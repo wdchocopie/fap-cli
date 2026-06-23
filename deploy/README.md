@@ -12,6 +12,7 @@
 ## File · Files
 | File | Nền tảng · Platform | Dùng cho · Use |
 |---|---|---|
+| **`setup-server.sh`** | **Linux server** | **TỰ DỰNG TẤT CẢ bằng 1 lệnh**: venv + cài + systemd (job hằng ngày + watch-attendance + watch-grades + bot tùy chọn) · **one-command full server setup** |
 | `run-fap.ps1` | Windows (PowerShell) | wrapper có log + dừng-khi-lỗi · logging wrapper |
 | `run-fap.cmd` | Windows (cmd) | wrapper gọn cho `schtasks` · simple wrapper |
 | `register-task-windows.ps1` | Windows | đăng ký Scheduled Task hằng ngày (mặc định 07:00) · register the daily task |
@@ -26,6 +27,17 @@
 | `Dockerfile` + `docker-run.sh` + `../.dockerignore` | Docker | đóng gói (tùy chọn) · container (optional) |
 
 ## Bắt đầu nhanh · Quickstart
+
+**🚀 Linux server — TỰ DỰNG TẤT CẢ (1 lệnh)**
+```bash
+# 1) (TRÊN MÁY CÓ BROWSER) đăng nhập, rồi copy token lên server:
+fap login && scp -r output/ <user>@<server>:~/fap-cli/
+# 2) (TRÊN SERVER, ở gốc repo) dựng hết:
+bash deploy/setup-server.sh                       # job hằng ngày + 2 watcher
+EXTRAS='[gcal,bot]' bash deploy/setup-server.sh   # + bot Telegram thường trú
+# Gỡ sạch:  bash deploy/setup-server.sh --remove
+```
+> Script tự: tạo `.venv`, `pip install -e .`, kiểm `fap refresh`, cài systemd `--user` units (đường dẫn thật), bật `enable-linger` (chạy cả khi logout). **Bước login phải làm trên máy có trình duyệt** (OAuth Google) rồi copy `output/` lên — server headless không tự login được.
 
 **Windows** *(PowerShell ở gốc repo · from repo root)*
 ```powershell
