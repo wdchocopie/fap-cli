@@ -1,0 +1,532 @@
+[
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/AddRate",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rateComment",
+      "rateValue",
+      "rateid"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/AddRate?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/CheckOpenFeedBack",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/CheckOpenFeedBack?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetActivityStudent",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetActivityStudent?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetActivityStudentByWeek",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum",
+      "rollNumber",
+      "week",
+      "year"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetActivityStudentByWeek?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetDiemphongtrao",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber",
+      "semester"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetDiemphongtrao?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentRate",
+    "method": "GET",
+    "category": "Hoạt động / Phong trào / Đánh giá",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentRate?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetAllActiveCampus",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": null,
+    "all_params": [],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetAllActiveCampus"
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetCampusInfo",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetCampusInfo?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSemester",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSemester?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSemesterMark",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": "CampusCode",
+    "all_params": [
+      "CampusCode",
+      "Authen",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSemesterMark?CampusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetVersion",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": null,
+    "all_params": [],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetVersion"
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetWeekByDate",
+    "method": "GET",
+    "category": "Hệ thống / Campus",
+    "first_param": "date",
+    "all_params": [
+      "date"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetWeekByDate?date="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/AcademicTranscript",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/AcademicTranscript?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetCourseOfSemester",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber",
+      "semester"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetCourseOfSemester?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetMarkByCourse",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "CourseId",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetMarkByCourse?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetScheduleExam",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetScheduleExam?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentAttendances",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentAttendances?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentMark",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentMark?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSubjectBySemester",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "Semester",
+      "checksum"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSubjectBySemester?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSubjets",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetSubjets?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/getCourseAttendance",
+    "method": "GET",
+    "category": "Học tập / Điểm",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "ClassName",
+      "Semester",
+      "SubjectCode",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/getCourseAttendance?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/CheckUpdateProfile",
+    "method": "GET",
+    "category": "Hồ sơ sinh viên",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/CheckUpdateProfile?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentById",
+    "method": "GET",
+    "category": "Hồ sơ sinh viên",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentById?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/RetriveImage",
+    "method": "GET",
+    "category": "Hồ sơ sinh viên",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/RetriveImage?campusCode="
+  },
+  {
+    "endpoint": "https://fap.fpt.edu.vn",
+    "method": "GET",
+    "category": "Khác",
+    "first_param": null,
+    "all_params": [],
+    "full_template": "https://fap.fpt.edu.vn"
+  },
+  {
+    "endpoint": "https://fap.fpt.edu.vn/temp/",
+    "method": "GET",
+    "category": "Khác",
+    "first_param": null,
+    "all_params": [],
+    "full_template": "https://fap.fpt.edu.vn/temp/"
+  },
+  {
+    "endpoint": "https://googleauthensite01.fpt.edu.vn:97",
+    "method": "GET",
+    "category": "Khác",
+    "first_param": null,
+    "all_params": [],
+    "full_template": "https://googleauthensite01.fpt.edu.vn:97"
+  },
+  {
+    "endpoint": "https://survey.fpt.edu.vn",
+    "method": "GET",
+    "category": "Khảo sát",
+    "first_param": null,
+    "all_params": [
+      "checksum"
+    ],
+    "full_template": "https://survey.fpt.edu.vn"
+  },
+  {
+    "endpoint": "https://survey.fpt.edu.vn/API/myFAP/GetRequiredSurvey",
+    "method": "GET",
+    "category": "Khảo sát",
+    "first_param": "username",
+    "all_params": [
+      "username",
+      "checksum"
+    ],
+    "full_template": "https://survey.fpt.edu.vn/API/myFAP/GetRequiredSurvey?username="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/UpdateTokedevices",
+    "method": "GET",
+    "category": "Thiết bị / Push token",
+    "first_param": "CampusCode",
+    "all_params": [
+      "CampusCode",
+      "Email",
+      "checksum",
+      "tokendevice"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/UpdateTokedevices?CampusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/UpdateTokenDonor",
+    "method": "GET",
+    "category": "Thiết bị / Push token",
+    "first_param": "CampusCode",
+    "all_params": [
+      "CampusCode",
+      "rollNumber",
+      "tokendevice"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/UpdateTokenDonor?CampusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetNotificationByDonor",
+    "method": "GET",
+    "category": "Tin tức / Thông báo",
+    "first_param": "CampusCode",
+    "all_params": [
+      "CampusCode",
+      "Authen",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetNotificationByDonor?CampusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetNotificationByRoll",
+    "method": "GET",
+    "category": "Tin tức / Thông báo",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetNotificationByRoll?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetTop10News",
+    "method": "GET",
+    "category": "Tin tức / Thông báo",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "type"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetTop10News?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/SearchNews",
+    "method": "GET",
+    "category": "Tin tức / Thông báo",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "keysearch",
+      "type"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/SearchNews?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GeFeeByRoll",
+    "method": "GET",
+    "category": "Tài chính",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GeFeeByRoll?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetBalance",
+    "method": "GET",
+    "category": "Tài chính",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetBalance?campusCode="
+  },
+  {
+    "endpoint": "https://dng.fpt.edu.vn/Invoice",
+    "method": "GET",
+    "category": "Tài chính",
+    "first_param": "StudentId",
+    "all_params": [
+      "StudentId"
+    ],
+    "full_template": "https://dng.fpt.edu.vn/Invoice?StudentId="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByFeId",
+    "method": "GET",
+    "category": "Xác thực / Đăng nhập",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "checksum"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByFeId?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByGoogleAccessToken",
+    "method": "GET",
+    "category": "Xác thực / Đăng nhập",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "checksum",
+      "token"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByGoogleAccessToken?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByUsername",
+    "method": "GET",
+    "category": "Xác thực / Đăng nhập",
+    "first_param": "CampusCode",
+    "all_params": [
+      "CampusCode",
+      "Authen",
+      "Password",
+      "userName"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/AuthenticationByUsername?CampusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetTokenWithEmp",
+    "method": "GET",
+    "category": "Xác thực / Đăng nhập",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "roll"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetTokenWithEmp?campusCode="
+  },
+  {
+    "endpoint": "https://api.fpt.edu.vn/fap/api/MyFAP/GetApplication",
+    "method": "GET",
+    "category": "Đơn từ",
+    "first_param": "campusCode",
+    "all_params": [
+      "campusCode",
+      "Authen",
+      "checksum",
+      "rollNumber"
+    ],
+    "full_template": "https://api.fpt.edu.vn/fap/api/MyFAP/GetApplication?campusCode="
+  }
+]

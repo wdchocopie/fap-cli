@@ -1,0 +1,15 @@
+# Chuẩn hoá xuống dòng: LF trong repo cho mọi file text.
+# Tránh CRLF làm hỏng .sh / .service / Dockerfile khi chạy trên Linux / Docker / systemd.
+* text=auto eol=lf
+
+# Script Windows-native giữ CRLF
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# File nhị phân (đừng đụng line-ending)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.pyc  binary

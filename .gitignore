@@ -1,0 +1,26 @@
+# ===== Dữ liệu nhạy cảm / cá nhân — KHÔNG commit =====
+# Token, refresh_token, hồ sơ, dữ liệu học tập, lịch... (mọi thứ script sinh ra)
+output/
+device-data/
+
+# Thông tin đăng nhập / bí mật
+# (LƯU Ý: .gitignore KHÔNG hỗ trợ comment cùng dòng — mỗi pattern phải đứng riêng.)
+.env
+# credentials.json = Google OAuth client (Calendar)
+credentials.json
+legacy/credentials.json
+
+# Sản phẩm build / cache (tự sinh lại)
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Tư liệu reverse-engineering NẶNG (~156MB) — giữ trên máy, KHÔNG commit.
+# APK là tài sản của FPT; bundle/disasm/strings giải lại được từ APK khi cần.
+# (Vẫn commit analysis/api-endpoints.json + analysis/_tables.md vì nhỏ & docs tham chiếu.)
+apks/
+analysis/disasm.hasm
+analysis/index.android.bundle
+analysis/strings_clean.txt

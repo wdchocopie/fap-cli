@@ -1,0 +1,19 @@
+# fap-bot.service — bot Telegram THƯỜNG TRÚ (tự khởi động lại). Copy vào ~/.config/systemd/user/.
+# Resident interactive Telegram bot (auto-restart). Copy to ~/.config/systemd/user/, edit paths, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now fap-bot.service
+# Cặp với fap.timer (refresh token hằng ngày) — bot đọc output/token.json mới mỗi lệnh.
+# Pairs with fap.timer (daily token refresh) — the bot re-reads output/token.json on every command.
+[Unit]
+Description=fap-cli interactive Telegram bot (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+ExecStart=%h/.venv/bin/fap telegram-bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fap-cli"
+version = "0.1.0"
+description = "fap-cli — đăng nhập FAP qua OAuth, kéo dữ liệu, .ics, Google Calendar, Telegram/Discord."
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT" }
+dependencies = ["requests>=2.28"]
+
+[project.optional-dependencies]
+gcal = [
+  "google-api-python-client>=2.0",
+  "google-auth-httplib2>=0.1",
+  "google-auth-oauthlib>=1.0",
+]
+bot = [
+  "discord.py>=2.0",          # chỉ cho `fap discord-bot` · only for the Discord bot (Python >=3.8)
+]
+
+[project.scripts]
+fap = "fapc.app.cli:main"
+
+[tool.setuptools]
+packages = ["fapc", "fapc.core", "fapc.app"]

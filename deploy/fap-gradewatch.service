@@ -1,0 +1,19 @@
+# fap-gradewatch.service — THEO DÕI ĐIỂM thường trú (báo khi có ĐIỂM MỚI). Copy vào ~/.config/systemd/user/.
+# Resident grade watcher. Copy to ~/.config/systemd/user/, edit paths, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now fap-gradewatch.service
+# Tự refresh token ~50' để sống lâu; đọc output/token.json mỗi lượt. Cặp với fap.timer cũng được.
+# Self-refreshes the token ~50m; re-reads output/token.json each poll.
+[Unit]
+Description=fap-cli grade watcher (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+ExecStart=%h/.venv/bin/fap watch-grades loop 60
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=default.target

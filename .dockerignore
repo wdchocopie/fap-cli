@@ -1,0 +1,13 @@
+# Giữ bí mật/PII + file nặng ra khỏi build context · keep secrets/PII & heavy files out of the image.
+.git/
+**/__pycache__/
+*.pyc
+*.egg-info/
+output/
+device-data/
+.env
+credentials.json
+legacy/credentials.json
+apks/
+analysis/
+tests/

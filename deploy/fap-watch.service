@@ -1,0 +1,19 @@
+# fap-watch.service — THEO DÕI ĐIỂM DANH thường trú (báo near real-time). Copy vào ~/.config/systemd/user/.
+# Resident attendance watcher. Copy to ~/.config/systemd/user/, edit paths, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now fap-watch.service
+# Cặp với fap.timer (refresh token hằng ngày) — watcher đọc output/token.json mới mỗi lượt dò.
+# Pairs with fap.timer (daily token refresh); the watcher re-reads output/token.json each poll.
+[Unit]
+Description=fap-cli attendance watcher (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+ExecStart=%h/.venv/bin/fap watch-attendance loop 15
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

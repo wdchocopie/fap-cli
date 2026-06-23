@@ -1,0 +1,3 @@
+# Bot Discord tương tác (fap discord-bot) — tùy chọn / optional. Cần Python >= 3.8.
+# Telegram bot (fap telegram-bot) KHÔNG cần gì thêm (đã có 'requests').
+discord.py>=2.0

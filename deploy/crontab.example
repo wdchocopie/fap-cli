@@ -1,0 +1,24 @@
+# crontab.example — fap-cli (Linux/macOS). Sửa /home/you/fap-cli cho đúng máy bạn.
+# Cài: crontab -e  rồi dán các dòng muốn dùng. Xem: crontab -l
+# Mỗi dòng dưới tự `fap refresh` trước khi gửi (deploy/run-notify.sh lo việc đó).
+#
+# m  h  dom mon dow  command
+#
+# ===== LỊCH ĐỀ XUẤT · RECOMMENDED SCHEDULE =====
+30 6  * * 1-6  /home/you/fap-cli/deploy/run-notify.sh today       # 06:30 T2–T7: lịch hôm nay
+0  21 * * 0-4  /home/you/fap-cli/deploy/run-notify.sh tomorrow    # 21:00 CN–T5: xem trước ngày mai
+0  20 * * 0    /home/you/fap-cli/deploy/run-notify.sh weekly      # 20:00 Chủ nhật: tổng quan tuần tới
+0  18 * * 5    /home/you/fap-cli/deploy/run-notify.sh banrisk     # 18:00 Thứ 6: cảnh báo cấm thi
+#
+# ===== TÙY CHỌN · OPTIONAL =====
+# 0 12 * * 1   /home/you/fap-cli/deploy/run-notify.sh attendance  # 12:00 T2: bảng điểm danh đầu tuần
+# 0 7  * * *   /home/you/fap-cli/deploy/run-fap.sh                 # 07:00 mỗi ngày: refresh + calendar-sync + notify today
+#
+# ===== THEO DÕI ĐIỂM DANH (near real-time) · ATTENDANCE WATCHER =====
+# Cách 1 (khuyên dùng): chạy nền bằng systemd — xem deploy/fap-watch.service (loop 15').
+# Cách 2: cron mỗi 15' trong giờ học (tự refresh để token còn hạn):
+# */15 7-18 * * 1-6  cd /home/you/fap-cli && /home/you/.venv/bin/fap refresh >/dev/null 2>&1; /home/you/.venv/bin/fap watch-attendance >> /home/you/fap-cli/output/deploy.log 2>&1
+#
+# ===== INLINE (không dùng wrapper) · without the wrapper =====
+# Đường dẫn TUYỆT ĐỐI tới fap (cron có PATH tối thiểu):
+# 30 6 * * 1-6  cd /home/you/fap-cli && /home/you/.venv/bin/fap refresh && fap notify today >> /home/you/fap-cli/output/cron.log 2>&1

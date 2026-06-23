@@ -1,0 +1,11 @@
+# fap.timer — chạy fap.service mỗi ngày 07:00. Copy vào ~/.config/systemd/user/.
+# Bật · enable:  systemctl --user daemon-reload && systemctl --user enable --now fap.timer
+[Unit]
+Description=Run fap-cli daily at 07:00 (vi · en)
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

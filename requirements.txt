@@ -1,0 +1,5 @@
+# Bắt buộc / required
+requests>=2.28
+
+# Tùy chọn — Google Calendar sync (fap calendar-sync). Cài thêm khi cần:
+#   pip install -r requirements-gcal.txt

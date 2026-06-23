@@ -1,0 +1,17 @@
+# fap.service — systemd USER unit. Copy vào ~/.config/systemd/user/ rồi sửa đường dẫn.
+# Copy to ~/.config/systemd/user/ and adjust paths (or point ExecStart at deploy/run-fap.sh).
+# Đổi %h/.venv/bin/fap cho khớp venv của bạn · change %h/.venv/bin/fap to match your venv.
+[Unit]
+Description=fap-cli daily pull (vi · en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+# Chạy tuần tự; refresh lỗi (exit != 0) thì các bước sau KHÔNG chạy.
+# Sequential; if refresh exits non-zero the later steps do NOT run.
+ExecStart=%h/.venv/bin/fap refresh
+ExecStart=%h/.venv/bin/fap calendar-sync
+ExecStart=%h/.venv/bin/fap notify today
