@@ -31,7 +31,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | Endpoint | Lấy gì | Tham số | Trường trả về | Độ tin |
 |---|---|---|---|---|
 | `AcademicTranscript` | Bảng điểm tổng toàn khóa (mọi môn, đạt/không đạt) | `campusCode`, `Authen`, `checksum`, `rollNumber` | `subjectCode`, `subjectName`, `semesterName`, `averageMark`, `gradeStatus`, `credit`, `result`, `attempt` | high |
-| `GetStudentMark` | Điểm thành phần tất cả môn trong một kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `subjectCode`, `subjectName`, `groupName`, `component`, `weight`, `value`, `averageMark`, `gradeStatus` | high |
+| `GetStudentMark` | Điểm **tổng kết** mỗi môn trong một kỳ (1 dòng/môn) + `courseID` để tra chi tiết. *(KHÔNG trả điểm thành phần — đối chiếu mẫu thật `output/api/GetStudentMark.json`; muốn thành phần phải gọi `GetMarkByCourse`.)* | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `subjectCode`, `className`, `averageMark`, `status`, `courseID` | high |
 | `GetMarkByCourse` | Chi tiết điểm của một môn theo `CourseId` | `campusCode`, `Authen`, `CourseId`, `checksum`, `rollNumber` *(có thể cần `SubjectCode`)* | `subjectCode`, `subjectName`, `component`, `weight`, `value`, `averageMark`, `gradeStatus` | high |
 | `GetSemesterMark` | Điểm tổng kết / GPA theo từng kỳ | `CampusCode` *(C hoa)*, `Authen`, `rollNumber` *(không có checksum)* | `semesterName`, `averageMark`, `gpa`, `termID`, `result` | medium |
 | `GetSubjectBySemester` | Danh mục môn mở trong một kỳ | `campusCode`, `Authen`, `Semester`, `checksum` | `subjectCode`, `subjectName`, `className`, `startDate`, `endDate` | high |
@@ -124,7 +124,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 
 **Hữu ích nhất để build sản phẩm:**
 - **Thời khóa biểu:** `GetActivityStudentByWeek` (TKB theo tuần) + `GetWeekByDate` (quy đổi ngày → tuần) + `GetCourseOfSemester` (lấy `CourseId`/danh sách lớp). Đây là bộ ba lõi cho app lịch học.
-- **Điểm:** `GetStudentMark` (điểm thành phần theo kỳ) + `AcademicTranscript` (bảng điểm toàn khóa) + `GetMarkByCourse` (chi tiết một môn). `GetSemester` cung cấp danh sách kỳ để đổ dropdown.
+- **Điểm:** `GetStudentMark` (điểm **tổng kết** mỗi môn trong kỳ, kèm `courseID`) + `AcademicTranscript` (bảng điểm toàn khóa) + `GetMarkByCourse` (**điểm thành phần** một môn theo `courseID`). `GetSemester` cung cấp danh sách kỳ để đổ dropdown.
 - **Điểm danh:** `GetStudentAttendances` (đã có mẫu thật, đáng tin nhất) + `getCourseAttendance` (chi tiết từng buổi).
 - **Học phí:** `GeFeeByRoll` (danh sách hóa đơn) + `GetBalance` (số dư).
 - **Tra cứu nhanh / offline:** cache `RKStorage:profile`, `:subjects`, `:semester` cho phép dựng phần lớn UI mà **không cần gọi mạng hay checksum**.

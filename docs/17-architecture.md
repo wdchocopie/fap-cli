@@ -84,7 +84,7 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 ## 5. Logic tầng giao tiếp · `app/`
 
-**bot_core.py** — `handle(cmd, arg)` là **lõi chung của bot + web + notify**: chuẩn hoá lệnh, `creds()`+`current_semester()` một lần, route tới `_*_text()`. Bọc `try/except SystemExit` → token hết hạn trả **lời nhắn** thay vì sập bot/web. `all_text()` lấy marks/att **đúng 1 lần** rồi chia sẻ (không gọi trùng endpoint).
+**bot_core.py** — `handle(cmd, arg)` là **lõi chung của bot + web + notify**: chuẩn hoá lệnh (gồm `_`→`-`, để tên menu `grades_detail` khớp `grades-detail`), `creds()`+`current_semester()` một lần, route tới `_*_text()`. Bọc `try/except SystemExit` → token hết hạn trả **lời nhắn** thay vì sập bot/web. `all_text()` lấy marks/att **đúng 1 lần** rồi chia sẻ (không gọi trùng endpoint). `COMMAND_INFO` là **nguồn lệnh duy nhất** → suy ra `COMMANDS` + `menu_commands()` (cấp cho menu gợi ý Telegram & slash Discord).
 
 **notify.py** — `push()` gửi Telegram + Discord (kiểm HTTP status — `requests.post` không raise với 4xx; xử lý 429 Retry-After). `push_new_notifications()` chỉ đẩy thông báo MỚI (dedupe theo `id`, sentinel `None`=chưa baseline; bỏ qua khi fetch rỗng; file hỏng → cô lập `.corrupt` + rebaseline).
 
@@ -94,7 +94,7 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 **webui.py** — `http.server` stdlib, **CHỈ bind 127.0.0.1**. Trang 1 file: nút nhóm theo chủ đề → `GET /q?c=<lệnh>` → `handle()`; `/me` lấy tên/MSSV từ token.json cho header. Tự bật `FAP_CACHE_MIN=2` (bấm nhiều không gọi lại API). Responsive + sáng/tối tự động + tự-làm-mới 60s.
 
-**telegrambot.py / discordbot.py** — long-poll/gateway, gọi `handle()` trong thread executor (không chặn loop). **Chỉ trả lời chủ tài khoản** (Telegram `TELEGRAM_CHAT` bắt buộc; Discord `DISCORD_ALLOWED_USER_ID` bắt buộc, mở cho mọi người phải cố ý `DISCORD_ALLOW_ANYONE=1`).
+**telegrambot.py / discordbot.py** — long-poll/gateway, gọi `handle()` trong thread executor (không chặn loop). **Chỉ trả lời chủ tài khoản** (Telegram `TELEGRAM_CHAT` bắt buộc; Discord `DISCORD_ALLOWED_USER_ID` bắt buộc, mở cho mọi người phải cố ý `DISCORD_ALLOW_ANYONE=1`). Lúc khởi động **tự đăng ký menu lệnh gợi ý**: Telegram `setMyCommands` (nút Menu ☰ + gợi ý khi gõ `/`); Discord `app_commands` slash (`tree.sync()` toàn cục, bọc try/except → thiếu thì vẫn chạy prefix `!`). Cả hai không sống-còn: lỗi đăng ký menu thì bot vẫn chạy.
 
 **gcal.py** — đẩy `.ics` lên Google Calendar (OAuth riêng, upsert chống trùng theo `iCalUID`).
 

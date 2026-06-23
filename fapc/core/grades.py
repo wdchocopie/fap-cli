@@ -72,9 +72,18 @@ def detail_text(token, campus, roll, sem, rows=None):
     out = [fmt.header("🧮", t(f"Điểm thành phần · {sem}", f"Component marks · {sem}"),
                       t(f"{len(rows)} môn", f"{len(rows)} subjects"))]
     for r in rows:
-        comps = _components(token, campus, roll, r.get("courseID"), r.get("subjectCode"))
-        out.append(f"\n▸ {r.get('subjectCode','')}")
-        out.append(fmt.table(comps) if comps else t("   (chưa có điểm thành phần)", "   (no component marks yet)"))
+        # fetch_components -> None khi LỖI (mạng/token), [] khi thật-sự-rỗng -> phân biệt 2 ca
+        comps = fetch_components(token, campus, roll, r.get("courseID"), r.get("subjectCode"))
+        meta = "  ·  ".join(x for x in (str(r.get("averageMark", "")).strip(),
+                                        str(r.get("status", "")).strip()) if x)   # vd '8.5 · Passed'
+        out.append(f"\n▸ {r.get('subjectCode','')}" + (f"  —  {meta}" if meta else ""))
+        if comps is None:
+            out.append(t("   ⚠ lỗi tải điểm thành phần (thử lại / fap refresh)",
+                         "   ⚠ failed to load components (retry / fap refresh)"))
+        elif comps:
+            out.append(fmt.table(comps))
+        else:
+            out.append(t("   (chưa có điểm thành phần)", "   (no component marks yet)"))
     return "\n".join(out)
 
 def _detail_raw(token, campus, roll, sem):

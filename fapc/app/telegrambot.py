@@ -10,12 +10,23 @@ cho người lạ. Lấy TELEGRAM_TOKEN từ @BotFather, TELEGRAM_CHAT = id chat
 import sys, time
 import requests
 from .. import config
-from .bot_core import handle
+from .bot_core import handle, menu_commands
 
 _TIMEOUT = 30   # long-poll: Telegram giữ kết nối tới 30s nếu chưa có update
 
 def _api(method):
     return f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/{method}"
+
+def _register_menu():
+    """Đăng ký danh sách lệnh GỢI Ý — Telegram hiện nút "Menu" ☰ + tự gợi ý khi gõ '/'.
+    Không sống-còn: lỗi mạng thì bot vẫn chạy bình thường (chỉ thiếu menu gợi ý)."""
+    cmds = [{"command": n, "description": d[:256]} for n, d in menu_commands()]
+    try:
+        r = requests.post(_api("setMyCommands"), json={"commands": cmds}, timeout=15)
+        print("📋 Menu lệnh đã đăng ký (gõ '/' để xem gợi ý)." if r.ok
+              else f"  (không đặt được menu: HTTP {r.status_code})")
+    except requests.RequestException as e:
+        print("  (không đặt được menu lệnh:", e, ")")
 
 def _send(chat_id, text):
     try:
@@ -33,6 +44,7 @@ def run():
         raise SystemExit("Thiếu TELEGRAM_CHAT trong .env — bắt buộc, để bot CHỈ trả lời chat của bạn "
                          "(không thì người lạ cũng truy vấn được dữ liệu của bạn). Xem docs/13-notify.md.")
     print(f"🤖 Bot Telegram đang chạy (chỉ chat {allow}). Ctrl+C để dừng.")
+    _register_menu()
     offset = None
     # Bỏ qua tồn đọng cũ lúc khởi động · skip backlog on startup
     try:

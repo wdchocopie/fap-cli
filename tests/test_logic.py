@@ -380,6 +380,11 @@ def test_grades_detail_text_offline():
     txt = G.detail_text("t", "FPTU", "HE1", "Summer2026")
     assert "PRF192" in txt and "Assignment" in txt and "8.0" in txt and "courseID" not in txt
     assert "MAE101" in txt                                # môn không courseID vẫn liệt kê (chưa có TP)
+    # LỖI tải (code 201) != rỗng thật -> phải hiện cảnh báo, KHÔNG nói 'chưa có điểm'
+    G.fetch_marks = lambda *a, **k: [{"subjectCode": "PRF192", "courseID": 11}]
+    G.call = lambda *a, **k: (200, {"code": "201", "message": "Token invalid", "data": []})
+    err = G.detail_text("t", "FPTU", "HE1", "Summer2026")
+    assert ("lỗi tải" in err or "failed to load" in err) and "chưa có điểm thành phần" not in err
 
 def test_grades_components_accepts_dict_shape():
     """GetMarkByCourse có thể trả dict (không phải list) -> KHÔNG được âm thầm bỏ (as_list cũ làm thế)."""

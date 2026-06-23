@@ -192,6 +192,9 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 > 🔒 **VI —** Bot chỉ trả lời **CHỦ tài khoản** để không lộ điểm/dữ liệu cho người lạ. Telegram: chỉ chat `TELEGRAM_CHAT`. Discord: chỉ user `DISCORD_ALLOWED_USER_ID` (nếu để trống → cảnh báo & trả lời mọi người, **nên đặt**).
 > 🔒 **EN —** A bot only answers the **account owner** so it never leaks your grades to strangers. Telegram: only chat `TELEGRAM_CHAT`. Discord: only user `DISCORD_ALLOWED_USER_ID` (empty → it warns and replies to everyone, so **set it**).
 
+> 📋 **VI —** Bot **tự đăng ký danh sách lệnh gợi ý** lúc khởi động — khỏi nhớ lệnh. Telegram hiện nút **Menu ☰** cạnh ô nhập + tự gợi ý khi gõ `/`. Discord có **slash command** (`/today`, `/grades`, `/whatif`…) hiện ngay khi gõ `/`. Danh sách đầy đủ vẫn là `/help`. Nguồn lệnh: `COMMAND_INFO` trong `fapc/app/bot_core.py` (thêm 1 dòng là cả 2 nền tảng có ngay).
+> 📋 **EN —** The bots **auto-register a suggested command list** on startup — no need to memorize. Telegram shows a **Menu ☰** button + autocompletes as you type `/`. Discord exposes **slash commands** (`/today`, `/grades`, `/whatif`…) the moment you type `/`. Full list is still `/help`. Source of truth: `COMMAND_INFO` in `fapc/app/bot_core.py` (add one line → both platforms get it).
+
 ### 8.1. Telegram bot
 **VI —** Dùng lại `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` ở §2 (cả hai **bắt buộc**). Chạy `fap telegram-bot` rồi nhắn `/today` cho bot. Dừng bằng `Ctrl+C`. Long-polling — không cần URL công khai, chạy sau NAT được.
 **EN —** Reuses `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` from §2 (both **required**). Run `fap telegram-bot`, then DM the bot `/today`. Stop with `Ctrl+C`. It long-polls — no public URL needed, works behind NAT.
@@ -200,16 +203,16 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 **VI —**
 1. [Developer Portal](https://discord.com/developers/applications) → **New Application** → tab **Bot** → **Reset Token** → copy vào `DISCORD_BOT_TOKEN` (token bot, **khác** webhook URL ở §3).
 2. Vẫn ở tab **Bot**: bật **MESSAGE CONTENT INTENT** (bắt buộc để bot đọc nội dung lệnh).
-3. Tab **OAuth2 → URL Generator**: chọn scope `bot`, quyền *Send Messages* → mở URL để mời bot vào server.
+3. Tab **OAuth2 → URL Generator**: chọn scope **`bot` + `applications.commands`** (scope thứ 2 cho **slash command** `/`), quyền *Send Messages* → mở URL để mời bot vào server.
 4. Lấy **id user của bạn** (bật Developer Mode → chuột phải avatar → Copy User ID) → `DISCORD_ALLOWED_USER_ID`.
-5. `pip install -e ".[bot]"` rồi `fap discord-bot`. Gõ lệnh prefix **`!`** trong kênh: `!today`, `!grades`, `!whatif 8`.
+5. `pip install -e ".[bot]"` rồi `fap discord-bot`. Gõ **`!`** (`!today`, `!grades`, `!whatif 8`) **hoặc** **slash** `/today` (gõ `/` để hiện gợi ý; lần đầu Discord có thể mất tới ~1h để slash xuất hiện).
 
 **EN —**
 1. [Developer Portal](https://discord.com/developers/applications) → **New Application** → **Bot** tab → **Reset Token** → copy into `DISCORD_BOT_TOKEN` (the bot token, **not** the webhook URL from §3).
 2. Same **Bot** tab: enable **MESSAGE CONTENT INTENT** (required so the bot can read command text).
-3. **OAuth2 → URL Generator**: pick scope `bot` + *Send Messages* → open the URL to invite the bot to your server.
+3. **OAuth2 → URL Generator**: pick scopes **`bot` + `applications.commands`** (the 2nd scope enables **slash commands** `/`) + *Send Messages* → open the URL to invite the bot to your server.
 4. Get **your user id** (enable Developer Mode → right-click your avatar → Copy User ID) → `DISCORD_ALLOWED_USER_ID`.
-5. `pip install -e ".[bot]"`, then `fap discord-bot`. Type `!`-prefixed commands in a channel: `!today`, `!grades`, `!whatif 8`.
+5. `pip install -e ".[bot]"`, then `fap discord-bot`. Type `!`-prefixed commands (`!today`, `!grades`, `!whatif 8`) **or** **slash** `/today` (type `/` to see suggestions; Discord may take up to ~1h to show new slash commands the first time).
 
 ### 8.3. `.env` cho bot · for the bot
 ```dotenv

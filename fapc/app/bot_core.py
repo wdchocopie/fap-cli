@@ -17,9 +17,33 @@ from ..core.transcript import gpa_text
 from ..i18n import t
 from .. import fmt
 
+# NGUỒN DUY NHẤT cho danh sách lệnh · single source of truth for the command list.
+# (tên, mô tả VI, mô tả EN) — dùng cho COMMANDS + menu Telegram (setMyCommands) + slash Discord.
+COMMAND_INFO = [
+    ("today",         "Lịch học hôm nay",          "Today's schedule"),
+    ("tomorrow",      "Lịch học ngày mai",         "Tomorrow's schedule"),
+    ("week",          "Lịch học cả tuần",          "This week's schedule"),
+    ("grades",        "Điểm + GPA tạm tính",       "Grades + provisional GPA"),
+    ("grades-detail", "Điểm thành phần từng môn",  "Per-subject component marks"),
+    ("attendance",    "Tỉ lệ điểm danh",           "Attendance percentage"),
+    ("banrisk",       "Cảnh báo nguy cơ cấm thi",  "Exam-ban risk (<80%)"),
+    ("whatif",        "Mô phỏng GPA (kèm điểm)",   "GPA what-if (optional mark)"),
+    ("status",        "Tổng quan nhanh",           "Quick overview"),
+    ("exams",         "Lịch thi",                  "Exam schedule"),
+    ("gpa",           "GPA tích lũy (tín chỉ)",    "Cumulative credit GPA"),
+    ("notifications", "Thông báo của trường",      "School notifications"),
+    ("profile",       "Hồ sơ sinh viên",           "Student profile"),
+    ("applications",  "Đơn từ + trạng thái xử lý", "Applications + status"),
+    ("all",           "Tất cả trong một tin",      "Everything in one message"),
+    ("help",          "Danh sách lệnh",            "List all commands"),
+]
 # Lệnh hỗ trợ (không kèm dấu / hay !) · supported commands (without leading / or !)
-COMMANDS = ["today", "tomorrow", "week", "grades", "grades-detail", "attendance", "banrisk",
-            "whatif", "status", "exams", "gpa", "notifications", "profile", "applications", "all", "help"]
+COMMANDS = [name for name, _, _ in COMMAND_INFO]
+
+def menu_commands():
+    """[(tên, mô tả)] để đăng ký menu lệnh tự-gợi-ý (Telegram setMyCommands / slash Discord).
+    Telegram chỉ cho phép [a-z0-9_] trong tên lệnh -> đổi '-' thành '_' (handle() chuẩn hoá lại)."""
+    return [(name.replace("-", "_"), t(vi, en)) for name, vi, en in COMMAND_INFO]
 
 def help_text():
     return fmt.header("🤖", "FAP bot") + "\n" + t(
@@ -146,7 +170,7 @@ def all_text(token, campus, roll, sem):
 def handle(cmd, arg=None):
     """cmd: chuỗi lệnh (có/không dấu /!); arg: tham số (vd điểm cho whatif). Trả text.
     Bắt SystemExit (token hết hạn / chưa đăng nhập) -> trả LỜI thay vì làm sập bot/web."""
-    cmd = (cmd or "").strip().lower().lstrip("/!")
+    cmd = (cmd or "").strip().lower().lstrip("/!").replace("_", "-")  # 'grades_detail' (menu) -> 'grades-detail'
     if cmd in ("", "start", "help"):
         return help_text()
     if cmd not in COMMANDS:
