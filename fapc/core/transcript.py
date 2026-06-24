@@ -115,6 +115,54 @@ def trend_report():
     token, campus, roll = creds()
     print(trend_text(fetch(token, campus, roll)))
 
+# ---------- Tiến độ tín chỉ tới tốt nghiệp (credits) ----------
+def _bar(cur, total, width=20):
+    f = max(0, min(width, int(width * cur / total))) if total else 0
+    return "█" * f + "░" * (width - f)
+
+def _total_credits():
+    """Tổng tín chỉ chương trình: env FAP_TOTAL_CREDITS > mặc định 145 (ƯỚC LƯỢNG — FAP không có endpoint CTĐT)."""
+    import os
+    try:
+        v = float(os.environ.get("FAP_TOTAL_CREDITS") or 0)
+    except ValueError:
+        v = 0
+    return v or 145.0
+
+def credits_text(rows, total):
+    """THUẦN: tín chỉ ĐÃ đạt (môn có điểm > 0 & tín chỉ > 0) + % + thanh tiến độ + ước lượng số kỳ còn lại."""
+    earned, n_pass = 0.0, 0
+    per_sem = {}
+    for r in rows or []:
+        cr, mk = fmt.safe_float(r.get("credit")), fmt.safe_float(r.get("averageMark"))
+        if cr > 0 and mk > 0:
+            earned += cr; n_pass += 1
+            s = str(r.get("semesterName") or "?")
+            per_sem[s] = per_sem.get(s, 0.0) + cr
+    if earned <= 0:
+        return t("🎓 Chưa có tín chỉ tích lũy (chưa hoàn tất kỳ nào).",
+                 "🎓 No earned credits yet (no completed semester).")
+    pct = round(100 * earned / total, 1) if total else 0
+    lines = [fmt.header("🎓", t("Tiến độ tín chỉ", "Credit progress")),
+             t(f"Đã đạt {earned:g}/{total:g} tín chỉ ({pct}%)  {_bar(earned, total)}",
+               f"Earned {earned:g}/{total:g} credits ({pct}%)  {_bar(earned, total)}"),
+             t(f"{n_pass} môn đã qua, trong {len(per_sem)} kỳ", f"{n_pass} subjects passed, across {len(per_sem)} terms")]
+    if per_sem and earned < total:
+        avg = earned / len(per_sem)
+        left = max(0, round((total - earned) / avg)) if avg else 0
+        lines.append(t(f"Nhịp ~{avg:.0f} tín/kỳ → còn ~{left} kỳ (ước lượng)",
+                       f"~{avg:.0f} cr/term → ~{left} terms left (estimate)"))
+    lines.append(t("(tổng chương trình là ước lượng — đặt FAP_TOTAL_CREDITS trong .env cho đúng)",
+                   "(program total is an estimate — set FAP_TOTAL_CREDITS in .env)"))
+    return "\n".join(lines)
+
+def credits_overview(token, campus, roll):
+    return credits_text(fetch(token, campus, roll), _total_credits())
+
+def credits_report():
+    token, campus, roll = creds()
+    print(credits_overview(token, campus, roll))
+
 def main():
     report()
 

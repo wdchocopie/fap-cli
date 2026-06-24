@@ -36,9 +36,11 @@ HELP = """fap <command>   ·   fap-cli
     attendance | banrisk   điểm danh | nguy cơ cấm thi · attendance | exam-ban risk
     transcript | gpa       bảng điểm tích lũy | GPA tích lũy (tín chỉ) · transcript | cumulative GPA
     gpa-trend              GPA theo từng kỳ + xu hướng (sparkline) · per-term GPA trend
+    credits                tiến độ tín chỉ tới tốt nghiệp (thanh %) · credit progress to graduation
     conduct                điểm rèn luyện/phong trào (xét tốt nghiệp) · conduct / movement points
     whatif [target]        mô phỏng GPA · GPA what-if
     exams | exams-ics      lịch thi | xuất lịch thi ra .ics (Calendar tự nhắc) · exams | exams→.ics
+    exam-countdown         đếm ngược ngày thi (gần nhất trước, kèm độ gấp) · days until each upcoming exam
     news | fees | notifications   tin tức | học phí | thông báo trường · news | fees | notifications
     profile | applications hồ sơ SV | đơn từ + trạng thái xử lý · student profile | applications
 
@@ -123,7 +125,9 @@ def main():
     elif cmd == "transcript":     from ..core.transcript import report; report()
     elif cmd == "gpa":            from ..core.transcript import gpa_report; gpa_report()
     elif cmd == "gpa-trend":      from ..core.transcript import trend_report; trend_report()
+    elif cmd == "credits":        from ..core.transcript import credits_report; credits_report()
     elif cmd == "conduct":        from ..core.conduct import report; report()
+    elif cmd == "exam-countdown": from ..core.extras import exam_countdown_cmd; exam_countdown_cmd()
     elif cmd == "whatif":         from ..core.whatif import run; run(rest[0] if rest else None)
     elif cmd == "exams":          from ..core.extras import exams; exams()
     elif cmd == "exams-ics":      from ..core.extras import exams_ics; exams_ics()

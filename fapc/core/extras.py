@@ -9,7 +9,8 @@
 Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa có dữ liệu — xử lý rỗng đàng hoàng.
 """
 import os, datetime
-from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth
+from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth, _vn_now
+from . import subjects
 from ..i18n import t
 from .. import fmt
 
@@ -206,6 +207,46 @@ def _exam_dt(r):
                 if c: hh, mm = c; break
     s = datetime.datetime(day.year, day.month, day.day, hh, mm)
     return s, s + datetime.timedelta(hours=2)
+
+# ---------- ĐẾM NGƯỢC LỊCH THI (exam-countdown) ----------
+def exam_countdown(rows, now):
+    """THUẦN: [(days, start_dt, subjectCode, room)] cho kỳ thi SẮP tới (bỏ đã qua), sớm nhất trước.
+    `now` truyền vào (datetime naive, giờ VN) → test offline được. Dùng lại `_exam_dt` (parse generic)."""
+    out = []
+    for r in rows or []:
+        dt = _exam_dt(r)
+        if not dt:
+            continue
+        days = (dt[0].date() - now.date()).days
+        if days < 0:                                   # đã thi xong → bỏ
+            continue
+        subj = r.get("subjectCode") or r.get("subjectName") or "?"
+        out.append((days, dt[0], str(subj), str(r.get("examRoom") or r.get("room") or "")))
+    out.sort(key=lambda x: x[1])
+    return out
+
+def countdown_text(token, campus, roll, sem, now=None):
+    now = now or _vn_now().replace(tzinfo=None)
+    subjects.load()
+    items = exam_countdown(_exam_rows(token, campus, roll, sem), now)
+    if not items:
+        return t("⏳ Chưa có lịch thi sắp tới.", "⏳ No upcoming exams.")
+    out = [fmt.header("⏳", t(f"Đếm ngược thi · {sem}", f"Exam countdown · {sem}"),
+                      t(f"{len(items)} môn", f"{len(items)} exams"))]
+    for days, start, subj, room in items:
+        if days == 0:   tag = t("🔴 HÔM NAY", "🔴 TODAY")
+        elif days == 1: tag = t("🟠 NGÀY MAI", "🟠 TOMORROW")
+        elif days <= 3: tag = t(f"🟡 còn {days} ngày", f"🟡 in {days} days")
+        else:           tag = t(f"⚪ còn {days} ngày", f"⚪ in {days} days")
+        line = f"• {subjects.label(subj)} — {start.strftime('%d/%m %H:%M')}  {tag}"
+        if room:
+            line += f"  📍 {room}"
+        out.append(line)
+    return "\n".join(out)
+
+def exam_countdown_cmd():
+    token, campus, roll = creds()
+    print(countdown_text(token, campus, roll, current_semester(token, campus, roll)))
 
 def build_exam_ics(rows):
     """THUẦN: rows GetScheduleExam -> (ics_str, n_events, n_skipped). Mỗi môn kèm VALARM -P1D (nhắc trước 1 ngày)."""

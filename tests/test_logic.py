@@ -774,6 +774,32 @@ def test_conduct_graceful():
     except SystemExit: raised = True
     assert raised
 
+def test_exam_countdown():
+    """exam-countdown: bỏ thi đã qua, sắp xếp sớm nhất trước, nhãn độ gấp ('now' truyền vào)."""
+    import fapc.core.extras as E, fapc.core.subjects as S
+    now = datetime.datetime(2026, 6, 24, 8, 0)
+    rows = [{"subjectCode": "IAP301", "examDate": "06/26/2026", "examTime": "07:30", "examRoom": "BE-101"},
+            {"subjectCode": "CES202", "examDate": "06/20/2026", "examTime": "07:30"},   # đã qua → bỏ
+            {"subjectCode": "HOD402", "examDate": "06/24/2026", "examTime": "13:30"}]   # hôm nay
+    items = E.exam_countdown(rows, now)
+    assert [i[2] for i in items] == ["HOD402", "IAP301"]      # quá khứ bị bỏ; sớm nhất trước
+    assert items[0][0] == 0 and items[1][0] == 2             # days: hôm nay=0, +2
+    S.set_index({}); E._exam_rows = lambda *a, **k: rows
+    assert "HÔM NAY" in E.countdown_text("t", "c", "r", "S", now=now) or "TODAY" in E.countdown_text("t","c","r","S",now=now)
+    E._exam_rows = lambda *a, **k: []
+    assert E.countdown_text("t", "c", "r", "S", now=now).strip().startswith("⏳")   # rỗng → thông báo
+
+def test_credits_progress():
+    """credits: đếm tín chỉ môn ĐÃ qua (mark>0 & credit>0) + % + thanh tiến độ."""
+    from fapc.core.transcript import credits_text
+    rows = [{"semesterName": "Fall2024", "averageMark": "8", "credit": "3"},
+            {"semesterName": "Fall2024", "averageMark": "7", "credit": "3"},
+            {"semesterName": "Spring2025", "averageMark": "0", "credit": "3"},   # chưa có điểm → không tính
+            {"semesterName": "Spring2025", "averageMark": "9", "credit": "2"}]
+    txt = credits_text(rows, total=100)
+    assert "8/100" in txt and "8.0%" in txt and "█" in txt    # 3+3+2 = 8 tín chỉ đạt + thanh
+    assert credits_text([], 100).strip().startswith("🎓")     # rỗng → thông báo, không lỗi
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

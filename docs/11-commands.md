@@ -49,9 +49,11 @@
 | `fap transcript` | bảng điểm tích lũy; rỗng nếu chưa hoàn tất kỳ nào · academic transcript; empty if no completed semester | *(không · none)* | stdout |
 | `fap gpa` | GPA tích lũy **theo tín chỉ** (toàn khoá + từng kỳ) từ `AcademicTranscript`; khác `whatif` (TB cộng kỳ hiện tại) · credit-weighted cumulative GPA | *(không · none)* | stdout |
 | `fap gpa-trend` | **GPA mỗi kỳ + xu hướng**: delta so kỳ trước (▲/▼) + sparkline + GPA toàn khoá (sắp xếp kỳ theo thời gian) · per-term GPA trend with deltas + a unicode sparkline | *(không · none)* | stdout |
+| `fap credits` | **tiến độ tín chỉ tới tốt nghiệp**: đã đạt / tổng + % + thanh + ước lượng số kỳ còn lại (tổng = `FAP_TOTAL_CREDITS`, mặc định ~145, *ước lượng*) · credit progress to graduation | *(không · none)* | stdout |
 | `fap conduct` | **điểm rèn luyện/phong trào** (`GetDiemphongtrao`, xét tốt nghiệp). Server trả `201`/null khi chưa có dữ liệu → hiện "chưa có", không lỗi · conduct / movement points; degrades to "none yet" on the server's empty-data error | *(không · none)* | stdout |
 | `fap whatif [target]` | mô phỏng GPA: bảng dự kiến nếu các môn còn lại đạt 5–10, hoặc cần TB bao nhiêu để đạt `target` · GPA what-if: projection table, or the average needed to hit `target` | `[target]` số 0–10 tùy chọn · optional 0–10 number | stdout |
 | `fap exams` | lịch thi (`GetScheduleExam`); rỗng nếu trường chưa xếp · exam schedule; empty until scheduled | *(không · none)* | stdout |
+| `fap exam-countdown` | **đếm ngược ngày thi**: bỏ kỳ đã qua, sớm nhất trước, nhãn độ gấp (🔴 hôm nay / 🟠 mai / còn N ngày) · days until each upcoming exam, urgency-tagged | *(không · none)* | stdout |
 | `fap exams-ics` | xuất lịch thi ra `.ics` (kèm nhắc trước 1 ngày) để import Calendar · export exams to `.ics` (1-day reminder) | *(không · none)* | `output/lichthi.ics` |
 | `fap news` | tin tức (`GetTop10News`) · school news | *(không · none)* | stdout |
 | `fap fees` | số dư + chi tiết học phí (`GetBalance`/`GeFeeByRoll`) · balance + fee details | *(không · none)* | stdout |
