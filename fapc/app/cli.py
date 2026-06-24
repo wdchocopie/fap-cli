@@ -32,6 +32,7 @@ HELP = """fap <command>   ·   fap-cli
     ics                    xuất output/lichhoc.ics · export .ics
     grades | grades-detail điểm | điểm thành phần (+ "cần gì để qua") · grades | component grades (+ pass-projection)
     subjects               tải/cache danh mục môn → hiện TÊN + tín chỉ ở mọi nơi · cache subject names + credits
+    courses                lớp đang học: môn/lớp/giảng viên/phòng · my classes this term
     attendance | banrisk   điểm danh | nguy cơ cấm thi · attendance | exam-ban risk
     transcript | gpa       bảng điểm tích lũy | GPA tích lũy (tín chỉ) · transcript | cumulative GPA
     whatif [target]        mô phỏng GPA · GPA what-if
@@ -109,6 +110,7 @@ def main():
     elif cmd == "grades":         from ..core.grades import report; report()
     elif cmd == "grades-detail":  from ..core.grades import detail; detail(raw="--raw" in rest)
     elif cmd == "subjects":       from ..core.subjects import report; report()
+    elif cmd == "courses":        from ..core.courses import report; report()
     elif cmd == "weekly":         from .notify import run; run("weekly")
     elif cmd == "attendance":     from ..core.attendance import report; report()
     elif cmd == "banrisk":        from ..core.attendance import banrisk; sys.exit(banrisk())

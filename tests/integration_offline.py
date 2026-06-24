@@ -34,7 +34,8 @@ SUCCESS = {
     "GetActivityStudent": [{"date": "06/23/2026", "slotTime": "(07:30 - 09:50)", "subjectCode": "IAP301", "roomNo": "BE-304", "isOnline": "false", "groupName": "G", "slot": "1"}],
     "GetStudentMark": [{"subjectCode": "EXE101", "averageMark": "0.0", "status": "Not Passed", "courseID": "1"},
                        {"subjectCode": "IAP301", "averageMark": "8.5", "status": "Passed", "courseID": "2"}],
-    "GetMarkByCourse": [{"component": "Assignment", "value": "8.5", "courseID": "2"}],
+    "GetMarkByCourse": [{"component": "Assignment", "value": "8.5", "weight": "100", "courseID": "2"}],
+    "GetCourseOfSemester": [{"subjectCode": "IAP301", "courseId": "2"}, {"subjectCode": "FRS401c", "courseId": "9"}],
     "GetStudentAttendances": [{"subjectCode": "IAP301", "attendance": "100", "numberOfTakenAttendances": 5, "numberOfAttendances": 5, "groupName": "G"},
                               {"subjectCode": "CES202", "attendance": "60", "numberOfTakenAttendances": 3, "numberOfAttendances": 5, "groupName": "G"}],
     "AcademicTranscript": [{"subjectCode": "PRF192", "averageMark": "8.0", "credit": "3", "semesterName": "Fall2025"}],
@@ -78,6 +79,10 @@ for lbl, fn in [("grades.report", g.report), ("grades.detail", g.detail), ("grad
 MODE["v"] = "expired"; api._CACHE.clear()
 for lbl, fn in [("grades", g.report), ("att", at.report), ("gpa", tr.gpa_report), ("exams", ex.exams), ("fees", ex.fees), ("notif", ex.notifications)]:
     raises_exit("expired:" + lbl, fn)
+MODE["v"] = "success"; api._CACHE.clear()
+check("grades-detail merges GetCourseOfSemester subject (P7)", "FRS401c" in _cap(lambda: handle("grades-detail")))
+check("courses roster renders (P8)", "IAP301" in _cap(lambda: handle("courses")))
+MODE["v"] = "expired"; api._CACHE.clear()
 check("handle expired->msg refresh", "refresh" in _cap(lambda: handle("grades")).lower())
 check("handle all expired->no crash", "refresh" in _cap(lambda: handle("all")).lower())
 # [D] mất mạng + không rò token

@@ -82,19 +82,27 @@ def detail_text(token, campus, roll, sem, rows=None):
     """Điểm thành phần từng môn — TRẢ chuỗi (dùng cho `fap all` / web). Generic, không bịa cột.
     rows: truyền sẵn GetStudentMark để khỏi gọi lại (vd từ all_text)."""
     from .whatif import predict_course, predict_line       # import trễ: tránh vòng grades↔whatif
+    from .courses import fetch_courses, course_id_map       # vá courseID/môn GetStudentMark bỏ sót
     if rows is None:
         rows = fetch_marks(token, campus, roll, sem)
-    if not rows:
-        return t("🧮 Chưa có dữ liệu điểm.", "🧮 No grades yet.")
     subjects.load()                                          # tên môn cho tiêu đề ▸ (nếu đã cache)
+    by_code = {str(r.get("subjectCode", "")): r for r in (rows or []) if r.get("subjectCode")}
+    # GetStudentMark có thể THIẾU môn (vd chỉ trả 4/6) hoặc thiếu courseID → lấy courseId mọi lớp từ
+    # GetCourseOfSemester rồi HỢP nhất. Endpoint lỗi/404 → cmap rỗng → giữ nguyên hành vi cũ.
+    cmap = course_id_map(fetch_courses(token, campus, roll, sem) or [])
+    codes = list(by_code) + [c for c in cmap if c not in by_code]   # union: môn có điểm trước, môn bù sau
+    if not codes:
+        return t("🧮 Chưa có dữ liệu điểm.", "🧮 No grades yet.")
     out = [fmt.header("🧮", t(f"Điểm thành phần · {sem}", f"Component marks · {sem}"),
-                      t(f"{len(rows)} môn", f"{len(rows)} subjects"))]
-    for r in rows:
+                      t(f"{len(codes)} môn", f"{len(codes)} subjects"))]
+    for code in codes:
+        r = by_code.get(code, {})
+        cid = r.get("courseID") or cmap.get(code)           # courseID từ marks, else vá từ GetCourseOfSemester
         # fetch_components -> None khi LỖI (mạng/token), [] khi thật-sự-rỗng -> phân biệt 2 ca
-        comps = fetch_components(token, campus, roll, r.get("courseID"), r.get("subjectCode"))
+        comps = fetch_components(token, campus, roll, cid, code)
         meta = "  ·  ".join(x for x in (str(r.get("averageMark", "")).strip(),
                                         str(r.get("status", "")).strip()) if x)   # vd '8.5 · Passed'
-        out.append(f"\n▸ {subjects.label(r.get('subjectCode',''))}" + (f"  —  {meta}" if meta else ""))
+        out.append(f"\n▸ {subjects.label(code)}" + (f"  —  {meta}" if meta else ""))
         if comps is None:
             out.append(t("   ⚠ lỗi tải điểm thành phần (thử lại / fap refresh)",
                          "   ⚠ failed to load components (retry / fap refresh)"))

@@ -10,6 +10,7 @@ from ..core.api import creds, current_semester, _vn_now
 from ..core.schedule import fetch_sessions
 from .notify import _day_digest, _week_digest
 from ..core.grades import fetch_marks, _gpa, term_gpa, detail_text
+from ..core.courses import courses_text
 from ..core import subjects
 from ..core.attendance import fetch as fetch_att, _at_risk
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
@@ -27,6 +28,7 @@ COMMAND_INFO = [
     ("weekly",        "Tổng kết tuần (lịch+điểm danh+điểm)", "Weekly recap (schedule+attendance+grades)"),
     ("grades",        "Điểm + GPA tạm tính",       "Grades + provisional GPA"),
     ("grades-detail", "Điểm thành phần từng môn",  "Per-subject component marks"),
+    ("courses",       "Lớp đang học (GV/phòng)",   "My classes (lecturer/room)"),
     ("attendance",    "Tỉ lệ điểm danh",           "Attendance percentage"),
     ("banrisk",       "Cảnh báo nguy cơ cấm thi",  "Exam-ban risk (<80%)"),
     ("whatif",        "Mô phỏng GPA (kèm điểm)",   "GPA what-if (optional mark)"),
@@ -208,6 +210,7 @@ def handle(cmd, arg=None):
         if cmd == "weekly":        return weekly_text(token, campus, roll, sem)
         if cmd == "grades":        return _grades_text(token, campus, roll, sem)
         if cmd == "grades-detail": return detail_text(token, campus, roll, sem)
+        if cmd == "courses":       return courses_text(token, campus, roll, sem)
         if cmd == "attendance":    return _att_text(token, campus, roll, sem)
         if cmd == "banrisk":       return _banrisk_text(token, campus, roll, sem)
         if cmd == "whatif":        return _whatif_text(token, campus, roll, sem, arg)

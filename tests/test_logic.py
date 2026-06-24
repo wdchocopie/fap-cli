@@ -372,7 +372,8 @@ def test_fmt_table_generic():
     assert table([None]) == ""                           # lọc None
 
 def test_grades_detail_text_offline():
-    import fapc.core.grades as G
+    import fapc.core.grades as G, fapc.core.courses as C
+    C.fetch_courses = lambda *a, **k: []                  # P7: không vá thêm môn trong test này (cmap rỗng)
     G.fetch_marks = lambda *a, **k: [{"subjectCode": "PRF192", "courseID": 11},
                                      {"subjectCode": "MAE101", "courseID": None}]
     # courseID 11 -> 1 thành phần (field 'course*' bị lọc); None -> chưa có
@@ -403,7 +404,8 @@ def test_grades_components_accepts_dict_shape():
     assert G._components("t", "FPTU", "HE1", None) == []   # không courseID
 
 def test_botcore_all_offline():
-    import fapc.app.bot_core as B, fapc.core.grades as G, fapc.core.extras as E
+    import fapc.app.bot_core as B, fapc.core.grades as G, fapc.core.extras as E, fapc.core.courses as C
+    C.fetch_courses = lambda *a, **k: None                # P7: GetCourseOfSemester không dùng được -> degrade
     marks = lambda *a, **k: [{"subjectCode": "A", "averageMark": "8.0", "status": "Passed", "courseID": None}]
     B.creds = lambda: ("tok", "FPTU", "HE190000")
     B.current_semester = lambda *a, **k: "Summer2026"
@@ -717,6 +719,33 @@ def test_weekly_recap_offline():
     S.set_index({})
     out = B.handle("weekly")
     assert "EXE101" in out and ("Tuần" in out or "Week" in out) and ("Điểm danh" in out or "Attendance" in out)
+
+def test_courses_resolver_and_roster():
+    """Port #7/#8: course_id_map (vá courseID), roster, fallback từ TKB — chấp nhận đa biến thể field."""
+    import fapc.core.courses as C
+    rows = [{"subjectCode": "IAP301", "courseId": "2", "className": "IA1900", "teacherCode": "AnhHT68", "roomNo": "BE-213"},
+            {"SubjectCode": "FRS401c", "courseID": "9"},          # khác hoa/thường vẫn nhận
+            {"subjectCode": "", "courseId": "x"}]                 # thiếu mã -> bỏ
+    cmap = C.course_id_map(rows)
+    assert cmap == {"IAP301": "2", "FRS401c": "9"}               # vá được cả 2, bỏ dòng rỗng
+    r = C.roster(rows)
+    assert r[0]["lecturer"] == "AnhHT68" and r[0]["room"] == "BE-213" and len(r) == 2
+    # fallback gộp buổi TKB theo môn, union phòng
+    sess = [{"subjectCode": "IAP301", "roomNo": "BE-213", "groupName": "G"},
+            {"subjectCode": "IAP301", "roomNo": "BE-304", "groupName": "G"}]
+    fb = C.roster_from_activity(sess)
+    assert len(fb) == 1 and "BE-213" in fb[0]["room"] and "BE-304" in fb[0]["room"]
+
+def test_grades_detail_merges_missing_subject():
+    """Port #7: môn GetStudentMark BỎ SÓT (chỉ có trong GetCourseOfSemester) vẫn hiện điểm thành phần."""
+    import fapc.core.grades as G, fapc.core.courses as C
+    G.fetch_marks = lambda *a, **k: [{"subjectCode": "IAP301", "courseID": "2"}]   # chỉ 1 môn có điểm
+    C.fetch_courses = lambda *a, **k: [{"subjectCode": "IAP301", "courseId": "2"},
+                                       {"subjectCode": "FRS401c", "courseId": "9"}]  # FRS401c bị GetStudentMark bỏ sót
+    G.call = lambda *a, **k: (200, {"data": [{"courseID": 9, "item": "Lab", "value": "7.0", "weight": "100"}]})
+    txt = G.detail_text("t", "FPTU", "HE1", "Summer2026")
+    assert "IAP301" in txt and "FRS401c" in txt                  # cả môn bù cũng hiện
+    assert "2 môn" in txt or "2 subjects" in txt
 
 # ---- runner không cần pytest ----
 def _run():
