@@ -139,7 +139,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 - `GetDiemphongtrao` / `GetActivityStudent` — chưa tham gia hoạt động → mảng rỗng (`code` khác 200 trả `[]`).
 - `GetActivityStudentByWeek` — tuần nghỉ lễ/giữa kỳ → `data` rỗng.
 - `CheckOpenFeedBack` — ngoài đợt khảo sát → chuỗi rỗng `''` / `isOpen=false`.
-- `GetCourseOfSemester` — khi gọi thật bằng URL trong dump trả **HTTP 404** (có thể phân biệt hoa/thường hoặc đã đổi path) — cần đối chiếu lại trước khi phụ thuộc.
+- `GetCourseOfSemester` — khi gọi thật bằng URL trong dump trả **HTTP 404** (có thể phân biệt hoa/thường hoặc đã đổi path). fap-cli **vẫn dùng** nó (lệnh `fap courses` + vá `courseID` cho `grades-detail`) nhưng **degrade êm**: `fetch_courses()` trả `None` khi 404/lỗi và mọi nơi gọi đều có fallback (gộp từ `GetActivityStudent` / giữ hành vi cũ) — không phụ thuộc cứng.
 
 ---
 
