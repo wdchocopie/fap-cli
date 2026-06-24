@@ -58,6 +58,7 @@ HELP = """fap <command>   ·   fap-cli
     telegram-bot           bot Telegram trả lời lệnh · interactive Telegram bot
     discord-bot            bot Discord trả lời lệnh · interactive Discord bot (cần · needs [bot])
 
+    update                 cập nhật code mới nhất (git pull) · pull the latest code
     doctor                 tự kiểm tra môi trường · self-check
     selftest               chạy toàn bộ test offline (kiểm tool chạy đúng) · run offline test suites
 """
@@ -80,6 +81,31 @@ def selftest():
         return 1
     print("\n✅ selftest PASS — mọi thứ chạy đúng." if rc == 0 else "\n❌ selftest FAIL — xem dòng FAIL ở trên.")
     return rc
+
+def update():
+    """Cập nhật fap-cli: `git pull` từ gốc repo. Bản cài '-e' nên mã mới có hiệu lực NGAY (không cần cài lại,
+    trừ khi đổi deps). Nhắc khởi động lại service thường trú để nạp mã mới."""
+    import subprocess
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if not os.path.isdir(os.path.join(root, ".git")):
+        print("⚠️ Không phải bản git (cài qua ZIP/pip?). Tải lại từ GitHub:\n"
+              "   https://github.com/wdchocopie/fap-cli  → Code → Download ZIP (hoặc `git clone`).")
+        return 1
+    before = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    print("⏳ git pull --ff-only …")
+    if subprocess.run(["git", "-C", root, "pull", "--ff-only"]).returncode != 0:
+        print("❌ git pull lỗi (xung đột cục bộ / mạng?). Tự xử lý rồi chạy lại `fap update`.")
+        return 1
+    after = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if before == after:
+        print("✅ Đã ở bản mới nhất — không có gì để cập nhật."); return 0
+    print(f"✅ Cập nhật {before[:7]} → {after[:7]} (bản cài '-e' có hiệu lực ngay).")
+    print("   • Service thường trú (bot/watch) — khởi động lại để nạp mã mới:")
+    print("       systemctl --user restart fap-bot fap-watch fap-gradewatch   # Linux/systemd")
+    print("       (hoặc deploy/update.sh tự làm hết trên VPS)")
+    print("   • Nếu pyproject/deps đổi:  pip install -e \".[gcal,bot]\"")
+    print("   • Kiểm tra nhanh:  fap selftest")
+    return 0
 
 def doctor():
     from .. import config
@@ -144,6 +170,7 @@ def main():
     elif cmd == "web":            from .webui import run; run(rest[0] if rest else 8000)
     elif cmd == "telegram-bot":   from .telegrambot import main as m; m()
     elif cmd == "discord-bot":    from .discordbot import main as m; m()
+    elif cmd == "update":         sys.exit(update())
     elif cmd == "doctor":         doctor()
     elif cmd == "selftest":       sys.exit(selftest())
     else: print(HELP)
