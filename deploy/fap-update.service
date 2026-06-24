@@ -1,0 +1,11 @@
+# fap-update.service — TỰ CẬP NHẬT fap-cli (git pull + cài lại nếu deps đổi + restart service).
+# Cài qua:  bash deploy/update.sh --schedule   (tự sửa đường dẫn + bật timer). Gỡ: --unschedule.
+[Unit]
+Description=fap-cli auto-update (git pull + reinstall + restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/fap-cli
+ExecStart=/usr/bin/env bash %h/fap-cli/deploy/update.sh --auto

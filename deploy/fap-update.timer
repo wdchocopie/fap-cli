@@ -1,0 +1,12 @@
+# fap-update.timer — chạy fap-update.service hằng tuần (CN 03:00 giờ hệ thống).
+# Bật:  bash deploy/update.sh --schedule    ·    Gỡ:  bash deploy/update.sh --unschedule
+# Đổi lịch: sửa OnCalendar (vd 'daily', 'Mon 04:00'). systemd tính theo TZ HỆ THỐNG (đặt Asia/Ho_Chi_Minh).
+[Unit]
+Description=fap-cli weekly auto-update
+
+[Timer]
+OnCalendar=Sun 03:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

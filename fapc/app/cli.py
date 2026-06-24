@@ -83,28 +83,55 @@ def selftest():
     return rc
 
 def update():
-    """Cập nhật fap-cli: `git pull` từ gốc repo. Bản cài '-e' nên mã mới có hiệu lực NGAY (không cần cài lại,
-    trừ khi đổi deps). Nhắc khởi động lại service thường trú để nạp mã mới."""
+    """Cập nhật fap-cli: `git pull` từ gốc repo, xử lý MỌI trường hợp (ZIP/không-git, có thay đổi cục bộ,
+    diverged, mất mạng, deps đổi, đã mới nhất). Bản cài '-e' nên mã mới có hiệu lực NGAY (trừ khi đổi deps)."""
     import subprocess
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    if not os.path.isdir(os.path.join(root, ".git")):
-        print("⚠️ Không phải bản git (cài qua ZIP/pip?). Tải lại từ GitHub:\n"
-              "   https://github.com/wdchocopie/fap-cli  → Code → Download ZIP (hoặc `git clone`).")
+    def git(*a):
+        return subprocess.run(["git", "-C", root, *a], capture_output=True, text=True)
+    # (1) Cài qua ZIP/pip (không có .git) → không pull được
+    if not os.path.isdir(os.path.join(root, ".git")) or git("rev-parse", "--is-inside-work-tree").returncode != 0:
+        print("⚠️ Bản này KHÔNG phải git checkout (cài qua ZIP/pip) → không tự `git pull` được.\n"
+              "   Cập nhật: tải lại ZIP mới ở https://github.com/wdchocopie/fap-cli (Code → Download ZIP),\n"
+              "   hoặc cài lại bằng git:  git clone https://github.com/wdchocopie/fap-cli")
         return 1
-    before = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    print("⏳ git pull --ff-only …")
-    if subprocess.run(["git", "-C", root, "pull", "--ff-only"]).returncode != 0:
-        print("❌ git pull lỗi (xung đột cục bộ / mạng?). Tự xử lý rồi chạy lại `fap update`.")
+    # (2) Có thay đổi CỤC BỘ chưa commit → pull --ff-only sẽ fail; hướng dẫn rõ thay vì để git nuốt
+    dirty = git("status", "--porcelain").stdout.strip()
+    if dirty:
+        print("⚠️ Có thay đổi cục bộ chưa commit — xử lý trước khi update:")
+        print("   • Giữ tạm:  git stash   →  fap update   →  git stash pop")
+        print("   • Bỏ hẳn :  git checkout -- .   (MẤT chỉnh sửa cục bộ)")
+        for ln in dirty.splitlines()[:8]:
+            print("     " + ln)
         return 1
-    after = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    branch = (git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "?")
+    before = git("rev-parse", "HEAD").stdout.strip()
+    pyproj_before = git("rev-parse", "HEAD:pyproject.toml").stdout.strip()
+    # (3) Pull
+    print(f"⏳ git pull --ff-only  (nhánh {branch}) …")
+    pull = subprocess.run(["git", "-C", root, "pull", "--ff-only"])
+    if pull.returncode != 0:
+        print("❌ git pull lỗi. Nguyên nhân thường gặp:")
+        print("   • Mất mạng → kiểm internet rồi thử lại.")
+        print("   • Có commit cục bộ (diverged):  git pull --rebase   rồi `fap update` lại.")
+        print(f"   • Đang ở nhánh khác:  git checkout main   (hiện ở '{branch}').")
+        return 1
+    after = git("rev-parse", "HEAD").stdout.strip()
     if before == after:
         print("✅ Đã ở bản mới nhất — không có gì để cập nhật."); return 0
-    print(f"✅ Cập nhật {before[:7]} → {after[:7]} (bản cài '-e' có hiệu lực ngay).")
-    print("   • Service thường trú (bot/watch) — khởi động lại để nạp mã mới:")
-    print("       systemctl --user restart fap-bot fap-watch fap-gradewatch   # Linux/systemd")
-    print("       (hoặc deploy/update.sh tự làm hết trên VPS)")
-    print("   • Nếu pyproject/deps đổi:  pip install -e \".[gcal,bot]\"")
-    print("   • Kiểm tra nhanh:  fap selftest")
+    n = git("rev-list", "--count", f"{before}..{after}").stdout.strip() or "?"
+    print(f"✅ Cập nhật {before[:7]} → {after[:7]}  ({n} commit mới).")
+    # (4) Deps đổi? (pyproject thay đổi) → cần cài lại; không thì '-e' đã có hiệu lực
+    if git("rev-parse", "HEAD:pyproject.toml").stdout.strip() != pyproj_before:
+        print("📦 pyproject.toml ĐỔI (deps có thể thay đổi) → cài lại:  pip install -e \".[gcal,bot]\"")
+    else:
+        print("   (deps không đổi — mã mới có hiệu lực ngay nhờ bản cài '-e')")
+    # (5) Nhắc restart service thường trú + kiểm tra
+    print("   Service thường trú — khởi động lại để nạp mã mới:")
+    print("     • VPS systemd :  bash deploy/update.sh   (tự pull+cài+selftest+restart)")
+    print("     • Windows task:  .\\deploy\\update.ps1     (tự pull+cài+restart task)")
+    print("     • Thủ công    :  systemctl --user restart fap-bot fap-watch fap-gradewatch")
+    print("   Kiểm tra:  fap selftest   ·   Token hết hạn thì:  fap refresh")
     return 0
 
 def doctor():
