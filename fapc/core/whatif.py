@@ -14,7 +14,72 @@ from ..i18n import t
 from .. import fmt
 
 MARK_MAX = 10.0
+PASS_MARK = 5.0                           # ngưỡng qua môn FPT (điểm trung bình môn ≥ 5)
 WHATIF_STEPS = (5, 6, 7, 8, 9, 10)        # dải mốc dùng chung CLI + bot (tránh lệch 5–10 vs 6–10)
+
+# Field "trọng số" / "giá trị" của 1 đầu điểm khác nhau theo campus → dò generic (giống gradewatch).
+_WEIGHT_KEYS = {"weight", "weightvalue", "weightpercent", "percent", "weightstr"}
+_VALUE_KEYS = {"value", "mark", "grade", "score", "point", "averagemark", "result", "valuestr"}
+
+def _num(x):
+    try:
+        return float(str(x).replace("%", "").replace(",", ".").strip())
+    except (TypeError, ValueError):
+        return None
+
+def _field(c, keys):
+    for k in c:
+        if str(k).lower() in keys and c[k] not in (None, ""):
+            return c[k]
+    return None
+
+def predict_course(components, target=PASS_MARK, max_mark=MARK_MAX):
+    """THUẦN — cho điểm thành phần 1 MÔN: cần TB bao nhiêu ở các đầu điểm CHƯA có để môn đạt `target`.
+    Trọng số tự triệt tiêu nên không cần biết % hay phân số. Trả dict hoặc None nếu không đọc được trọng số.
+      {locked, total_w, remaining_w, remaining_pct, needed, guaranteed, impossible, current}"""
+    total_w = locked = 0.0
+    any_w = False
+    for c in components:
+        if not isinstance(c, dict):
+            continue
+        w = _num(_field(c, _WEIGHT_KEYS))
+        if w is None or w <= 0:
+            continue
+        any_w = True
+        total_w += w
+        v = _num(_field(c, _VALUE_KEYS))      # None = đầu điểm chưa có giá trị
+        if v is not None:
+            locked += v * w
+    if not any_w or total_w <= 0:
+        return None
+    graded_w = sum(_num(_field(c, _WEIGHT_KEYS)) or 0 for c in components
+                   if isinstance(c, dict) and _num(_field(c, _VALUE_KEYS)) is not None
+                   and (_num(_field(c, _WEIGHT_KEYS)) or 0) > 0)
+    remaining_w = total_w - graded_w
+    current = round(locked / total_w, 2)              # điểm môn nếu phần còn lại = 0
+    if remaining_w <= 0:
+        return {"locked": locked, "total_w": total_w, "remaining_w": 0.0, "remaining_pct": 0.0,
+                "needed": 0.0, "guaranteed": current >= target, "impossible": current < target, "current": current}
+    needed = (target * total_w - locked) / remaining_w
+    return {"locked": locked, "total_w": total_w, "remaining_w": remaining_w,
+            "remaining_pct": round(100 * remaining_w / total_w, 1), "needed": round(needed, 2),
+            "guaranteed": needed <= 0, "impossible": needed > max_mark + 1e-9, "current": current}
+
+def predict_line(pred, target=PASS_MARK):
+    """THUẦN — 1 dòng người-đọc cho kết quả predict_course (None → '')."""
+    if not pred:
+        return ""
+    if pred["remaining_w"] <= 0:
+        return (t(f"   📊 Đã chốt: {pred['current']}/10 → {'QUA' if pred['guaranteed'] else 'CHƯA qua'} (≥{target:g})",
+                  f"   📊 Final: {pred['current']}/10 → {'PASS' if pred['guaranteed'] else 'NOT passed'} (≥{target:g})"))
+    if pred["guaranteed"]:
+        return t(f"   📊 Đã chắc QUA môn (kể cả 0đ ở {pred['remaining_pct']:g}% còn lại).",
+                 f"   📊 Already secured a PASS (even with 0 on the remaining {pred['remaining_pct']:g}%).")
+    if pred["impossible"]:
+        return t(f"   📊 Cần {pred['needed']}/10 ở {pred['remaining_pct']:g}% còn lại để qua — vượt 10, rất khó.",
+                 f"   📊 Need {pred['needed']}/10 on the remaining {pred['remaining_pct']:g}% — above 10, very hard.")
+    return t(f"   📊 Cần TB {pred['needed']}/10 ở {pred['remaining_pct']:g}% trọng số còn lại để qua (≥{target:g}).",
+             f"   📊 Need avg {pred['needed']}/10 on the remaining {pred['remaining_pct']:g}% weight to pass (≥{target:g}).")
 
 def _split(rows):
     """-> (graded[(code,mark)], sum_graded, remaining_count). 'remaining' = môn chưa có điểm (avg=0)."""

@@ -24,3 +24,4 @@ apks/
 analysis/disasm.hasm
 analysis/index.android.bundle
 analysis/strings_clean.txt
+.apk_tmp/

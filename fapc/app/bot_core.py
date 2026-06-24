@@ -9,7 +9,8 @@ import datetime
 from ..core.api import creds, current_semester, _vn_now
 from ..core.schedule import fetch_sessions
 from .notify import _day_digest, _week_digest
-from ..core.grades import fetch_marks, _gpa, detail_text
+from ..core.grades import fetch_marks, _gpa, term_gpa, detail_text
+from ..core import subjects
 from ..core.attendance import fetch as fetch_att, _at_risk
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
 from ..core.extras import exams_text, notifications_text, profile_text, applications_text
@@ -23,6 +24,7 @@ COMMAND_INFO = [
     ("today",         "Lịch học hôm nay",          "Today's schedule"),
     ("tomorrow",      "Lịch học ngày mai",         "Tomorrow's schedule"),
     ("week",          "Lịch học cả tuần",          "This week's schedule"),
+    ("weekly",        "Tổng kết tuần (lịch+điểm danh+điểm)", "Weekly recap (schedule+attendance+grades)"),
     ("grades",        "Điểm + GPA tạm tính",       "Grades + provisional GPA"),
     ("grades-detail", "Điểm thành phần từng môn",  "Per-subject component marks"),
     ("attendance",    "Tỉ lệ điểm danh",           "Attendance percentage"),
@@ -82,9 +84,11 @@ def _grades_text(token, campus, roll, sem, rows=None):
         mk = r.get("averageMark") if fmt.has_mark(r) else fmt.gpa_val(None)
         st = str(r.get("status", ""))
         icon = "✅" if ("pass" in st.lower() and "not" not in st.lower()) else "⏳"
-        lines.append(f"• {r.get('subjectCode','')} — {mk}  {icon} {st}")
-    g = fmt.gpa_val(_gpa(rows))
-    lines.append("\n" + t(f"🎯 GPA tạm tính: {g}", f"🎯 Provisional GPA: {g}"))
+        lines.append(f"• {subjects.label(r.get('subjectCode',''))} — {mk}  {icon} {st}")
+    g, weighted = term_gpa(rows)
+    gv = fmt.gpa_val(g)
+    lines.append("\n" + (t(f"🎯 GPA tạm tính (tín chỉ): {gv}", f"🎯 Provisional GPA (credit): {gv}") if weighted
+                         else t(f"🎯 GPA tạm tính: {gv}", f"🎯 Provisional GPA: {gv}")))
     return "\n".join(lines)
 
 def _att_text(token, campus, roll, sem, rows=None):
@@ -97,7 +101,7 @@ def _att_text(token, campus, roll, sem, rows=None):
         warn = " ⚠️" if _at_risk(r) else ""
         taken, total = r.get("numberOfTakenAttendances"), r.get("numberOfAttendances")
         cnt = f"  ({taken}/{total})" if taken is not None and total is not None else ""
-        lines.append(f"• {r.get('subjectCode','')} — {r.get('attendance','')}%{warn}{cnt}")
+        lines.append(f"• {subjects.label(r.get('subjectCode',''))} — {r.get('attendance','')}%{warn}{cnt}")
     return "\n".join(lines)
 
 def _banrisk_text(token, campus, roll, sem, rows=None):
@@ -108,7 +112,7 @@ def _banrisk_text(token, campus, roll, sem, rows=None):
         return t("✅ Không môn nào nguy cơ cấm thi (≥80%).", "✅ No exam-ban risk (≥80%).")
     lines = [fmt.header("⚠️", t("Nguy cơ cấm thi (<80%)", "Exam-ban risk (<80%)"))]
     for r in risk:
-        lines.append(f"• {r.get('subjectCode','')} — {r.get('attendance','')}%")
+        lines.append(f"• {subjects.label(r.get('subjectCode',''))} — {r.get('attendance','')}%")
     return "\n".join(lines)
 
 def _whatif_text(token, campus, roll, sem, arg):
@@ -149,6 +153,21 @@ def _status_text(token, campus, roll, sem):
                  else t("✅ Chuyên cần ổn (≥80%)", "✅ Attendance OK (≥80%)"))
     return "\n\n".join(parts)
 
+def weekly_text(token, campus, roll, sem):
+    """Recap TUẦN trong 1 tin: lịch tuần + điểm danh + cảnh báo cấm thi + điểm hiện tại.
+    Lấy sessions/att/marks ĐÚNG 1 LẦN rồi chia sẻ (không gọi trùng endpoint)."""
+    sessions = fetch_sessions(token, campus, roll, sem)
+    att = fetch_att(token, campus, roll, sem)
+    marks = fetch_marks(token, campus, roll, sem)
+    today = _vn_now().date()
+    parts = [
+        _week_digest(sessions, today),
+        _att_text(token, campus, roll, sem, rows=att),
+        _banrisk_text(token, campus, roll, sem, rows=att),
+        _grades_text(token, campus, roll, sem, rows=marks),
+    ]
+    return ("\n\n" + fmt.RULE + "\n\n").join(parts)
+
 def all_text(token, campus, roll, sem):
     """Gộp MỌI mục vào 1 tin: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi.
     Lấy marks/att ĐÚNG 1 LẦN rồi chia sẻ cho các mục con -> không gọi trùng endpoint (nhẹ máy yếu)."""
@@ -178,6 +197,7 @@ def handle(cmd, arg=None):
     try:
         token, campus, roll = creds()                   # raise SystemExit nếu chưa đăng nhập
         sem = current_semester(token, campus, roll)
+        subjects.load()                                  # tên + tín chỉ từ cache (nếu đã `fap subjects`)
         if cmd in ("today", "tomorrow", "week"):
             sessions = fetch_sessions(token, campus, roll, sem)
             today = _vn_now().date()
@@ -185,6 +205,7 @@ def handle(cmd, arg=None):
                 return _week_digest(sessions, today)
             day = today + datetime.timedelta(days=1) if cmd == "tomorrow" else today
             return _day_digest(sessions, day)
+        if cmd == "weekly":        return weekly_text(token, campus, roll, sem)
         if cmd == "grades":        return _grades_text(token, campus, roll, sem)
         if cmd == "grades-detail": return detail_text(token, campus, roll, sem)
         if cmd == "attendance":    return _att_text(token, campus, roll, sem)

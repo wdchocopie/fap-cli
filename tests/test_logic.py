@@ -657,6 +657,67 @@ def test_reminders_lead_config():
     finally:
         C.REMIND_MINUTES = orig
 
+def test_subjects_resolver():
+    """Port #1: danh mục môn -> tên + tín chỉ; thiếu danh mục -> degrade về mã trơ."""
+    import fapc.core.subjects as S
+    try:
+        S.set_index(S.index_of([
+            {"subjectCode": "HOD402", "subjectName": "Human-Computer Interaction",
+             "subjectV": "Tương tác người-máy", "credits": "3"},
+            {"subjectCode": "EXE101", "subjectName": "Experiential Entrepreneurship 1",
+             "subjectV": "", "credits": "2"}]))
+        assert "HOD402" in S.label("HOD402") and "Tương tác" in S.label("HOD402")   # vi ưu tiên
+        assert "Experiential" in S.label("EXE101")                                  # vi rỗng -> fallback en
+        assert S.credit_of("HOD402") == 3.0 and S.credit_of("EXE101") == 2.0
+        assert S.label("UNKNOWN") == "UNKNOWN" and S.credit_of("UNKNOWN") == 0.0    # ngoài danh mục
+        S.set_index({})
+        assert S.label("HOD402") == "HOD402" and S.credit_of("HOD402") == 0.0       # không danh mục
+    finally:
+        S.set_index({})                                                            # dọn để test khác thấy mã trơ
+
+def test_term_gpa_weighted():
+    """Port #1: GPA kỳ theo TRỌNG SỐ tín chỉ khi có danh mục; rơi về TB cộng khi không."""
+    import fapc.core.grades as G, fapc.core.subjects as S
+    rows = [{"subjectCode": "A", "averageMark": "8.0"}, {"subjectCode": "B", "averageMark": "6.0"}]
+    try:
+        S.set_index({"A": {"credits": 3.0}, "B": {"credits": 1.0}})
+        g, w = G.term_gpa(rows)
+        assert w is True and g == 7.5                       # (8*3+6*1)/4
+        S.set_index({})
+        g2, w2 = G.term_gpa(rows)
+        assert w2 is False and g2 == 7.0                    # (8+6)/2 — không tín chỉ
+    finally:
+        S.set_index({})
+
+def test_predict_course():
+    """Port #3: cần TB bao nhiêu ở phần còn lại để qua môn (trọng số tự triệt tiêu)."""
+    from fapc.core.whatif import predict_course, predict_line
+    comps = [{"component": "Assignment", "weight": "30", "value": "8"},
+             {"component": "Progress", "weight": "20", "value": "6"},
+             {"component": "Final", "weight": "50", "value": ""}]
+    p = predict_course(comps, target=5.0)                   # locked=8*30+6*20=360; tot=100; rem=50; need=(500-360)/50=2.8
+    assert p["needed"] == 2.8 and p["remaining_pct"] == 50.0 and not p["impossible"] and not p["guaranteed"]
+    assert "2.8" in predict_line(p)
+    guaranteed = predict_course([{"weight": "80", "value": "9"}, {"weight": "20", "value": ""}])
+    assert guaranteed["guaranteed"] is True                 # need=(500-720)/20 < 0 -> chắc qua
+    hard = predict_course([{"weight": "60", "value": "0"}, {"weight": "40", "value": ""}])
+    assert hard["impossible"] is True                       # need=(500-0)/40 = 12.5 > 10 -> không khả thi
+    assert predict_course([{"component": "X", "value": "5"}]) is None   # không trọng số -> None
+
+def test_weekly_recap_offline():
+    """Port #2: `weekly` ghép lịch tuần + điểm danh + điểm trong 1 tin (KHÁC alias 'week' cũ)."""
+    import fapc.app.bot_core as B, fapc.core.grades as G, fapc.core.subjects as S
+    marks = lambda *a, **k: [{"subjectCode": "EXE101", "averageMark": "8.0", "status": "Passed", "courseID": None}]
+    B.creds = lambda: ("tok", "FPTU", "HE190000")
+    B.current_semester = lambda *a, **k: "Summer2026"
+    B.fetch_sessions = lambda *a, **k: [MON, MON2, WED]
+    B.fetch_marks = marks; G.fetch_marks = marks
+    B.fetch_att = lambda *a, **k: [{"subjectCode": "EXE101", "attendance": "100"}]
+    B._vn_now = lambda: datetime.datetime(2026, 6, 15, 8, 0)
+    S.set_index({})
+    out = B.handle("weekly")
+    assert "EXE101" in out and ("Tuần" in out or "Week" in out) and ("Điểm danh" in out or "Attendance" in out)
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

@@ -35,6 +35,8 @@ fap refresh      # các lần sau: làm mới token (không cần browser) · he
 - Đẩy thẳng lên Google Calendar · push directly: `fap calendar-auth` rồi `fap calendar-sync`.
 - Gửi lên Telegram/Discord · push to chat: cấu hình `.env` (xem `.env.example`) rồi `fap notify today`.
 - Xem nhanh · quick view: `fap status` (tổng quan hôm nay · today overview), `fap week` (lịch tuần · weekly), `fap whatif 8` (mô phỏng GPA · GPA what-if).
+- Hiện **tên môn** thay vì mã trơ: chạy `fap subjects` **một lần** → tên + tín chỉ xuất hiện ở grades/điểm danh/lịch/bot/web (và GPA kỳ tính **theo tín chỉ**). · run `fap subjects` once → names + credits everywhere.
+- Tổng kết tuần 1 tin · weekly recap: `fap weekly` (lịch + điểm danh + điểm → kênh chat).
 
 Mọi lệnh · all commands: `fap` (không tham số). Cơ chế OAuth: [docs/04-feid-oauth-tool.md](docs/04-feid-oauth-tool.md).
 
@@ -65,14 +67,15 @@ fap-cli/
 │   ├── core/                ← LÕI: truy cập dữ liệu — KHÔNG phụ thuộc app
 │   │   ├── api.py           ← creds + checksum + call + auto học kỳ
 │   │   ├── auth.py          ← đăng nhập OAuth (login/refresh/exchange/whoami)
-│   │   └── schedule.py · grades.py · attendance.py · transcript.py · whatif.py · extract.py
+│   │   └── schedule.py · grades.py · attendance.py · transcript.py · whatif.py · subjects.py · extras.py · extract.py
 │   └── app/                 ← APP: kết nối người dùng — phụ thuộc core
 │       ├── cli.py           ← điểm vào CLI · CLI entry
 │       ├── gcal.py          ← Google Calendar sync (OAuth)
 │       ├── notify.py        ← Telegram + Discord (push 1 chiều)
-│       ├── bot_core.py · telegrambot.py · discordbot.py   ← bot tương tác
-│       ├── dashboard.py     ← status / week
-│       └── attendwatch.py   ← theo dõi điểm danh near real-time
+│       ├── bot_core.py · telegrambot.py · discordbot.py   ← bot tương tác (menu/slash + nhắc trước tiết)
+│       ├── reminders.py     ← nhắc trước mỗi tiết (trong bot)
+│       ├── webui.py · dashboard.py   ← web dashboard / status / week
+│       └── attendwatch.py · gradewatch.py   ← theo dõi điểm danh / điểm near real-time
 ├── deploy/                  ← script lên lịch · scheduling (Windows/cron/systemd/Docker)
 ├── legacy/                  ← cách CŨ · legacy (fap_login mật khẩu, pull_token máy ảo)
 ├── docs/                    ← tài liệu + ghi chép reverse-engineering

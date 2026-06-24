@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """grades.py — điểm tổng kết môn (GetStudentMark) + chi tiết thành phần (GetMarkByCourse)."""
 from .api import creds, call, as_list, unwrap, current_semester, check_auth, _err_code
+from . import subjects
 from ..i18n import t
 from .. import fmt
 
@@ -16,16 +17,31 @@ def _gpa(rows):
     graded = [fmt.safe_float(r.get("averageMark")) for r in rows if fmt.has_mark(r)]
     return round(sum(graded) / len(graded), 2) if graded else None
 
+def term_gpa(rows):
+    """(gpa, weighted). Có tín chỉ (danh mục đã cache qua `fap subjects`) → theo TRỌNG SỐ tín chỉ
+    (đúng cách FPT tính); không có → rơi về TB cộng `_gpa`. THUẦN (credit lấy từ subjects memo)."""
+    num = den = 0.0
+    for r in rows:
+        mk, cr = fmt.safe_float(r.get("averageMark")), subjects.credit_of(r.get("subjectCode", ""))
+        if mk > 0 and cr > 0:
+            num += mk * cr; den += cr
+    if den:
+        return round(num / den, 2), True
+    return _gpa(rows), False
+
 def report():
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
+    subjects.load()                                   # tên + tín chỉ từ cache (nếu đã `fap subjects`)
     rows = fetch_marks(token, campus, roll, sem)
     print(t(f"== Điểm kỳ {sem} ({len(rows)} môn) ==", f"== Grades {sem} ({len(rows)} subjects) =="))
-    print(f"{'Môn/Subject':12} {'Lớp/Class':14} {'TB/Avg':>7}  {'Trạng thái/Status'}")
+    print(f"{'Môn/Subject':10} {'TB/Avg':>7}  {'Trạng thái/Status':18} {'Tên môn/Name'}")
     for r in rows:
-        print(f"{r.get('subjectCode',''):12} {r.get('className',''):14} {str(r.get('averageMark','')):>7}  {r.get('status','')}")
-    g = fmt.gpa_val(_gpa(rows))
-    print(t(f"\nGPA tạm tính (môn đã có điểm): {g}", f"\nProvisional GPA (graded subjects): {g}"))
+        print(f"{r.get('subjectCode',''):10} {str(r.get('averageMark','')):>7}  "
+              f"{str(r.get('status','')):18} {subjects.name(r.get('subjectCode',''))}")
+    g, weighted = term_gpa(rows)
+    note = t("theo tín chỉ", "credit-weighted") if weighted else t("TB cộng", "unweighted mean")
+    print(t(f"\nGPA tạm tính ({note}): {fmt.gpa_val(g)}", f"\nProvisional GPA ({note}): {fmt.gpa_val(g)}"))
 
 def _mark_params(campus, token, cid, roll, subj=None):
     """Tham số GetMarkByCourse. SubjectCode: catalog (docs/03) ghi 'có thể cần' -> gửi kèm cho chắc."""
@@ -65,10 +81,12 @@ def fetch_components(token, campus, roll, cid, subj=None):
 def detail_text(token, campus, roll, sem, rows=None):
     """Điểm thành phần từng môn — TRẢ chuỗi (dùng cho `fap all` / web). Generic, không bịa cột.
     rows: truyền sẵn GetStudentMark để khỏi gọi lại (vd từ all_text)."""
+    from .whatif import predict_course, predict_line       # import trễ: tránh vòng grades↔whatif
     if rows is None:
         rows = fetch_marks(token, campus, roll, sem)
     if not rows:
         return t("🧮 Chưa có dữ liệu điểm.", "🧮 No grades yet.")
+    subjects.load()                                          # tên môn cho tiêu đề ▸ (nếu đã cache)
     out = [fmt.header("🧮", t(f"Điểm thành phần · {sem}", f"Component marks · {sem}"),
                       t(f"{len(rows)} môn", f"{len(rows)} subjects"))]
     for r in rows:
@@ -76,15 +94,16 @@ def detail_text(token, campus, roll, sem, rows=None):
         comps = fetch_components(token, campus, roll, r.get("courseID"), r.get("subjectCode"))
         meta = "  ·  ".join(x for x in (str(r.get("averageMark", "")).strip(),
                                         str(r.get("status", "")).strip()) if x)   # vd '8.5 · Passed'
-        out.append(f"\n▸ {r.get('subjectCode','')}" + (f"  —  {meta}" if meta else ""))
+        out.append(f"\n▸ {subjects.label(r.get('subjectCode',''))}" + (f"  —  {meta}" if meta else ""))
         if comps is None:
             out.append(t("   ⚠ lỗi tải điểm thành phần (thử lại / fap refresh)",
                          "   ⚠ failed to load components (retry / fap refresh)"))
         elif comps:
             out.append(fmt.table(comps))
+            out.append(predict_line(predict_course(comps)))  # 'cần X/10 ở phần còn lại để qua' (rỗng nếu thiếu trọng số)
         else:
             out.append(t("   (chưa có điểm thành phần)", "   (no component marks yet)"))
-    return "\n".join(out)
+    return "\n".join(l for l in out if l != "")             # bỏ dòng predict rỗng
 
 def _detail_raw(token, campus, roll, sem):
     """In NGUYÊN response GetMarkByCourse từng môn — để soi vì sao 'chưa có' (rỗng thật vs sai shape)."""

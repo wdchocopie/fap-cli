@@ -23,13 +23,15 @@ HELP = """fap <command>   ·   fap-cli
   Tổng quan / Overview:
     status | dashboard     hôm nay + điểm + điểm danh · today + grades + attendance
     all                    MỌI thứ trong 1 lần · everything at once
+    weekly                 tổng kết tuần: lịch + điểm danh + điểm (gửi kênh) · weekly recap → channels
     week [next|prev|N]     lịch tuần (lọc từ kỳ) · weekly schedule
     week-exact [week year] lịch tuần lấy thẳng server (chuẩn tuần nghỉ lễ) · weekly straight from server
 
   Dữ liệu / Data:
     extract                kéo toàn bộ -> output/ · pull everything
     ics                    xuất output/lichhoc.ics · export .ics
-    grades | grades-detail điểm | điểm thành phần · grades | component grades
+    grades | grades-detail điểm | điểm thành phần (+ "cần gì để qua") · grades | component grades (+ pass-projection)
+    subjects               tải/cache danh mục môn → hiện TÊN + tín chỉ ở mọi nơi · cache subject names + credits
     attendance | banrisk   điểm danh | nguy cơ cấm thi · attendance | exam-ban risk
     transcript | gpa       bảng điểm tích lũy | GPA tích lũy (tín chỉ) · transcript | cumulative GPA
     whatif [target]        mô phỏng GPA · GPA what-if
@@ -106,6 +108,8 @@ def main():
     elif cmd == "watch-attendance": from .attendwatch import run; run(rest)
     elif cmd == "grades":         from ..core.grades import report; report()
     elif cmd == "grades-detail":  from ..core.grades import detail; detail(raw="--raw" in rest)
+    elif cmd == "subjects":       from ..core.subjects import report; report()
+    elif cmd == "weekly":         from .notify import run; run("weekly")
     elif cmd == "attendance":     from ..core.attendance import report; report()
     elif cmd == "banrisk":        from ..core.attendance import banrisk; sys.exit(banrisk())
     elif cmd in ("status", "dashboard"): from .dashboard import status; status()

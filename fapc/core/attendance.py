@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """attendance.py — điểm danh (GetStudentAttendances) + cảnh báo nguy cơ cấm thi."""
 from .api import creds, call, as_list, current_semester, check_auth
+from . import subjects
 from ..i18n import t
 
 # FPT: vắng > 20% tổng buổi -> cấm thi. Proxy theo % chuyên cần hiện tại.
@@ -29,12 +30,14 @@ def _at_risk(r):
 def report():
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
+    subjects.load()                                   # tên môn từ cache (nếu đã `fap subjects`)
     rows = fetch(token, campus, roll, sem)
     print(t(f"== Điểm danh kỳ {sem} ==", f"== Attendance {sem} =="))
-    print(f"{'Môn/Subject':12} {'Có mặt/Present':>13} {'Tổng/Total':>10} {'%':>6}")
+    print(f"{'Môn/Subject':10} {'Có mặt/Present':>13} {'Tổng/Total':>10} {'%':>6}  {'Tên môn/Name'}")
     for r in rows:
-        print(f"{r.get('subjectCode',''):12} {str(r.get('numberOfTakenAttendances','')):>13} "
-              f"{str(r.get('numberOfAttendances','')):>10} {str(r.get('attendance','')):>6}")
+        print(f"{r.get('subjectCode',''):10} {str(r.get('numberOfTakenAttendances','')):>13} "
+              f"{str(r.get('numberOfAttendances','')):>10} {str(r.get('attendance','')):>6}  "
+              f"{subjects.name(r.get('subjectCode',''))}")
 
 def banrisk():
     """In các môn nguy cơ cấm thi. Trả exit code 2 nếu có nguy cơ (cho cron/CI)."""

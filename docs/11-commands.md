@@ -30,6 +30,7 @@
 |---|---|---|---|
 | `fap status` *(alias: `fap dashboard`)* | tổng quan 1 màn hình: lịch hôm nay + GPA tạm tính + điểm danh + cảnh báo cấm thi · one-screen overview: today's classes + provisional GPA + attendance + ban warning | *(không · none)* | stdout |
 | `fap all` | **MỌI mục trong 1 lần**: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi · everything at once | *(không · none)* | stdout |
+| `fap weekly` | **tổng kết tuần** trong 1 tin: lịch tuần + điểm danh + nguy cơ cấm thi + điểm (gửi kênh đã cấu hình) · weekly recap in one message → channels | *(không · none)* | tin nhắn kênh + stdout |
 | `fap week [next\|prev\|N]` | lịch cả tuần T2–CN (lọc từ dữ liệu kỳ) · whole-week schedule (Mon–Sun) | `next`/`sau` = tuần sau, `prev`/`trước` = tuần trước, hoặc số tuần lệch `N` · or integer offset `N` (mặc định · default = tuần này · this week) | stdout |
 | `fap week-exact [week year]` | TKB lấy **thẳng từ server** (`GetActivityStudentByWeek`) — chuẩn cho tuần nghỉ lễ/đặc biệt; tự dò số tuần FAP qua `GetWeekByDate` · weekly straight from server | `[week year]` tuỳ chọn; thiếu = tự dò tuần hiện tại · optional, else auto-detect current week | stdout |
 
@@ -39,8 +40,9 @@
 |---|---|---|---|
 | `fap extract` | kéo toàn bộ endpoint chỉ-đọc về đĩa, kèm chi tiết điểm danh từng môn · pull every read-only endpoint to disk, plus per-subject attendance | *(không · none)* | `output/api/<endpoint>.json`, `output/api/courseAttendance__<mã>.json` |
 | `fap ics` *(alias: `fap run`)* | xuất thời khóa biểu ra file `.ics` để import Calendar · export the timetable to an `.ics` file for Calendar import | *(không · none)* | `output/lichhoc.ics` + tóm tắt stdout |
-| `fap grades` | bảng điểm tổng kết môn + GPA tạm tính · subject summary grades + provisional GPA | *(không · none)* | stdout |
-| `fap grades-detail` | điểm thành phần từng môn · component (per-course) grades | *(không · none)* | stdout |
+| `fap grades` | bảng điểm tổng kết môn + **tên môn** + GPA tạm tính (**theo tín chỉ** nếu đã `fap subjects`) · subject summary + names + provisional GPA (credit-weighted when the catalog is cached) | *(không · none)* | stdout |
+| `fap grades-detail` | điểm thành phần từng môn + dòng **"cần X/10 ở phần còn lại để qua"** · component grades + a per-subject pass-projection line | *(không · none)* | stdout |
+| `fap subjects` | tải & cache **danh mục môn** (`GetSubjets`) → từ đó **TÊN môn + tín chỉ** hiện ở grades/điểm danh/lịch/bot/web · cache the subject catalog → names + credits everywhere | *(không · none)* | `output/subjects_catalog.json` + stdout |
 | `fap attendance` | bảng điểm danh (có mặt / tổng / %) · attendance table (present / total / %) | *(không · none)* | stdout |
 | `fap banrisk` | liệt kê môn nguy cơ cấm thi (proxy chuyên cần < 80%) · list exam-ban-risk subjects (attendance < 80% proxy) | *(không · none)* | stdout + **exit code 2** nếu có nguy cơ · if at risk |
 | `fap transcript` | bảng điểm tích lũy; rỗng nếu chưa hoàn tất kỳ nào · academic transcript; empty if no completed semester | *(không · none)* | stdout |
@@ -164,7 +166,7 @@ fap ics                          # -> output/lichhoc.ics
 fap notify test                  # gửi tin thử · send a test message
 fap notify today                 # lịch hôm nay · today's schedule
 fap notify tomorrow              # lịch ngày mai · tomorrow's schedule
-fap notify weekly                # lịch cả tuần · the whole week
+fap notify weekly                # TỔNG KẾT tuần: lịch + điểm danh + điểm · weekly recap (schedule+attendance+grades)
 fap calendar-auth                # xác thực Google 1 lần · one-time Google auth
 fap calendar-sync                # đẩy/cập nhật lịch · push/update the timetable
 ```

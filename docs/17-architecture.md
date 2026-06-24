@@ -68,13 +68,15 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 **schedule.py** — `parse_session()` đọc `date` + `slotTime` "(HH:MM - HH:MM)": thử 3 format ngày (`m/d/Y` ưu tiên vì FAP dùng US), đánh dấu *ambiguous* nếu cả ngày & tháng ≤12, +1 ngày nếu kết thúc qua nửa đêm. `sessions_on_day()` lọc+sort theo giờ (dùng chung cho dashboard/notify). `build_ics()` xuất `.ics` (VTIMEZONE Asia/Ho_Chi_Minh, skip buổi không parse được). `fetch_week_by_date()`/`fetch_week_activities()` cho `week-exact` (lấy TKB tuần thẳng từ server).
 
-**grades.py** — `fetch_marks()` (GetStudentMark). `_gpa()` = TB cộng môn đã có điểm (`fmt.has_mark`). `_components()`/`_normalize_components()` (GetMarkByCourse): nhận cả list lẫn dict (lấy mảng-con là list-of-dict không rỗng → không bỏ sót). `fetch_components()` trả `None` khi lấy hỏng (cho watch-grades giữ mốc). `detail_text()` render điểm thành phần (generic, không bịa cột).
+**subjects.py** — danh mục môn (GetSubjets, checksum_login). `index_of()` THUẦN → `{mã: {en, vi, credits, replacedBy}}`. `load()` đọc cache `output/subjects_catalog.json` (memo trong tiến trình, KHÔNG tự fetch ở lệnh nóng); `refresh()` fetch+lưu (lệnh `fap subjects`). `label()`/`name()`/`credit_of()` tự nạp cache, **degrade êm về mã trơ / 0 tín chỉ** khi chưa cache → mọi nơi gọi đều an toàn. Đây là lớp join để API mã-trơ hiện **tên môn** + cấp **tín chỉ** cho GPA theo trọng số.
 
-**attendance.py** — `_pct()` trả `None` nếu CHƯA có dữ liệu (khác 0% thật). `_at_risk()` = `pct < 80%` (proxy chấp nhận cho luật cấm thi). `banrisk()` trả exit code 2 nếu có nguy cơ (tiện cron).
+**grades.py** — `fetch_marks()` (GetStudentMark). `_gpa()` = TB cộng môn đã có điểm; `term_gpa()` → `(gpa, weighted)`: có tín chỉ (subjects đã cache) thì tính **theo trọng số tín chỉ**, không thì rơi về TB cộng. `_components()`/`_normalize_components()` (GetMarkByCourse): nhận cả list lẫn dict. `fetch_components()` trả `None` khi lấy hỏng. `detail_text()` render điểm thành phần + **tên môn** ở tiêu đề + dòng dự đoán "cần X/10 để qua" (qua `whatif.predict_course`, import trễ tránh vòng).
+
+**attendance.py** — `_pct()` trả `None` nếu CHƯA có dữ liệu (khác 0% thật). `_at_risk()` = `pct < 80%`. `banrisk()` trả exit code 2 nếu có nguy cơ (tiện cron). `report()` hiện thêm **tên môn** (subjects).
 
 **transcript.py** — `_weighted_gpa()` = Σ(điểm×tín chỉ)/Σ(tín chỉ) — **GPA chính thức theo tín chỉ** (nguồn AcademicTranscript). `gpa_text()` gộp toàn khoá + từng kỳ.
 
-**whatif.py** — `_split()` tách môn đã/chưa có điểm. `needed_average(target,…)` = điểm TB cần trên môn còn lại để đạt target. `run()` in bảng dự kiến (5–10) hoặc điểm-cần; `need <= 0` ⇒ "đã chắc chắn đạt". Thang 0–10 TB cộng (xấp xỉ; GPA thật theo tín chỉ ở `fap gpa`).
+**whatif.py** — `_split()` tách môn đã/chưa có điểm. `needed_average(target,…)` cho mô phỏng GPA cả kỳ. `predict_course(components,target)` THUẦN: từ trọng số+giá trị các đầu điểm 1 môn → "cần TB bao nhiêu ở phần còn lại để **qua môn**" (trọng số tự triệt tiêu nên không cần biết %/phân số); `predict_line()` render 1 dòng. `run()` in bảng dự kiến (5–10) hoặc điểm-cần.
 
 **extras.py** — `campuses()` (GetAllActiveCampus, KHÔNG cần token — chọn campus trước login), `exams_text()`/`exams_ics()` (lịch thi → `.ics` + nhắc trước 1 ngày, parse ngày/giờ generic), `notifications_text()` (GetNotificationByRoll, mới nhất trước), `news()`, `fees()`.
 
