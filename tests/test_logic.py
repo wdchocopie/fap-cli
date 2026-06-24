@@ -624,6 +624,39 @@ def test_notifications_dedupe():
     finally:
         N._load_seen, N._save_seen, N.push = orig
 
+def test_reminders_due_window():
+    """Nhắc trước tiết: chỉ tiết bắt đầu trong [now, now+lead] mới 'due'; đã qua / khác ngày / quá xa -> bỏ."""
+    from fapc.app.reminders import due_reminders, _key
+    now = datetime.datetime(2026, 6, 24, 7, 0)                       # 07:00 ngày 24/06
+    soon  = _sess("06/24/2026", "(07:30 - 09:00)", "IAP301", room="BE-304")   # +30'
+    later = _sess("06/24/2026", "(09:30 - 11:00)", "CES202")                  # +150'
+    past  = _sess("06/24/2026", "(06:00 - 06:50)", "EXE101")                  # -60'
+    other = _sess("06/25/2026", "(07:30 - 09:00)", "HOD402")                  # ngày khác
+    due = due_reminders([soon, later, past, other], now, 30, set())
+    assert len(due) == 1 and due[0][2]["subjectCode"] == "IAP301" and due[0][3] == 30
+    # đã nhắc tiết đó -> không nhắc lại (chống spam)
+    sent = {due[0][4]}
+    assert due_reminders([soon, later, past, other], now, 30, sent) == []
+    assert _key(due[0][0], soon) in sent
+
+def test_reminders_text():
+    from fapc.app.reminders import reminder_text
+    s = _sess("06/24/2026", "(07:30 - 09:00)", "IAP301", room="BE-304")
+    start, end = datetime.datetime(2026, 6, 24, 7, 30), datetime.datetime(2026, 6, 24, 9, 0)
+    txt = reminder_text(start, end, s, 30)
+    assert "IAP301" in txt and "07:30" in txt and "30" in txt and "BE-304" in txt
+    assert "ngay" in reminder_text(start, end, s, 0) or "now" in reminder_text(start, end, s, 0)
+
+def test_reminders_lead_config():
+    import fapc.config as C, fapc.app.reminders as R
+    orig = C.REMIND_MINUTES
+    try:
+        C.REMIND_MINUTES = "0";   assert R.lead_minutes() == 0 and not R.ClassReminder().enabled()   # tắt
+        C.REMIND_MINUTES = "15";  assert R.lead_minutes() == 15
+        C.REMIND_MINUTES = "bad"; assert R.lead_minutes() == 30                # rác -> mặc định 30
+    finally:
+        C.REMIND_MINUTES = orig
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

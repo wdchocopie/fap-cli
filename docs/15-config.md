@@ -42,6 +42,7 @@ $env:FAP_LANG = "en"; fap whoami
 | `FAP_WATCH_ABSENT_ONLY` | *(trống · empty)* | `1`/`true` = `watch-attendance` **chỉ báo buổi vắng/muộn** (đỡ spam); trống = báo mọi buổi mới · `1`/`true` = the watcher only pings Absent/Late; empty = ping every new record | `FAP_WATCH_ABSENT_ONLY=1` |
 | `FAP_CACHE_MIN` | `0` *(tắt)* | Số **phút** cache phản hồi API trong bộ nhớ (giảm gọi lại endpoint giống nhau). Hữu ích cho `fap web`/`status`. Đặt nhỏ để dữ liệu không cũ · minutes to cache API responses in-memory; small value keeps data fresh | `FAP_CACHE_MIN=5` |
 | `FAP_EXTRACT_DELAY` | `0.7` | Số **giây** nghỉ giữa mỗi lượt gọi API khi `fap extract` (lịch sự với server / nhẹ máy yếu) · seconds to pause between API calls during `fap extract` | `FAP_EXTRACT_DELAY=1.5` |
+| `FAP_REMIND_MINUTES` | `30` | Số **phút** trước mỗi tiết mà **bot tương tác** (`telegram-bot`/`discord-bot`) tự nhắc lịch — mỗi tiết đúng 1 lần, dùng giờ VN. `0` = tắt · minutes before each class the **interactive bot** auto-reminds (once per session, VN time); `0` = off | `FAP_REMIND_MINUTES=15` |
 | `DISCORD_ALLOW_ANYONE` | *(trống · empty)* | `1` = cho `fap discord-bot` chạy **dù chưa đặt** `DISCORD_ALLOWED_USER_ID` (bot trả lời **MỌI người** — NGUY HIỂM, lộ dữ liệu); trống = bắt buộc có allowlist · `1` lets the Discord bot run without an allowlist (replies to **everyone** — risky); empty = allowlist required | `DISCORD_ALLOW_ANYONE=1` |
 
 **VI —** Để trống `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL` thì kênh đó **tắt** — `fap notify` đơn giản không gửi qua kênh chưa cấu hình.

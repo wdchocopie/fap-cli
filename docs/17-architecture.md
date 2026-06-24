@@ -96,6 +96,8 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 **telegrambot.py / discordbot.py** — long-poll/gateway, gọi `handle()` trong thread executor (không chặn loop). **Chỉ trả lời chủ tài khoản** (Telegram `TELEGRAM_CHAT` bắt buộc; Discord `DISCORD_ALLOWED_USER_ID` bắt buộc, mở cho mọi người phải cố ý `DISCORD_ALLOW_ANYONE=1`). Lúc khởi động **tự đăng ký menu lệnh gợi ý**: Telegram `setMyCommands` (nút Menu ☰ + gợi ý khi gõ `/`); Discord `app_commands` slash (`tree.sync()` toàn cục, bọc try/except → thiếu thì vẫn chạy prefix `!`). Cả hai không sống-còn: lỗi đăng ký menu thì bot vẫn chạy.
 
+**reminders.py** — **nhắc trước mỗi tiết** cho bot tương tác. Lõi THUẦN `due_reminders(sessions, now, lead, sent)` (tiết bắt đầu trong `[now, now+lead]` & chưa nhắc) + `reminder_text()` → test offline. `ClassReminder.tick()` lo phần mạng: nạp TKB hôm nay (cache ~3h, reset `sent` khi sang ngày), **tự refresh token ~50'** (vá việc bot tương tác trước đây không refresh → chết token sau ~1h). Telegram tick mỗi vòng long-poll; Discord chạy task nền 60s và **DM** chủ tài khoản. `FAP_REMIND_MINUTES=0` → tắt.
+
 **gcal.py** — đẩy `.ics` lên Google Calendar (OAuth riêng, upsert chống trùng theo `iCalUID`).
 
 ---

@@ -11,6 +11,7 @@ import sys, time
 import requests
 from .. import config
 from .bot_core import handle, menu_commands
+from .reminders import ClassReminder
 
 _TIMEOUT = 30   # long-poll: Telegram giữ kết nối tới 30s nếu chưa có update
 
@@ -45,6 +46,9 @@ def run():
                          "(không thì người lạ cũng truy vấn được dữ liệu của bạn). Xem docs/13-notify.md.")
     print(f"🤖 Bot Telegram đang chạy (chỉ chat {allow}). Ctrl+C để dừng.")
     _register_menu()
+    reminder = ClassReminder()
+    print(f"⏰ Nhắc trước mỗi tiết {reminder.lead}' (vào chat {allow})." if reminder.enabled()
+          else "⏰ Nhắc lịch: TẮT (đặt FAP_REMIND_MINUTES>0 trong .env để bật).")
     offset = None
     # Bỏ qua tồn đọng cũ lúc khởi động · skip backlog on startup
     try:
@@ -83,6 +87,14 @@ def run():
                 reply = f"Lỗi · error: {e}"
             print(f"  > {text[:40]}  ->  {len(reply)} ký tự")
             _send(chat_id, reply)
+        # Sau mỗi vòng long-poll (~≤30s): kiểm có tiết nào sắp tới cần nhắc không.
+        if reminder.enabled():
+            try:
+                for txt in reminder.tick():
+                    print(f"  ⏰ nhắc tiết  ->  {len(txt)} ký tự")
+                    _send(allow, txt)
+            except Exception as e:                       # noqa: BLE001 — nhắc lỗi không được làm chết bot
+                print("  nhắc lỗi · reminder error:", e)
 
 def main():
     try:
