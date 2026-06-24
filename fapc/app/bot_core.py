@@ -15,7 +15,8 @@ from ..core import subjects
 from ..core.attendance import fetch as fetch_att, _at_risk
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
 from ..core.extras import exams_text, notifications_text, profile_text, applications_text
-from ..core.transcript import gpa_text
+from ..core.transcript import gpa_text, trend_text, fetch as _fetch_transcript
+from ..core.conduct import conduct_text
 from ..i18n import t
 from .. import fmt
 
@@ -35,6 +36,8 @@ COMMAND_INFO = [
     ("status",        "Tổng quan nhanh",           "Quick overview"),
     ("exams",         "Lịch thi",                  "Exam schedule"),
     ("gpa",           "GPA tích lũy (tín chỉ)",    "Cumulative credit GPA"),
+    ("gpa-trend",     "GPA theo kỳ + xu hướng",    "Per-term GPA trend"),
+    ("conduct",       "Điểm rèn luyện/phong trào", "Conduct / movement points"),
     ("notifications", "Thông báo của trường",      "School notifications"),
     ("profile",       "Hồ sơ sinh viên",           "Student profile"),
     ("applications",  "Đơn từ + trạng thái xử lý", "Applications + status"),
@@ -217,6 +220,8 @@ def handle(cmd, arg=None):
         if cmd == "status":        return _status_text(token, campus, roll, sem)
         if cmd == "exams":         return exams_text(token, campus, roll, sem)
         if cmd == "gpa":           return gpa_text(token, campus, roll)
+        if cmd == "gpa-trend":     return trend_text(_fetch_transcript(token, campus, roll))
+        if cmd == "conduct":       return conduct_text(token, campus, roll, sem)
         if cmd == "notifications": return notifications_text(token, campus, roll)
         if cmd == "profile":       return profile_text(token, campus, roll)
         if cmd == "applications":  return applications_text(token, campus, roll)

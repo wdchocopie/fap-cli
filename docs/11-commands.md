@@ -48,6 +48,8 @@
 | `fap banrisk` | liệt kê môn nguy cơ cấm thi (proxy chuyên cần < 80%) · list exam-ban-risk subjects (attendance < 80% proxy) | *(không · none)* | stdout + **exit code 2** nếu có nguy cơ · if at risk |
 | `fap transcript` | bảng điểm tích lũy; rỗng nếu chưa hoàn tất kỳ nào · academic transcript; empty if no completed semester | *(không · none)* | stdout |
 | `fap gpa` | GPA tích lũy **theo tín chỉ** (toàn khoá + từng kỳ) từ `AcademicTranscript`; khác `whatif` (TB cộng kỳ hiện tại) · credit-weighted cumulative GPA | *(không · none)* | stdout |
+| `fap gpa-trend` | **GPA mỗi kỳ + xu hướng**: delta so kỳ trước (▲/▼) + sparkline + GPA toàn khoá (sắp xếp kỳ theo thời gian) · per-term GPA trend with deltas + a unicode sparkline | *(không · none)* | stdout |
+| `fap conduct` | **điểm rèn luyện/phong trào** (`GetDiemphongtrao`, xét tốt nghiệp). Server trả `201`/null khi chưa có dữ liệu → hiện "chưa có", không lỗi · conduct / movement points; degrades to "none yet" on the server's empty-data error | *(không · none)* | stdout |
 | `fap whatif [target]` | mô phỏng GPA: bảng dự kiến nếu các môn còn lại đạt 5–10, hoặc cần TB bao nhiêu để đạt `target` · GPA what-if: projection table, or the average needed to hit `target` | `[target]` số 0–10 tùy chọn · optional 0–10 number | stdout |
 | `fap exams` | lịch thi (`GetScheduleExam`); rỗng nếu trường chưa xếp · exam schedule; empty until scheduled | *(không · none)* | stdout |
 | `fap exams-ics` | xuất lịch thi ra `.ics` (kèm nhắc trước 1 ngày) để import Calendar · export exams to `.ics` (1-day reminder) | *(không · none)* | `output/lichthi.ics` |

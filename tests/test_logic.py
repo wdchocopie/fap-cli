@@ -747,6 +747,33 @@ def test_grades_detail_merges_missing_subject():
     assert "IAP301" in txt and "FRS401c" in txt                  # cả môn bù cũng hiện
     assert "2 môn" in txt or "2 subjects" in txt
 
+def test_gpa_trend():
+    """gpa-trend: sắp xếp kỳ theo thời gian + delta + sparkline (GPA theo tín chỉ)."""
+    import fapc.core.transcript as T
+    assert T._sem_key("Spring2025") < T._sem_key("Summer2025") < T._sem_key("Fall2025") < T._sem_key("Spring2026")
+    assert T._sem_key("???") == (9999, 9, "???")             # không parse được -> đẩy cuối
+    sp = T._sparkline([6.0, 7.0, 8.0])
+    assert len(sp) == 3 and sp[0] == "▁" and sp[-1] == "█"
+    assert T._sparkline([7.0]) == ""                         # < 2 điểm -> rỗng
+    rows = [{"semesterName": "Fall2025", "averageMark": "8", "credit": "3"},
+            {"semesterName": "Spring2025", "averageMark": "6", "credit": "3"}]
+    txt = T.trend_text(rows)
+    assert txt.index("Spring2025") < txt.index("Fall2025")   # kỳ cũ hiện trước (đã sắp thời gian)
+    assert "▲2.00" in txt                                    # Fall lên 2.00 so kỳ trước
+    assert T.trend_text([]).strip().startswith("📈")         # rỗng -> thông báo, KHÔNG lỗi
+
+def test_conduct_graceful():
+    """conduct: code 201 + NullReference (data null) -> coi như CHƯA có điểm, KHÔNG raise như token hết hạn."""
+    import fapc.core.conduct as K
+    K.call = lambda *a, **k: (200, {"code": "201", "message": "Thành công", "data": None})
+    assert K.fetch("t", "c", "r", "Summer2026") == []        # null/NullReference -> [] (không raise)
+    assert "rèn luyện" in K.conduct_text("t", "c", "r", "Summer2026")
+    K.call = lambda *a, **k: (200, {"code": "201", "message": "Token invalid", "data": None})
+    raised = False
+    try: K.fetch("t", "c", "r", "Summer2026")                # token THẬT hết hạn -> phải raise
+    except SystemExit: raised = True
+    assert raised
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

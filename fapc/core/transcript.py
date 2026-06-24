@@ -7,6 +7,7 @@
 Nguồn: AcademicTranscript (cs12 rollNumber,campusCode). Tài khoản chưa hoàn tất kỳ nào
 thì server trả rỗng — khi đó in thông báo thay vì lỗi. Cột hiển thị theo đúng field server trả.
 """
+import re
 from .api import creds, call, as_list, check_auth
 from ..i18n import t
 from .. import fmt
@@ -58,6 +59,61 @@ def gpa_text(token, campus, roll):
 def gpa_report():
     token, campus, roll = creds()
     print(gpa_text(token, campus, roll))
+
+# ---------- Xu hướng GPA theo kỳ (gpa-trend) ----------
+_SEASON = {"spring": 1, "summer": 2, "fall": 3, "autumn": 3}
+_SPARK = "▁▂▃▄▅▆▇█"
+
+def _sem_key(name):
+    """THUẦN: 'Spring2026' → (năm, thứ-tự-mùa) để sắp xếp kỳ theo thời gian. Không parse được → (9999, 9, tên)."""
+    s = str(name or "").strip()
+    m = re.match(r"([A-Za-z]+)\s*0*(\d{4})", s)
+    if not m:
+        return (9999, 9, s)
+    return (int(m.group(2)), _SEASON.get(m.group(1).lower(), 8), s)
+
+def _sparkline(vals):
+    """THUẦN: sparkline unicode từ list số (None → khoảng trắng). '' nếu < 2 điểm số."""
+    xs = [v for v in vals if v is not None]
+    if len(xs) < 2:
+        return ""
+    lo, hi = min(xs), max(xs)
+    if hi == lo:
+        return _SPARK[len(_SPARK) // 2] * len(vals)
+    return "".join(" " if v is None else _SPARK[int((v - lo) / (hi - lo) * (len(_SPARK) - 1) + 0.5)] for v in vals)
+
+def trend_text(rows):
+    """THUẦN: GPA mỗi kỳ (theo tín chỉ) + delta so kỳ trước + sparkline + GPA toàn khoá.
+    Trả lời câu 'mình đang lên hay xuống?' mà gpa/transcript (phẳng) đang giấu."""
+    if not rows:
+        return t("📈 Chưa có dữ liệu xu hướng GPA (chưa hoàn tất kỳ nào).",
+                 "📈 No GPA trend yet (no completed semester).")
+    sems = {}
+    for r in rows:
+        sems.setdefault(str(r.get("semesterName") or "?"), []).append(r)
+    order = sorted(sems, key=_sem_key)
+    gpas = [_weighted_gpa(sems[s]) for s in order]
+    lines = [fmt.header("📈", t("Xu hướng GPA theo kỳ", "GPA trend by semester"))]
+    prev = None
+    for s, g in zip(order, gpas):
+        if g is None:
+            lines.append(f"• {s}: {fmt.gpa_val(None)}"); continue
+        tail = ""
+        if prev is not None:
+            d = round(g - prev, 2)
+            tail = f"  {'▲' if d > 0 else '▼' if d < 0 else '▬'}{abs(d):.2f}" if d else "  ▬"
+        lines.append(f"• {s}: {g}{tail}  ({len(sems[s])} " + t("môn", "subj") + ")")
+        prev = g
+    spark = _sparkline(gpas)
+    if spark:
+        lines.append("\n" + t("Đồ thị: ", "Trend: ") + spark)
+    lines.append(t(f"🎓 GPA toàn khoá: {fmt.gpa_val(_weighted_gpa(rows))}",
+                   f"🎓 Overall GPA: {fmt.gpa_val(_weighted_gpa(rows))}"))
+    return "\n".join(lines)
+
+def trend_report():
+    token, campus, roll = creds()
+    print(trend_text(fetch(token, campus, roll)))
 
 def main():
     report()

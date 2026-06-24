@@ -35,6 +35,8 @@ HELP = """fap <command>   ·   fap-cli
     courses                lớp đang học: môn/lớp/giảng viên/phòng · my classes this term
     attendance | banrisk   điểm danh | nguy cơ cấm thi · attendance | exam-ban risk
     transcript | gpa       bảng điểm tích lũy | GPA tích lũy (tín chỉ) · transcript | cumulative GPA
+    gpa-trend              GPA theo từng kỳ + xu hướng (sparkline) · per-term GPA trend
+    conduct                điểm rèn luyện/phong trào (xét tốt nghiệp) · conduct / movement points
     whatif [target]        mô phỏng GPA · GPA what-if
     exams | exams-ics      lịch thi | xuất lịch thi ra .ics (Calendar tự nhắc) · exams | exams→.ics
     news | fees | notifications   tin tức | học phí | thông báo trường · news | fees | notifications
@@ -120,6 +122,8 @@ def main():
     elif cmd == "week-exact":     from .dashboard import week_exact; week_exact(rest[0] if rest else None, rest[1] if len(rest) > 1 else None)
     elif cmd == "transcript":     from ..core.transcript import report; report()
     elif cmd == "gpa":            from ..core.transcript import gpa_report; gpa_report()
+    elif cmd == "gpa-trend":      from ..core.transcript import trend_report; trend_report()
+    elif cmd == "conduct":        from ..core.conduct import report; report()
     elif cmd == "whatif":         from ..core.whatif import run; run(rest[0] if rest else None)
     elif cmd == "exams":          from ..core.extras import exams; exams()
     elif cmd == "exams-ics":      from ..core.extras import exams_ics; exams_ics()
