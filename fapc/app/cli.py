@@ -18,7 +18,7 @@ HELP = """fap <command>   ·   fap-cli
     refresh                làm mới token headless · refresh token headless
     exchange "<url>"       đổi URL redirect -> token · exchange redirect URL
     fap [campus]           đổi access_token đã lưu -> token FAP (khi login lỗi) · re-exchange saved token
-    whoami                 xem token đã lưu · show saved token
+    whoami [--full|--json] thẻ định danh OFFLINE (decode JWT) + đếm ngược hết hạn · offline identity card from the JWT
 
   Tổng quan / Overview:
     status | dashboard     hôm nay + điểm + điểm danh · today + grades + attendance
@@ -41,7 +41,7 @@ HELP = """fap <command>   ·   fap-cli
     whatif [target]        mô phỏng GPA · GPA what-if
     exams | exams-ics      lịch thi | xuất lịch thi ra .ics (Calendar tự nhắc) · exams | exams→.ics
     exam-countdown         đếm ngược ngày thi (gần nhất trước, kèm độ gấp) · days until each upcoming exam
-    news | fees | notifications   tin tức | học phí | thông báo trường · news | fees | notifications
+    news [từ khoá] [--type=N] | fees | notifications   tin tức (tìm từ khoá: SearchNews) | học phí | thông báo · news (keyword search) | fees | notifications
     profile | applications hồ sơ SV | đơn từ + trạng thái xử lý · student profile | applications
 
   Giao diện / UI:
@@ -104,7 +104,7 @@ def main():
     elif cmd == "refresh":        from ..core.auth import refresh_tokens; refresh_tokens()
     elif cmd == "exchange":       from ..core.auth import exchange_code; exchange_code(rest[0] if rest else "")
     elif cmd == "fap":            from ..core.auth import cmd_fap; cmd_fap(rest[0] if rest else None)
-    elif cmd == "whoami":         from ..core.auth import cmd_whoami; cmd_whoami()
+    elif cmd == "whoami":         from ..core.auth import cmd_whoami; cmd_whoami("--full" in rest, "--json" in rest)
     elif cmd == "extract":        from ..core.extract import main as m; m()
     elif cmd in ("ics", "run"):   from ..core.schedule import main as m; m()
     elif cmd == "calendar-auth":  from .gcal import cmd_auth; cmd_auth()
@@ -131,7 +131,11 @@ def main():
     elif cmd == "whatif":         from ..core.whatif import run; run(rest[0] if rest else None)
     elif cmd == "exams":          from ..core.extras import exams; exams()
     elif cmd == "exams-ics":      from ..core.extras import exams_ics; exams_ics()
-    elif cmd == "news":           from ..core.extras import news; news()
+    elif cmd == "news":
+        from ..core.extras import news
+        _kw = next((a for a in rest if not a.startswith("--")), None)             # `fap news học bổng`
+        _ty = next((a.split("=", 1)[1] for a in rest if a.startswith("--type=")), "0")
+        news(_kw, type=_ty)
     elif cmd == "fees":           from ..core.extras import fees; fees()
     elif cmd == "notifications":  from ..core.extras import notifications; notifications()
     elif cmd == "profile":        from ..core.extras import profile; profile()

@@ -21,7 +21,7 @@
 | `fap exchange "<url>"` | đổi URL redirect đã copy thành token (khi không dán lúc `login`) · exchange the copied redirect URL for a token | `"<url>"` = URL `io.identityserver.demo:/oauthredirect?code=...` (bắt buộc · required) | `output/oauth_tokens.json`, `output/token.json` |
 | `fap refresh` | làm mới token không cần trình duyệt qua `refresh_token` · renew token headlessly via `refresh_token` | *(không · none)* — đọc campus từ `token.json`, nếu thiếu thì hỏi · reads campus from `token.json`, else prompts | cập nhật · updates `output/oauth_tokens.json`, `output/token.json` |
 | `fap fap [campus]` | đổi `access_token` đã lưu sang token FAP (khi riêng bước FAP lỗi) · convert the saved `access_token` to a FAP token (when only the FAP step failed) | `[campus]` tùy chọn · optional; thiếu thì hỏi `CampusCode` · else prompts | cập nhật · updates `output/token.json` |
-| `fap whoami` | in token FAP đã lưu (che bớt `authenkey`) · print the saved FAP token (`authenkey` masked) | *(không · none)* | stdout |
+| `fap whoami [--full] [--json]` | **thẻ định danh OFFLINE**: decode JWT trong `oauth_tokens.json` (KHÔNG gọi mạng) → tài khoản/email/campus/vai trò + **đếm ngược hết hạn** token. `--full` hiện CCCD/SĐT, `--json` cho script · offline identity card from the JWT + expiry countdown | `--full` · `--json` | stdout |
 | `fap campuses` | liệt kê `campusCode` đang hoạt động (`GetAllActiveCampus`) — **chạy được TRƯỚC khi login** để biết campus cần nhập · list active campus codes (no login needed) | *(không · none)* | stdout |
 
 ### Tổng quan · Overview
@@ -55,7 +55,7 @@
 | `fap exams` | lịch thi (`GetScheduleExam`); rỗng nếu trường chưa xếp · exam schedule; empty until scheduled | *(không · none)* | stdout |
 | `fap exam-countdown` | **đếm ngược ngày thi**: bỏ kỳ đã qua, sớm nhất trước, nhãn độ gấp (🔴 hôm nay / 🟠 mai / còn N ngày) · days until each upcoming exam, urgency-tagged | *(không · none)* | stdout |
 | `fap exams-ics` | xuất lịch thi ra `.ics` (kèm nhắc trước 1 ngày) để import Calendar · export exams to `.ics` (1-day reminder) | *(không · none)* | `output/lichthi.ics` |
-| `fap news` | tin tức (`GetTop10News`) · school news | *(không · none)* | stdout |
+| `fap news [từ khoá] [--type=N]` | tin tức: không tham số → `GetTop10News`; có **từ khoá** → **`SearchNews`** (vd `fap news học bổng`); `--type=N` đổi nhóm tin · school news; keyword → SearchNews | `[từ khoá]` · `--type=N` | stdout |
 | `fap fees` | số dư + chi tiết học phí (`GetBalance`/`GeFeeByRoll`) · balance + fee details | *(không · none)* | stdout |
 | `fap notifications` | thông báo cá nhân của trường (`GetNotificationByRoll`), mới nhất trước · personal school notifications, newest first | *(không · none)* | stdout |
 | `fap profile` | hồ sơ sinh viên (`GetStudentById`): tên/MSSV/email/ngày sinh/ngành/lớp… (chỉ hiện field có giá trị) · student profile | *(không · none)* | stdout |

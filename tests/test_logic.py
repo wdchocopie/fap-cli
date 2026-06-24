@@ -800,6 +800,32 @@ def test_credits_progress():
     assert "8/100" in txt and "8.0%" in txt and "█" in txt    # 3+3+2 = 8 tín chỉ đạt + thanh
     assert credits_text([], 100).strip().startswith("🎓")     # rỗng → thông báo, không lỗi
 
+def test_whoami_offline_jwt():
+    """whoami --offline: decode JWT (KHÔNG xác minh chữ ký) + token_freshness theo claim exp."""
+    import base64, json as _json
+    from fapc.core.auth import decode_jwt, token_freshness
+    mk = lambda p: "h." + base64.urlsafe_b64encode(_json.dumps(p).encode()).decode().rstrip("=") + ".sig"
+    c = decode_jwt(mk({"username": "he190000", "email": "x@fpt.edu.vn", "exp": 2000}))
+    assert c["username"] == "he190000" and c["email"] == "x@fpt.edu.vn"
+    assert decode_jwt("not-a-jwt") == {} and decode_jwt("") == {}     # méo → {} (không raise)
+    assert token_freshness({"exp": 2000}, now=1000) == ("valid", 1000)
+    assert token_freshness({"exp": 1000}, now=2000) == ("expired", 1000)
+    assert token_freshness({}) == ("unknown", 0)
+
+def test_news_search():
+    """news <từ khoá> → SearchNews(keysearch); không từ khoá → GetTop10News. Decode entity."""
+    import fapc.core.extras as E
+    seen = {}
+    def fake(ep, params, *a, **k):
+        seen["ep"] = ep; seen["p"] = dict(params)
+        return (200, {"data": [{"title": "Học bổng &amp; quà"}]})
+    E.call = fake
+    rows = E.fetch_news("t", "c", "r", keyword="học bổng", type="1")
+    assert seen["ep"] == "SearchNews" and seen["p"].get("keysearch") == "học bổng" and seen["p"].get("type") == "1"
+    assert rows[0]["title"] == "Học bổng & quà"              # &amp; → &
+    E.fetch_news("t", "c", "r")                              # không keyword → top-10
+    assert seen["ep"] == "GetTop10News"
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

@@ -118,17 +118,28 @@ def exams():
     print(exams_text(token, campus, roll, current_semester(token, campus, roll)))
 
 # ---------- TIN TỨC ----------
-def news():
-    token, campus, roll = creds()
-    http, data = call("GetTop10News", [("campusCode", campus), ("Authen", token), ("type", "0")],
-                      roll, campus, checksum_value=checksum_auth("0", campus))
+def fetch_news(token, campus, roll, keyword=None, type="0"):
+    """GetTop10News (mặc định) HOẶC SearchNews khi có `keyword`. checksum_auth(type, campus) (như GetTop10News).
+    Trả list dict đã decode entity. Rỗng nếu lỗi/không có."""
+    if keyword:
+        http, data = call("SearchNews",
+            [("campusCode", campus), ("Authen", token), ("keysearch", keyword), ("type", str(type))],
+            roll, campus, checksum_value=checksum_auth(str(type), campus))
+    else:
+        http, data = call("GetTop10News", [("campusCode", campus), ("Authen", token), ("type", str(type))],
+                          roll, campus, checksum_value=checksum_auth(str(type), campus))
     check_auth(http, data)
-    rows = as_list(data)
+    return [{k: fmt.unescape(v) if isinstance(v, str) else v for k, v in r.items()}
+            for r in as_list(data) if isinstance(r, dict)]
+
+def news(keyword=None, type="0"):
+    token, campus, roll = creds()
+    rows = fetch_news(token, campus, roll, keyword, type)
     if not rows:
-        print(t("📰 Chưa có tin tức.", "📰 No news.")); return
-    rows = [{k: fmt.unescape(v) if isinstance(v, str) else v for k, v in r.items()}   # decode &#xxx; trong tin tức
-            for r in rows if isinstance(r, dict)]
-    print(t(f"== Tin tức ({len(rows)}) ==", f"== News ({len(rows)}) =="))
+        print(t(f"📰 Không có tin{' khớp ' + repr(keyword) if keyword else ''}.",
+                f"📰 No news{' matching ' + repr(keyword) if keyword else ''}.")); return
+    head = t(f"Tin tức · tìm {keyword!r}", f"News · search {keyword!r}") if keyword else t("Tin tức", "News")
+    print(t(f"== {head} ({len(rows)}) ==", f"== {head} ({len(rows)}) =="))
     print(fmt.table(rows))
 
 # ---------- HỌC PHÍ / SỐ DƯ ----------

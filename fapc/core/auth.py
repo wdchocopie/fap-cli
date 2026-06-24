@@ -20,6 +20,8 @@ CHỈ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN.
 import os, sys, json, time, base64, hashlib, secrets, webbrowser, urllib.parse
 import requests
 from .api import BASE as FAP_BASE, checksum_login, UA
+from ..i18n import t
+from .. import fmt
 
 # ===== FE Identity (OIDC) — từ /.well-known/openid-configuration =====
 ISSUER       = "https://feid.fpt.edu.vn"
@@ -242,12 +244,60 @@ def cmd_fap(campus=None):
     print("• Đổi access_token đã lưu -> token FAP...")
     _do_fap(campus, at)
 
-def cmd_whoami():
-    if os.path.exists(TOKEN_JSON):
-        t = json.load(open(TOKEN_JSON, encoding="utf-8"))
-        print("FAP:", {k: (str(v)[:12] + "…" if k == "authenkey" and v else v) for k, v in t.items()})
-    else:
-        print("Chưa có token.json — chạy 'login'.")
+def decode_jwt(tok):
+    """THUẦN: payload (phần giữa) của JWT → dict claims. {} nếu không phải JWT/lỗi.
+    KHÔNG xác minh chữ ký — CHỈ để hiển thị, tuyệt đối không tin cho quyết định bảo mật."""
+    try:
+        p = str(tok).split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+    except Exception:                              # noqa: BLE001 — token méo → coi như không có claims
+        return {}
+
+def token_freshness(claims, now=None):
+    """(state, |giây|): 'valid'/'expired'/'unknown' theo claim exp. now=epoch (test inject được)."""
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)):
+        return ("unknown", 0)
+    d = exp - (now if now is not None else time.time())
+    return ("valid" if d > 0 else "expired", abs(int(d)))
+
+def _human(s):
+    if s < 5400:   return f"{max(1, round(s / 60))} " + t("phút", "min")
+    if s < 172800: return f"{round(s / 3600)} " + t("giờ", "h")
+    return f"{round(s / 86400)} " + t("ngày", "days")
+
+def cmd_whoami(full=False, as_json=False):
+    """Thẻ định danh OFFLINE: decode JWT trong oauth_tokens.json (KHÔNG gọi mạng) + đếm ngược hết hạn."""
+    if not (os.path.exists(OAUTH_JSON) or os.path.exists(TOKEN_JSON)):
+        print(t("Chưa có token — chạy 'fap login'.", "No token — run 'fap login'.")); return
+    oauth = json.load(open(OAUTH_JSON, encoding="utf-8")) if os.path.exists(OAUTH_JSON) else {}
+    fap = json.load(open(TOKEN_JSON, encoding="utf-8")) if os.path.exists(TOKEN_JSON) else {}
+    claims = decode_jwt(oauth.get("access_token") or oauth.get("id_token") or "")
+    state, secs = token_freshness(claims)
+    if as_json:
+        out = {k: claims.get(k) for k in ("username", "email", "campusCode", "role", "userType", "userId")}
+        out["token_state"], out["token_seconds"] = state, secs
+        print(json.dumps(out, ensure_ascii=False)); return
+    print(fmt.header("🪪", t("Danh tính (offline · từ JWT)", "Identity (offline · from JWT)")))
+    rows = [(t("Tài khoản", "User"), claims.get("username") or fap.get("rollnumber")),
+            ("Email", claims.get("email")),
+            ("Campus", claims.get("campusCode") or fap.get("campus")),
+            (t("Vai trò", "Role"), claims.get("role")),
+            (t("Loại", "Type"), claims.get("userType")),
+            ("User ID", claims.get("userId"))]
+    if full:
+        rows += [("CCCD/ID", claims.get("citizenCardId")), (t("SĐT", "Phone"), claims.get("phone_number"))]
+    for lbl, v in rows:
+        if v not in (None, ""):
+            print(f"  {lbl:10}: {v}")
+    if state == "valid":
+        print(t(f"\n🔑 access_token còn hạn ~{_human(secs)}.", f"\n🔑 access_token valid for ~{_human(secs)}."))
+    elif state == "expired":
+        print(t(f"\n⚠️ access_token đã hết hạn ~{_human(secs)} trước — chạy 'fap refresh'.",
+                f"\n⚠️ access_token expired ~{_human(secs)} ago — run 'fap refresh'."))
+    if not full:
+        print(t("(ẩn CCCD/SĐT — thêm --full để xem; --json cho máy đọc)",
+                "(citizenCardId/phone hidden — add --full; --json for scripts)"))
 
 def main():
     args = sys.argv[1:]
