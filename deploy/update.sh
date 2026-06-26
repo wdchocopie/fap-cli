@@ -38,7 +38,8 @@ soft() { echo "$1"; [ "$AUTO" = 1 ] && exit 0 || exit 1; }
 echo "== fap-cli update @ $REPO  (extras=$EXTRAS${AUTO:+, auto=$AUTO}) =="
 command -v git >/dev/null || soft "⚠️ Không có git."
 [ -d .git ] || soft "⚠️ Không phải git checkout (ZIP/pip) — tải lại từ GitHub để cập nhật."
-[ -z "$(git status --porcelain)" ] || soft "⚠️ Có thay đổi cục bộ chưa commit — git stash/checkout trước rồi chạy lại."
+# Chỉ chặn khi có thay đổi file ĐÃ THEO DÕI (-uno bỏ qua untracked như .venv/output/logs — không cản pull).
+[ -z "$(git status --porcelain --untracked-files=no)" ] || soft "⚠️ Có thay đổi file đã-theo-dõi chưa commit — git stash/checkout trước rồi chạy lại."
 
 before="$(git rev-parse HEAD 2>/dev/null || echo none)"
 pyb="$(git rev-parse HEAD:pyproject.toml 2>/dev/null || echo x)"

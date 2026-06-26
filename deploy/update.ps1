@@ -22,7 +22,8 @@ if ($Schedule) {
 }
 
 if (-not (Test-Path "$repo\.git")) { Write-Host "⚠️ Không phải git checkout (ZIP/pip) — tải lại ZIP từ GitHub."; exit 1 }
-if (git status --porcelain) { Write-Host "⚠️ Có thay đổi cục bộ chưa commit — `git stash` hoặc `git checkout -- .` trước."; exit 1 }
+# -uno: bỏ qua untracked (.venv/output/logs) vì không cản pull; chỉ chặn file đã-theo-dõi bị sửa.
+if (git status --porcelain --untracked-files=no) { Write-Host "⚠️ Có thay đổi file đã-theo-dõi chưa commit — git stash hoặc git checkout -- . trước."; exit 1 }
 
 $before = (git rev-parse HEAD)
 $pyb    = (git rev-parse HEAD:pyproject.toml)

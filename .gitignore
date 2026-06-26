@@ -16,6 +16,11 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+# Virtualenv + log runtime (tự sinh — KHÔNG commit, và để `fap update` không coi là "thay đổi cục bộ")
+.venv/
+venv/
+logs/
+*.log
 
 # Tư liệu reverse-engineering NẶNG (~156MB) — giữ trên máy, KHÔNG commit.
 # APK là tài sản của FPT; bundle/disasm/strings giải lại được từ APK khi cần.

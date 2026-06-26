@@ -95,10 +95,11 @@ def update():
               "   Cập nhật: tải lại ZIP mới ở https://github.com/wdchocopie/fap-cli (Code → Download ZIP),\n"
               "   hoặc cài lại bằng git:  git clone https://github.com/wdchocopie/fap-cli")
         return 1
-    # (2) Có thay đổi CỤC BỘ chưa commit → pull --ff-only sẽ fail; hướng dẫn rõ thay vì để git nuốt
-    dirty = git("status", "--porcelain").stdout.strip()
+    # (2) Có thay đổi file ĐÃ THEO DÕI chưa commit → pull --ff-only sẽ fail; hướng dẫn rõ.
+    #     -uno bỏ qua untracked (.venv/output/logs…) vì chúng KHÔNG cản fast-forward.
+    dirty = git("status", "--porcelain", "--untracked-files=no").stdout.strip()
     if dirty:
-        print("⚠️ Có thay đổi cục bộ chưa commit — xử lý trước khi update:")
+        print("⚠️ Có thay đổi file đã-theo-dõi chưa commit — xử lý trước khi update:")
         print("   • Giữ tạm:  git stash   →  fap update   →  git stash pop")
         print("   • Bỏ hẳn :  git checkout -- .   (MẤT chỉnh sửa cục bộ)")
         for ln in dirty.splitlines()[:8]:
