@@ -11,6 +11,7 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=%h/fap-cli
 Environment=PYTHONUTF8=1
+Environment=PYTHONUNBUFFERED=1
 ExecStart=%h/.venv/bin/fap telegram-bot
 Restart=always
 RestartSec=10

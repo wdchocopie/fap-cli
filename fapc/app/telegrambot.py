@@ -50,6 +50,7 @@ def run():
     print(f"⏰ Nhắc trước mỗi tiết {reminder.lead}' (vào chat {allow})." if reminder.enabled()
           else "⏰ Nhắc lịch: TẮT (đặt FAP_REMIND_MINUTES>0 trong .env để bật).")
     offset = None
+    last_tick = 0.0
     # Bỏ qua tồn đọng cũ lúc khởi động · skip backlog on startup
     try:
         r = requests.get(_api("getUpdates"), params={"timeout": 0}, timeout=15).json()
@@ -59,6 +60,16 @@ def run():
         pass
 
     while True:
+        # NHẮC TIẾT chạy ĐỘC LẬP với getUpdates: đặt ở ĐẦU vòng → không bị bỏ lượt khi Telegram lỗi
+        # mạng / trả not-ok (những nhánh `continue` bên dưới). Throttle ~20s cho nhẹ.
+        if reminder.enabled() and time.time() - last_tick >= 20:
+            last_tick = time.time()
+            try:
+                for txt in reminder.tick():
+                    print(f"  ⏰ nhắc tiết  ->  {len(txt)} ký tự")
+                    _send(allow, txt)
+            except Exception as e:                       # noqa: BLE001 — nhắc lỗi không được làm chết bot
+                print("  nhắc lỗi · reminder error:", e)
         try:
             r = requests.get(_api("getUpdates"), params={"timeout": _TIMEOUT, "offset": offset},
                              timeout=_TIMEOUT + 10).json()
@@ -87,14 +98,6 @@ def run():
                 reply = f"Lỗi · error: {e}"
             print(f"  > {text[:40]}  ->  {len(reply)} ký tự")
             _send(chat_id, reply)
-        # Sau mỗi vòng long-poll (~≤30s): kiểm có tiết nào sắp tới cần nhắc không.
-        if reminder.enabled():
-            try:
-                for txt in reminder.tick():
-                    print(f"  ⏰ nhắc tiết  ->  {len(txt)} ký tự")
-                    _send(allow, txt)
-            except Exception as e:                       # noqa: BLE001 — nhắc lỗi không được làm chết bot
-                print("  nhắc lỗi · reminder error:", e)
 
 def main():
     try:
