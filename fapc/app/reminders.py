@@ -100,7 +100,9 @@ class ClassReminder:
         """1 nhịp: refresh token (định kỳ) + nạp TKB (cache) + trả list lời nhắc CẦN GỬI ngay."""
         if not self.enabled():
             return []
-        now = now or _vn_now()
+        # _vn_now() là offset-AWARE; giờ bắt đầu tiết (sessions_on_day) là NAIVE → phải strip tz,
+        # nếu không `start - now` ném "can't subtract offset-naive and offset-aware datetimes".
+        now = (now or _vn_now()).replace(tzinfo=None)
         self._maybe_refresh(time.time())
         self._maybe_reload(now)
         texts = []

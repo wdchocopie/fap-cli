@@ -659,6 +659,20 @@ def test_reminders_lead_config():
     finally:
         C.REMIND_MINUTES = orig
 
+def test_reminder_tick_strips_tz():
+    """Regression: _vn_now() AWARE vs start tiết NAIVE → tick() phải strip tz, KHÔNG raise + vẫn nhắc.
+    (Trước fix: 'can't subtract offset-naive and offset-aware datetimes' → nhắc KHÔNG BAO GIỜ chạy.)"""
+    import fapc.app.reminders as R, datetime
+    sess = _sess("06/27/2026", "(10:00 - 12:15)", "IAP301", room="BE-302", slot="2")
+    R.creds = lambda: ("t", "c", "r")
+    R.current_semester = lambda *a, **k: "Summer2026"
+    R.fetch_sessions = lambda *a, **k: [sess]
+    R._vn_now = lambda: datetime.datetime(2026, 6, 27, 9, 40, tzinfo=datetime.timezone.utc)  # AWARE, 20' trước 10:00
+    rem = R.ClassReminder(lead=30)
+    rem._last_refresh = 9e18                          # bỏ qua _refresh_token (khỏi đụng mạng)
+    texts = rem.tick()                                # KHÔNG được raise vì lệch tz
+    assert texts and "IAP301" in texts[0]
+
 def test_subjects_resolver():
     """Port #1: danh mục môn -> tên + tín chỉ; thiếu danh mục -> degrade về mã trơ."""
     import fapc.core.subjects as S
