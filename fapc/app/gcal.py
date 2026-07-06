@@ -93,11 +93,59 @@ def _events(sessions):
             "extendedProperties": {"private": {"fapc": "1"}},
         }
 
+# ---------- DỌN event MỒ CÔI (prune) — CHỈ event fap-cli tạo, KHÔNG đụng lịch cá nhân ----------
+def _current_uids(sessions):
+    """THUẦN: tập iCalUID của lịch HIỆN TẠI (buổi còn hợp lệ)."""
+    return {ev["iCalUID"] for ev in _events(sessions)}
+
+def _list_fapc_events(svc, cal_id):
+    """MỌI event do fap-cli tạo (lọc theo nhãn private fapc=1 → KHÔNG đụng event cá nhân), có phân trang."""
+    out, page = [], None
+    while True:
+        resp = svc.events().list(calendarId=cal_id, privateExtendedProperty="fapc=1",
+                                 singleEvents=True, showDeleted=False, maxResults=2500, pageToken=page).execute()
+        out += resp.get("items", [])
+        page = resp.get("nextPageToken")
+        if not page:
+            break
+    return out
+
+def _prune_plan(fapc_events, current_uids):
+    """THUẦN: event fapc KHÔNG còn trong lịch hiện tại → [(id, iCalUID, summary)] cần XÓA (buổi hủy/dời)."""
+    return [(ev.get("id"), ev.get("iCalUID", ""), ev.get("summary", ""))
+            for ev in fapc_events if ev.get("iCalUID") and ev.get("iCalUID") not in current_uids]
+
+def _prune(svc, sessions, yes=False, force=False):
+    """Xóa event fap-cli MỒ CÔI. Dry-run mặc định (chỉ in); >30% thì TỪ CHỐI (phòng lấy lịch lỗi) trừ --force."""
+    fapc = _list_fapc_events(svc, config.GCAL_CALENDAR_ID)
+    plan = _prune_plan(fapc, _current_uids(sessions))
+    if not plan:
+        print(t("✓ Không có sự kiện mồ côi để dọn.", "✓ No orphan events to prune.")); return
+    if fapc and len(plan) / len(fapc) > 0.30 and not force:
+        print(t(f"⚠️ {len(plan)}/{len(fapc)} sự kiện (>30%) sẽ bị xóa — TỪ CHỐI (lấy lịch có thể lỗi). Ép: thêm --force.",
+                f"⚠️ {len(plan)}/{len(fapc)} events (>30%) would be deleted — REFUSED (bad fetch?). Override: --force."))
+        return
+    print(t(f"{'Đang xóa' if yes else '[DRY-RUN] sẽ xóa'} {len(plan)} sự kiện mồ côi (chỉ event fap-cli):",
+            f"{'Deleting' if yes else '[DRY-RUN] would delete'} {len(plan)} orphan events (fap-cli only):"))
+    for _id, _uid, summ in plan[:20]:
+        print(f"   - {summ}")
+    if len(plan) > 20:
+        print(f"   … +{len(plan) - 20}")
+    if not yes:
+        print(t("→ Thêm --yes để xóa thật.", "→ Add --yes to actually delete.")); return
+    deleted = 0
+    for _id, _uid, summ in plan:
+        try:
+            svc.events().delete(calendarId=config.GCAL_CALENDAR_ID, eventId=_id).execute(); deleted += 1
+        except Exception as e:                       # noqa: BLE001 — 1 event lỗi không dừng cả mẻ
+            print("  lỗi xóa · delete error:", str(e)[:100])
+    print(t(f"✓ Đã xóa {deleted} sự kiện mồ côi.", f"✓ Deleted {deleted} orphan events."))
+
 def cmd_auth():
     _load_creds(interactive=True)
     print(t("✓ Đã xác thực Google -> output/gcal_token.json", "✓ Google authorized -> output/gcal_token.json"))
 
-def cmd_sync():
+def cmd_sync(prune=False, yes=False, force=False):
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
     sessions = fetch_sessions(token, campus, roll, sem)
@@ -114,10 +162,22 @@ def cmd_sync():
             if fail <= 3: print("  lỗi 1 sự kiện:", str(e)[:120])
     print(t(f"✓ Đồng bộ {ok} sự kiện (lỗi {fail}). Chạy lại = cập nhật, không trùng.",
             f"✓ Synced {ok} events (failed {fail}). Re-run = update, no duplicates."))
+    if prune:                                        # dọn event buổi-đã-hủy/dời (chỉ event fap-cli)
+        _prune(svc, sessions, yes=yes, force=force)
+
+def cmd_prune(yes=False, force=False):
+    """Dọn RIÊNG (không đẩy lại): xóa event fap-cli không còn trong lịch FAP hiện tại."""
+    token, campus, roll = creds()
+    sem = current_semester(token, campus, roll)
+    _prune(_service(), fetch_sessions(token, campus, roll, sem), yes=yes, force=force)
 
 def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "sync"
-    {"auth": cmd_auth, "sync": cmd_sync}.get(cmd, cmd_sync)()
+    args = sys.argv[1:]
+    cmd = args[0] if args else "sync"
+    flags = {"yes": "--yes" in args, "force": "--force" in args}
+    if cmd == "auth":    cmd_auth()
+    elif cmd == "prune": cmd_prune(**flags)
+    else:                cmd_sync(prune="--prune" in args, **flags)
 
 if __name__ == "__main__":
     main()

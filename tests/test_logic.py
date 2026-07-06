@@ -840,6 +840,17 @@ def test_news_search():
     E.fetch_news("t", "c", "r")                              # không keyword → top-10
     assert seen["ep"] == "GetTop10News"
 
+def test_calendar_prune_plan():
+    """calendar-prune: CHỈ đánh dấu xóa event fapc KHÔNG còn trong lịch hiện tại (giữ event còn, bỏ event thiếu uid)."""
+    import fapc.app.gcal as G
+    fapc_events = [
+        {"id": "e1", "iCalUID": "fapc-20260627-IAP301-2@fap.fpt.edu.vn", "summary": "IAP301"},   # còn → giữ
+        {"id": "e2", "iCalUID": "fapc-20260601-OLD101-1@fap.fpt.edu.vn", "summary": "OLD101"},    # mồ côi → xóa
+        {"id": "e3", "iCalUID": "", "summary": "no-uid"},                                          # thiếu uid → bỏ qua
+    ]
+    plan = G._prune_plan(fapc_events, {"fapc-20260627-IAP301-2@fap.fpt.edu.vn"})
+    assert [p[2] for p in plan] == ["OLD101"] and [p[0] for p in plan] == ["e2"]
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

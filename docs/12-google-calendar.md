@@ -19,6 +19,25 @@
 
 ---
 
+## 0b. Giữ lịch KHỚP với FAP · Keep it matched
+
+**VI —** `calendar-sync` **upsert** theo `iCalUID`: đổi **phòng/giờ** trên FAP → chạy lại là event **tự sửa** (không trùng). Nhưng buổi **bị hủy/dời** thì event cũ thành "mồ côi" → thêm `--prune` để dọn:
+```bash
+fap calendar-sync --prune          # đồng bộ + LIỆT KÊ event mồ côi (dry-run, CHƯA xóa)
+fap calendar-sync --prune --yes    # + XÓA thật event mồ côi
+fap calendar-prune                 # chỉ dọn (không đẩy lại); --yes để xóa; --force nếu >30%
+```
+> **An toàn:** prune **CHỈ xóa event do fap-cli tạo** (lọc theo nhãn riêng `extendedProperties.private.fapc=1`) — **không bao giờ đụng event cá nhân**. Dry-run mặc định; **từ chối nếu >30%** bị xóa (phòng lấy lịch lỗi), ép bằng `--force`.
+**EN —** `calendar-sync` upserts by `iCalUID` (room/time edits auto-fix on re-run); add `--prune` to delete class events for sessions no longer on FAP. Prune only ever touches fap-cli's own events (tagged `fapc=1`) — never your personal events. Dry-run by default; refuses if >30% would be deleted.
+
+**VI — Tách hẳn khỏi lịch cá nhân (KHUYÊN):** tạo một Google Calendar riêng (vd "Lịch học FAP"), lấy **Calendar ID** của nó (Settings của calendar đó → *Integrate calendar* → *Calendar ID*) rồi đặt trong `.env`:
+```dotenv
+GCAL_CALENDAR_ID=abcdef...@group.calendar.google.com
+```
+→ Lịch học vào calendar riêng, muốn ẩn/tắt cả cụm rất dễ, và prune chỉ quét trong đó. Mặc định `GCAL_CALENDAR_ID=primary` (lịch chính).
+
+---
+
 ## 1. Lấy `credentials.json` từ Google Cloud Console · Get `credentials.json`
 
 **VI —** Đây là phần dài nhất, nhưng chỉ làm **một lần**. Mỗi bước mô tả chính xác chỗ bấm. Console của Google đôi khi đổi giao diện nhẹ — nếu chữ hơi khác, tìm nút có nghĩa tương đương.

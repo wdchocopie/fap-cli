@@ -49,7 +49,8 @@ HELP = """fap <command>   ·   fap-cli
 
   Đẩy / Push:
     calendar-auth          xác thực Google Calendar 1 lần · authorize Google Calendar
-    calendar-sync          đồng bộ lịch lên Google Calendar · sync to Google Calendar
+    calendar-sync [--prune [--yes]]   đồng bộ (upsert: đổi phòng/giờ tự sửa) + tùy chọn dọn buổi đã hủy · sync (+optional prune)
+    calendar-prune [--yes] [--force]  xóa event lịch-học MỒ CÔI (chỉ event fap-cli tạo; dry-run mặc định) · prune orphan class events
     notify [test|today|tomorrow|weekly|attendance|banrisk|grades|grades-detail|status|whatif|exams|gpa|notifications|all]   gửi lên kênh · push
     watch-attendance [loop [phút]] [--absent-only]   báo khi VỪA điểm danh; --absent-only = chỉ báo vắng/muộn
     watch-grades [loop [phút]]   báo khi có ĐIỂM MỚI (thành phần/tổng kết) · ping on new marks
@@ -162,7 +163,8 @@ def main():
     elif cmd == "extract":        from ..core.extract import main as m; m()
     elif cmd in ("ics", "run"):   from ..core.schedule import main as m; m()
     elif cmd == "calendar-auth":  from .gcal import cmd_auth; cmd_auth()
-    elif cmd == "calendar-sync":  from .gcal import cmd_sync; cmd_sync()
+    elif cmd == "calendar-sync":  from .gcal import cmd_sync; cmd_sync(prune="--prune" in rest, yes="--yes" in rest, force="--force" in rest)
+    elif cmd == "calendar-prune": from .gcal import cmd_prune; cmd_prune(yes="--yes" in rest, force="--force" in rest)
     elif cmd == "notify":         from .notify import run; run(" ".join(rest) if rest else "test")
     elif cmd == "watch-attendance": from .attendwatch import run; run(rest)
     elif cmd == "grades":         from ..core.grades import report; report()
