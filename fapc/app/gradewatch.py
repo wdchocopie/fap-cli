@@ -14,6 +14,7 @@ from ..core.api import creds, current_semester, _vn_now
 from ..core.grades import fetch_marks, fetch_components
 from .notify import push
 from .attendwatch import _refresh_token          # dùng chung: tự làm mới token cho service chạy nền
+from .selfupdate import maybe_autoupdate, autoupdate_min
 from ..i18n import t
 from .. import fmt
 
@@ -125,8 +126,12 @@ def loop(interval_min=30, refresh_min=50):
     interval_min = max(interval_min, 10)                 # điểm đổi chậm -> tối thiểu 10' (nhẹ server)
     print(t(f"👀 Theo dõi điểm mỗi {interval_min}' (06:00–22:00 giờ VN); tự refresh token ~{refresh_min}'. Ctrl+C để dừng.",
             f"👀 Watching grades every {interval_min}m (06:00–22:00 VN); auto token-refresh ~{refresh_min}m. Ctrl+C to stop."))
-    last_refresh = 0.0
+    if autoupdate_min():
+        print(t(f"🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).",
+                f"🔄 Update-while-running: ON every {autoupdate_min()}m (FAP_AUTOUPDATE_MIN)."))
+    last_refresh = last_update = 0.0
     while True:
+        last_update = maybe_autoupdate(last_update, time.time())   # opt-in: pull+selftest → tự restart
         if 6 <= _vn_now().hour <= 22:
             if time.time() - last_refresh > refresh_min * 60:   # giữ token sống cho service chạy nền
                 _refresh_token()

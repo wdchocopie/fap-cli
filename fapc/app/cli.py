@@ -85,46 +85,38 @@ def selftest():
 
 def update():
     """Cập nhật fap-cli: `git pull` từ gốc repo, xử lý MỌI trường hợp (ZIP/không-git, có thay đổi cục bộ,
-    diverged, mất mạng, deps đổi, đã mới nhất). Bản cài '-e' nên mã mới có hiệu lực NGAY (trừ khi đổi deps)."""
-    import subprocess
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    def git(*a):
-        return subprocess.run(["git", "-C", root, *a], capture_output=True, text=True)
+    diverged, mất mạng, deps đổi, đã mới nhất). Bản cài '-e' nên mã mới có hiệu lực NGAY (trừ khi đổi deps).
+    Logic `git pull` dùng CHUNG với bot/watcher qua selfupdate.pull() (nguồn duy nhất)."""
+    from .selfupdate import pull
+    res = pull()
+    st = res["status"]
     # (1) Cài qua ZIP/pip (không có .git) → không pull được
-    if not os.path.isdir(os.path.join(root, ".git")) or git("rev-parse", "--is-inside-work-tree").returncode != 0:
+    if st == "notgit":
         print("⚠️ Bản này KHÔNG phải git checkout (cài qua ZIP/pip) → không tự `git pull` được.\n"
               "   Cập nhật: tải lại ZIP mới ở https://github.com/wdchocopie/fap-cli (Code → Download ZIP),\n"
               "   hoặc cài lại bằng git:  git clone https://github.com/wdchocopie/fap-cli")
         return 1
     # (2) Có thay đổi file ĐÃ THEO DÕI chưa commit → pull --ff-only sẽ fail; hướng dẫn rõ.
-    #     -uno bỏ qua untracked (.venv/output/logs…) vì chúng KHÔNG cản fast-forward.
-    dirty = git("status", "--porcelain", "--untracked-files=no").stdout.strip()
-    if dirty:
+    if st == "dirty":
         print("⚠️ Có thay đổi file đã-theo-dõi chưa commit — xử lý trước khi update:")
         print("   • Giữ tạm:  git stash   →  fap update   →  git stash pop")
         print("   • Bỏ hẳn :  git checkout -- .   (MẤT chỉnh sửa cục bộ)")
-        for ln in dirty.splitlines()[:8]:
+        for ln in (res.get("detail", "") or "").splitlines()[:8]:
             print("     " + ln)
         return 1
-    branch = (git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "?")
-    before = git("rev-parse", "HEAD").stdout.strip()
-    pyproj_before = git("rev-parse", "HEAD:pyproject.toml").stdout.strip()
-    # (3) Pull
-    print(f"⏳ git pull --ff-only  (nhánh {branch}) …")
-    pull = subprocess.run(["git", "-C", root, "pull", "--ff-only"])
-    if pull.returncode != 0:
+    # (3) Pull lỗi (mạng / diverged / nhánh khác)
+    if st == "pullerror":
         print("❌ git pull lỗi. Nguyên nhân thường gặp:")
         print("   • Mất mạng → kiểm internet rồi thử lại.")
         print("   • Có commit cục bộ (diverged):  git pull --rebase   rồi `fap update` lại.")
-        print(f"   • Đang ở nhánh khác:  git checkout main   (hiện ở '{branch}').")
+        print("   • Đang ở nhánh khác:  git checkout main")
+        print("   ↳ " + res["message"])
         return 1
-    after = git("rev-parse", "HEAD").stdout.strip()
-    if before == after:
+    if st == "uptodate":
         print("✅ Đã ở bản mới nhất — không có gì để cập nhật."); return 0
-    n = git("rev-list", "--count", f"{before}..{after}").stdout.strip() or "?"
-    print(f"✅ Cập nhật {before[:7]} → {after[:7]}  ({n} commit mới).")
-    # (4) Deps đổi? (pyproject thay đổi) → cần cài lại; không thì '-e' đã có hiệu lực
-    if git("rev-parse", "HEAD:pyproject.toml").stdout.strip() != pyproj_before:
+    # (4) Đã cập nhật
+    print(f"✅ Cập nhật {res['message']}")
+    if res.get("deps_changed"):        # deps đổi → cần cài lại; không thì '-e' đã có hiệu lực
         print("📦 pyproject.toml ĐỔI (deps có thể thay đổi) → cài lại:  pip install -e \".[gcal,bot]\"")
     else:
         print("   (deps không đổi — mã mới có hiệu lực ngay nhờ bản cài '-e')")
@@ -133,6 +125,7 @@ def update():
     print("     • VPS systemd :  bash deploy/update.sh   (tự pull+cài+selftest+restart)")
     print("     • Windows task:  .\\deploy\\update.ps1     (tự pull+cài+restart task)")
     print("     • Thủ công    :  systemctl --user restart fap-bot fap-watch fap-gradewatch")
+    print("     • Bot đang chạy: gõ /update trong chat → tự pull + selftest + khởi động lại")
     print("   Kiểm tra:  fap selftest   ·   Token hết hạn thì:  fap refresh")
     return 0
 

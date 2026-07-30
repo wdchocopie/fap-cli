@@ -30,3 +30,8 @@ analysis/disasm.hasm
 analysis/index.android.bundle
 analysis/strings_clean.txt
 .apk_tmp/
+
+# ===== Cấu hình trợ lý AI / Claude Code (cá nhân — KHÔNG commit) =====
+# Skill + hướng dẫn agent: công cụ dev riêng, không phải sản phẩm của repo.
+.claude/skills/
+AGENTS.md

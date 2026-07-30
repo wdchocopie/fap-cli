@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""grades.py — điểm tổng kết môn (GetStudentMark) + chi tiết thành phần (GetMarkByCourse)."""
+"""grades.py — điểm tổng kết môn (GetStudentMark) + chi tiết thành phần (GetMarkByCourse).
+
+⚠️ GetMarkByCourse trả về BẢNG HTML (chuỗi), KHÔNG phải JSON — xác minh live:
+   data = "<table ...><tr><th>Grade category</th>...<td>Progress test 1</td><td>10.0 %</td><td>9.7</td>..."
+Vì thế điểm thành phần lấy được HEADLESS qua mobile API (không cần browser/Cloudflare) — chỉ cần PARSE HTML.
+"""
+from html.parser import HTMLParser
 from .api import creds, call, as_list, unwrap, current_semester, check_auth, _err_code
 from . import subjects
 from ..i18n import t
@@ -50,10 +56,53 @@ def _mark_params(campus, token, cid, roll, subj=None):
         p.append(("SubjectCode", subj))
     return p
 
+class _MarkTable(HTMLParser):
+    """Bóc bảng HTML GetMarkByCourse -> rows [(kind, [ô]) ] (kind='foot' cho <tfoot>)."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows, self._cur, self._cell, self._foot = [], None, None, False
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr": self._cur = []
+        elif tag in ("td", "th") and self._cur is not None: self._cell = []
+        elif tag == "tfoot": self._foot = True
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._cell is not None:
+            self._cur.append("".join(self._cell).strip()); self._cell = None
+        elif tag == "tr" and self._cur is not None:
+            self.rows.append(("foot" if self._foot else "body", self._cur)); self._cur = None
+        elif tag == "tfoot": self._foot = False
+    def handle_data(self, data):
+        if self._cell is not None: self._cell.append(data)
+
+def _marks_from_html(html):
+    """THUẦN: bảng HTML GetMarkByCourse -> list {category, item, weight, value}. Xử lý rowspan (ô category
+    chỉ xuất hiện dòng đầu mỗi nhóm); BỎ dòng 'Total' (subtotal) + header. HTML méo -> [] (không raise)."""
+    p = _MarkTable()
+    try:
+        p.feed(str(html))
+    except Exception:                             # noqa: BLE001 — HTML lạ/méo -> rỗng, đừng làm chết lệnh
+        return []
+    items, category = [], ""
+    for kind, cells in p.rows:
+        if kind == "foot" or not cells or cells[0] in ("Grade category", "Grade item"):
+            continue                              # bỏ tfoot (Average/Status) + header
+        if len(cells) >= 5:                       # có ô 'category' (rowspan mở): category|item|weight|value|comment
+            category, item, weight, value = cells[0], cells[1], cells[2], cells[3]
+        elif len(cells) == 4:                     # nối tiếp category trước: item|weight|value|comment
+            item, weight, value = cells[0], cells[1], cells[2]
+        else:
+            continue
+        if str(item).strip() == "Total":          # bỏ dòng subtotal mỗi nhóm
+            continue
+        items.append({"category": category, "item": item, "weight": weight, "value": value})
+    return items
+
 def _normalize_components(data):
-    """Chuẩn hoá data GetMarkByCourse -> list dict (bỏ field 'course*'). Nhận list HOẶC dict (lấy
-    mảng con nếu có, không thì coi cả dict là 1 dòng) -> không bỏ sót dữ liệu."""
+    """Chuẩn hoá data GetMarkByCourse -> list dict. GetMarkByCourse trả BẢNG HTML (chuỗi) -> parse HTML.
+    Cũng chấp nhận list/dict (phòng khi campus/endpoint khác trả JSON) -> không bỏ sót dữ liệu."""
     d = unwrap(data)
+    if isinstance(d, str):                        # GetMarkByCourse: chuỗi HTML (không phải JSON)
+        return _marks_from_html(d) if "<t" in d.lower() else []
     if isinstance(d, dict):                       # ưu tiên list-of-dict KHÔNG rỗng (tránh lấy nhầm list 'errors' rỗng)
         _lists = [v for v in d.values() if isinstance(v, list)]
         d = next((v for v in _lists if v and isinstance(v[0], dict)), _lists[0] if _lists else [d])

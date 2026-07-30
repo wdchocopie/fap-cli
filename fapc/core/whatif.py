@@ -33,15 +33,20 @@ def _field(c, keys):
             return c[k]
     return None
 
+_NAME_KEYS = {"item", "component", "name", "gradeitem", "title", "categoryname", "type"}
+def _skip(c):
+    """Bỏ dòng subtotal 'Total' + đầu điểm THI LẠI 'Resit'/'Retake' (thay thế Final, không cộng dồn)."""
+    nm = str(_field(c, _NAME_KEYS) or "").strip().lower()
+    return nm == "total" or "resit" in nm or "retake" in nm or "thi lại" in nm
+
 def predict_course(components, target=PASS_MARK, max_mark=MARK_MAX):
     """THUẦN — cho điểm thành phần 1 MÔN: cần TB bao nhiêu ở các đầu điểm CHƯA có để môn đạt `target`.
     Trọng số tự triệt tiêu nên không cần biết % hay phân số. Trả dict hoặc None nếu không đọc được trọng số.
       {locked, total_w, remaining_w, remaining_pct, needed, guaranteed, impossible, current}"""
-    total_w = locked = 0.0
+    comps = [c for c in components if isinstance(c, dict) and not _skip(c)]   # bỏ 'Total'/'Resit'
+    total_w = locked = graded_w = 0.0
     any_w = False
-    for c in components:
-        if not isinstance(c, dict):
-            continue
+    for c in comps:
         w = _num(_field(c, _WEIGHT_KEYS))
         if w is None or w <= 0:
             continue
@@ -49,17 +54,15 @@ def predict_course(components, target=PASS_MARK, max_mark=MARK_MAX):
         total_w += w
         v = _num(_field(c, _VALUE_KEYS))      # None = đầu điểm chưa có giá trị
         if v is not None:
-            locked += v * w
+            locked += v * w; graded_w += w
     if not any_w or total_w <= 0:
         return None
-    graded_w = sum(_num(_field(c, _WEIGHT_KEYS)) or 0 for c in components
-                   if isinstance(c, dict) and _num(_field(c, _VALUE_KEYS)) is not None
-                   and (_num(_field(c, _WEIGHT_KEYS)) or 0) > 0)
     remaining_w = total_w - graded_w
-    current = round(locked / total_w, 2)              # điểm môn nếu phần còn lại = 0
+    raw = locked / total_w                            # điểm môn nếu phần còn lại = 0 (KHÔNG làm tròn để quyết định)
+    current = round(raw, 2)
     if remaining_w <= 0:
-        return {"locked": locked, "total_w": total_w, "remaining_w": 0.0, "remaining_pct": 0.0,
-                "needed": 0.0, "guaranteed": current >= target, "impossible": current < target, "current": current}
+        return {"locked": locked, "total_w": total_w, "remaining_w": 0.0, "remaining_pct": 0.0, "needed": 0.0,
+                "guaranteed": raw >= target - 1e-9, "impossible": raw < target - 1e-9, "current": current}
     needed = (target * total_w - locked) / remaining_w
     return {"locked": locked, "total_w": total_w, "remaining_w": remaining_w,
             "remaining_pct": round(100 * remaining_w / total_w, 1), "needed": round(needed, 2),

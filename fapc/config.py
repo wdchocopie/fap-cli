@@ -42,3 +42,8 @@ WATCH_ABSENT_ONLY = os.environ.get("FAP_WATCH_ABSENT_ONLY")
 
 # Nhắc trước mỗi tiết học (bot tương tác tự đẩy): số PHÚT trước giờ vào lớp. 0/“off” = tắt. Mặc định 30.
 REMIND_MINUTES = os.environ.get("FAP_REMIND_MINUTES", "30")
+
+# Tự cập nhật KHI ĐANG CHẠY (bot/watcher thường trú): số PHÚT giữa mỗi lần dò `git pull`.
+# 0 = TẮT (mặc định). Khi >0: tiến trình nền tự pull → chạy selftest → nếu PASS thì tự khởi động lại
+# để nạp mã mới (bot vẫn có lệnh /update thủ công dù bật hay tắt). Xem fapc/app/selfupdate.py.
+AUTOUPDATE_MIN = os.environ.get("FAP_AUTOUPDATE_MIN", "0")

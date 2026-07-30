@@ -97,20 +97,60 @@ def campuses():
     print(campuses_text())
 
 # ---------- LỊCH THI (có bản trả-text cho bot/notify) ----------
+# GetScheduleExam trả mỗi môn 1 dict. Dữ liệu THẬT (đã xác nhận): subjectCode + examDate ('m/d/Y') +
+# examTime ('HH:MM') + examRoom; có thể kèm examType (PE/FE/2ndFE…) / examForm / groupName. Tên field
+# đổi theo campus/kỳ -> DÒ ĐA BIẾN-THỂ (không phân biệt hoa/thường) như courses.py, đừng cứng 1 tên.
+_EX_SUBJ  = ("subjectcode", "subject", "examsubject")
+_EX_ROOM  = ("examroom", "room", "roomno", "phongthi", "examroomname")
+_EX_TYPE  = ("examtype", "type", "publicexamtype")
+_EX_FORM  = ("examform", "form", "method", "examformat")
+
+def _exam_get(r, keys):
+    """Giá trị đầu tiên KHÁC RỖNG trong các key ứng viên (không phân biệt hoa/thường). '' nếu không có."""
+    if not isinstance(r, dict):
+        return ""
+    low = {str(k).lower(): v for k, v in r.items()}
+    for k in keys:
+        v = low.get(k)
+        if v not in (None, ""):
+            return str(v).strip()
+    return ""
+
+def _exam_line(r):
+    """1 dòng lịch thi ĐÃ ĐỊNH DẠNG (thay cho việc đổ thô mọi value):
+    '• MÃ — Tên môn — DD/MM/YYYY HH:MM  📍 phòng  · type · form'. Trả (dòng, start_dt|None) để sort."""
+    subj = _exam_get(r, _EX_SUBJ) or "?"
+    dt = _exam_dt(r) if isinstance(r, dict) else None       # parse ngày/giờ generic (m/d/Y ưu tiên)
+    if dt:
+        when = dt[0].strftime("%d/%m/%Y %H:%M")
+    else:                                                    # không parse được -> hiện thô cái đang có
+        when = " ".join(x for x in (_exam_get(r, ("examdate", "date")),
+                                    _exam_get(r, ("examtime", "time"))) if x)
+    room = _exam_get(r, _EX_ROOM)
+    tags = [b for b in (_exam_get(r, _EX_TYPE), _exam_get(r, _EX_FORM)) if b]
+    line = f"• {subjects.label(subj)}"
+    if when:
+        line += f" — {when}"
+    if room:
+        line += f"  📍 {room}"
+    if tags:
+        line += "  · " + " · ".join(tags)
+    return line, (dt[0] if dt else None)
+
 def exams_text(token, campus, roll, sem):
     http, data = call("GetScheduleExam",
         [("campusCode", campus), ("rollNumber", roll), ("Semester", sem), ("Authen", token)], roll, campus)
     check_auth(http, data)        # token hết hạn -> raise rõ, KHÔNG báo nhầm "chưa có lịch thi"
-    rows = as_list(data)
+    rows = [r for r in as_list(data) if isinstance(r, dict)]
     if not rows:
         return t(f"📝 Chưa có lịch thi kỳ {sem} (sẽ hiện khi trường xếp lịch).",
                  f"📝 No exam schedule for {sem} yet (appears once scheduled).")
-    lines = [fmt.header("📝", t(f"Lịch thi {sem}", f"Exam schedule {sem}"), str(len(rows)))]
-    for r in rows:
-        if isinstance(r, dict):
-            lines.append("• " + " · ".join(str(v) for v in r.values() if v not in (None, "")))
-        else:
-            lines.append(f"• {r}")
+    subjects.load()                                          # tên môn từ cache (nếu đã `fap subjects`)
+    rendered = [_exam_line(r) for r in rows]
+    rendered.sort(key=lambda x: x[1] or datetime.datetime.max)   # sớm nhất trước; không-parse-được xuống cuối
+    lines = [fmt.header("📝", t(f"Lịch thi {sem}", f"Exam schedule {sem}"),
+                        t(f"{len(rows)} môn", f"{len(rows)} exams"))]
+    lines += [ln for ln, _ in rendered]
     return "\n".join(lines)
 
 def exams():
@@ -202,20 +242,18 @@ def _exam_dt(r):
         except ValueError: continue
     if not day:
         return None
-    hh, mm = 7, 0
     def _clock(s):
-        m = re.search(r"(\d{1,2}):(\d{2})", str(s or ""))
+        # chấp nhận '07h30' (FAP dùng 'h') và '07:30'; lấy giờ ĐẦU nếu là khoảng '07h30-08h50'
+        m = re.search(r"(\d{1,2})\s*[h:]\s*(\d{2})", str(s or ""))
         if m and 0 <= int(m.group(1)) <= 23 and 0 <= int(m.group(2)) <= 59:
             return int(m.group(1)), int(m.group(2))
         return None
-    inline = _clock(dv)           # giờ nằm sẵn trong field ngày (vd '2026-06-05T13:30:00')
-    if inline:
-        hh, mm = inline
-    else:
-        for k in r:
-            if str(k).lower() in ("examtime", "time", "giothi", "starttime"):
-                c = _clock(r[k])
-                if c: hh, mm = c; break
+    hh, mm = 7, 0
+    tv = next((r[k] for k in r if str(k).lower() in ("examtime", "time", "giothi", "starttime") and r[k]), None)
+    for src in (tv, dv):                 # ưu tiên field GIỜ riêng (vd '07h30-08h50'), rồi giờ nhúng trong field ngày
+        c = _clock(src)
+        if c and c != (0, 0):            # bỏ '00:00' GIẢ từ field ngày dạng '...T00:00:00'
+            hh, mm = c; break
     s = datetime.datetime(day.year, day.month, day.day, hh, mm)
     return s, s + datetime.timedelta(hours=2)
 
@@ -232,7 +270,7 @@ def exam_countdown(rows, now):
         if days < 0:                                   # đã thi xong → bỏ
             continue
         subj = r.get("subjectCode") or r.get("subjectName") or "?"
-        out.append((days, dt[0], str(subj), str(r.get("examRoom") or r.get("room") or "")))
+        out.append((days, dt[0], str(subj), str(r.get("examRoom") or r.get("roomNo") or r.get("room") or "")))
     out.sort(key=lambda x: x[1])
     return out
 
@@ -269,9 +307,10 @@ def build_exam_ics(rows):
         if not p:
             skipped += 1; continue
         s, e = p
-        subj = r.get("subjectCode") or r.get("examSubject") or r.get("subjectName") or "Thi"
-        room = r.get("examRoom") or r.get("room") or ""
-        desc = " · ".join(str(v) for v in r.values() if v not in (None, ""))
+        subj = _exam_get(r, _EX_SUBJ) or "Thi"
+        room = _exam_get(r, _EX_ROOM)
+        desc = " • ".join(b for b in (f"Môn {subj}", f"Phòng {room}" if room else "",
+                                      _exam_get(r, _EX_TYPE), _exam_get(r, _EX_FORM)) if b)
         lines += ["BEGIN:VEVENT", f"UID:exam-{subj}-{_fmt(s)}-{n}@fap", f"SUMMARY:{_esc('[Thi] ' + str(subj))}",
                   f"DTSTART;TZID={TZID}:{_fmt(s)}", f"DTEND;TZID={TZID}:{_fmt(e)}",
                   f"LOCATION:{_esc(room)}", f"DESCRIPTION:{_esc(desc)}",
@@ -283,7 +322,8 @@ def build_exam_ics(rows):
 
 def exams_ics():
     """output/lichthi.ics — import vào Calendar để được nhắc tự động trước giờ thi.
-    Field ngày/giờ thi của FAP chưa kiểm chứng (tài khoản chưa xếp lịch) -> parse generic, bỏ dòng không đọc được."""
+    Field GetScheduleExam đã xác nhận từ dữ liệu thật (subjectCode/examDate/examTime/examRoom) nhưng parse
+    ngày/giờ vẫn generic (m/d/Y ưu tiên) + dò đa biến-thể -> dòng nào không đọc được ngày thì bỏ qua."""
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
     rows = _exam_rows(token, campus, roll, sem)

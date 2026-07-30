@@ -21,6 +21,7 @@ import os, sys, json, time
 from ..core.api import creds, current_semester, call, as_list, _vn_now, _err_code
 from ..core.attendance import fetch as fetch_agg          # GetStudentAttendances
 from .notify import push
+from .selfupdate import maybe_autoupdate, autoupdate_min
 from ..i18n import t
 from .. import config, fmt
 
@@ -166,8 +167,12 @@ def loop(interval_min=15, absent_only=None, refresh_min=50):
     mode = t(" [chỉ báo vắng]", " [absent-only]") if on else ""
     print(t(f"👀 Theo dõi điểm danh mỗi {interval_min}' (06:00–21:00 giờ VN){mode}; tự refresh token ~{refresh_min}'. Ctrl+C để dừng.",
             f"👀 Watching attendance every {interval_min}m (06:00–21:00 VN){mode}; auto token-refresh ~{refresh_min}m. Ctrl+C to stop."))
-    last_refresh = 0.0
+    if autoupdate_min():
+        print(t(f"🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).",
+                f"🔄 Update-while-running: ON every {autoupdate_min()}m (FAP_AUTOUPDATE_MIN)."))
+    last_refresh = last_update = 0.0
     while True:
+        last_update = maybe_autoupdate(last_update, time.time())   # opt-in: pull+selftest → tự restart
         if 6 <= _vn_now().hour <= 21:
             if time.time() - last_refresh > refresh_min * 60:   # giữ token sống cho service chạy nền
                 _refresh_token()

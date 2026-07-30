@@ -851,6 +851,105 @@ def test_calendar_prune_plan():
     plan = G._prune_plan(fapc_events, {"fapc-20260627-IAP301-2@fap.fpt.edu.vn"})
     assert [p[2] for p in plan] == ["OLD101"] and [p[0] for p in plan] == ["e2"]
 
+def test_exams_text_format_offline():
+    """Feature 2: exams_text định dạng SẠCH (không đổ thô r.values()) — tên môn + DD/MM/YYYY HH:MM +
+    phòng + loại thi, SẮP XẾP sớm nhất trước; ngày US 'm/d/Y' được ĐỔI sang DD/MM/YYYY."""
+    import fapc.core.extras as E, fapc.core.subjects as S
+    S.set_index(S.index_of([{"subjectCode": "IAP301", "subjectName": "Interaction Design",
+                             "subjectV": "", "credits": "3"}]))
+    try:
+        rows = [{"subjectCode": "HOD402", "examDate": "06/26/2026", "examTime": "13:30", "examRoom": "BE-205", "examType": "FE"},
+                {"subjectCode": "IAP301", "examDate": "06/25/2026", "examTime": "07:30", "examRoom": "BE-101", "examType": "PE"}]
+        E.call = lambda *a, **k: (200, {"code": "200", "data": rows})
+        txt = E.exams_text("t", "FPTU", "HE1", "Summer2026")
+        assert "25/06/2026 07:30" in txt and "BE-101" in txt          # ngày ĐÃ đổi định dạng + giờ + phòng
+        assert "Interaction Design" in txt                            # join tên môn từ danh mục
+        assert "FE" in txt and "PE" in txt                            # loại kỳ thi (examType) hiện ra
+        assert txt.index("IAP301") < txt.index("HOD402")             # 25/06 trước 26/06 (sắp thời gian)
+        assert "06/25/2026" not in txt                               # KHÔNG còn ngày US thô -> đã format
+    finally:
+        S.set_index({})
+
+def test_exams_text_multivariant_fields():
+    """Feature 2: nhận tên field KHÁC hoa/thường & biến-thể (SubjectCode/date/time/room) mà vẫn format đúng."""
+    import fapc.core.extras as E, fapc.core.subjects as S
+    S.set_index({})
+    rows = [{"SubjectCode": "CES202", "date": "07/01/2026", "time": "09:15", "room": "AL-R201"}]
+    E.call = lambda *a, **k: (200, {"code": "200", "data": rows})
+    txt = E.exams_text("t", "FPTU", "HE1", "Summer2026")
+    assert "CES202" in txt and "01/07/2026 09:15" in txt and "AL-R201" in txt
+
+def test_selfupdate_perform_update_decisions():
+    """Feature 1: perform_update quyết định restart ĐÚNG theo trạng thái pull + kết quả selftest."""
+    import fapc.app.selfupdate as U
+    orig = (U.pull, U.run_selftest)
+    try:
+        U.run_selftest = lambda: (True, "ok")
+        for st in ("uptodate", "notgit", "dirty", "pullerror"):
+            U.pull = lambda st=st: {"status": st, "message": "x"}
+            assert U.perform_update()[1] is False, st                 # các trạng thái này KHÔNG restart
+        U.pull = lambda: {"status": "updated", "message": "a→b", "deps_changed": False}
+        assert U.perform_update()[1] is True                          # updated + selftest PASS -> restart
+        U.run_selftest = lambda: (False, "boom FAILED")
+        s, r = U.perform_update(); assert r is False and "FAIL" in s   # selftest FAIL -> KHÔNG restart
+        U.run_selftest = lambda: (True, "ok")
+        U.pull = lambda: {"status": "updated", "message": "a→b", "deps_changed": True}
+        assert U.perform_update()[1] is False                         # deps đổi -> KHÔNG tự restart
+    finally:
+        U.pull, U.run_selftest = orig
+
+def test_selfupdate_autoupdate_min_and_noop():
+    """Feature 1: autoupdate_min đọc FAP_AUTOUPDATE_MIN; maybe_autoupdate khi TẮT (0) là no-op (không pull)."""
+    import fapc.app.selfupdate as U, fapc.config as C
+    orig_cfg, orig_pull = C.AUTOUPDATE_MIN, U.pull
+    called = {"pull": False}
+    try:
+        U.pull = lambda: (called.__setitem__("pull", True), {"status": "uptodate", "message": ""})[1]
+        C.AUTOUPDATE_MIN = "0"
+        assert U.autoupdate_min() == 0
+        assert U.maybe_autoupdate(0.0, 10_000.0, log=lambda m: None) == 0.0 and called["pull"] is False
+        C.AUTOUPDATE_MIN = "45";  assert U.autoupdate_min() == 45
+        C.AUTOUPDATE_MIN = "bad"; assert U.autoupdate_min() == 0       # rác -> 0 (tắt)
+    finally:
+        C.AUTOUPDATE_MIN, U.pull = orig_cfg, orig_pull
+
+def test_markbycourse_html_parse():
+    """GetMarkByCourse trả BẢNG HTML → _normalize_components parse ra {category,item,weight,value}, bỏ 'Total'+header."""
+    import fapc.core.grades as G
+    html = ("<table><tr><th>Grade category</th><th>Grade item</th><th>Weight</th><th>Value</th><th>Comment</th></tr>"
+            "<tr><td rowspan='2'>Progress test 1</td><td>Progress test 1</td><td>10.0 %</td><td>9.7</td><td></td></tr>"
+            "<tr><td>Total</td><td>10.0 %</td><td></td><td></td></tr>"
+            "<tr><td rowspan='2'>LAB</td><td>LAB 1</td><td>1.7 %</td><td>9</td><td></td></tr>"
+            "<tr><td>LAB 2</td><td>1.7 %</td><td></td><td></td></tr>"
+            "<tfoot><tr><td rowspan='2'>Course total</td><td>Average</td><td colspan='3'>0.0</td></tr>"
+            "<tr><td>Status</td><td colspan='3'>Not Passed</td></tr></tfoot></table>")
+    comps = G._normalize_components({"data": html})           # như fetch_components (unwrap -> chuỗi HTML)
+    got = {(c["item"], c["value"]) for c in comps}
+    assert ("Progress test 1", "9.7") in got and ("LAB 1", "9") in got
+    assert all(c["item"] != "Total" for c in comps)           # bỏ subtotal + không có header 'Grade item'
+    lab1 = next(c for c in comps if c["item"] == "LAB 1")
+    assert lab1["category"] == "LAB" and lab1["weight"] == "1.7 %"   # rowspan category gán đúng
+
+def test_exam_dt_time_field_h():
+    """M9 fix: giờ thi lấy từ field 'time'='14h30-16h00' (dấu h), KHÔNG lấy '00:00' từ date '...T00:00:00'."""
+    from fapc.core.extras import _exam_dt
+    s, _ = _exam_dt({"subjectCode": "IAP301", "date": "2026-07-27T00:00:00", "time": "14h30-16h00"})
+    assert (s.hour, s.minute) == (14, 30)                     # giờ ĐẦU của khoảng, không phải 00:00
+    s2, _ = _exam_dt({"date": "2026-07-27T00:00:00"})         # thiếu time → mặc định 07:00 (bỏ 00:00 giả)
+    assert (s2.hour, s2.minute) == (7, 0)
+    s3, _ = _exam_dt({"date": "2026-06-05T13:30:00"})         # date có giờ THẬT nhúng → dùng luôn
+    assert (s3.hour, s3.minute) == (13, 30)
+
+def test_predict_course_skips_resit_total():
+    """predict_course bỏ dòng 'Total' (subtotal) + 'Resit' (thi lại) → không cộng dồn trọng số."""
+    from fapc.core.whatif import predict_course
+    comps = [{"item": "Progress test 1", "weight": "10.0 %", "value": "8"},
+             {"item": "Total", "weight": "10.0 %", "value": ""},              # bỏ
+             {"item": "Final exam", "weight": "30.0 %", "value": ""},
+             {"item": "Final exam Resit", "weight": "30.0 %", "value": ""}]   # bỏ (thi lại)
+    p = predict_course(comps, target=5.0)
+    assert p["total_w"] == 40.0                               # 10 + 30 (bỏ Total 10 + Resit 30)
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

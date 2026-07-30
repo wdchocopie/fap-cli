@@ -9,10 +9,12 @@ Cần: DISCORD_BOT_TOKEN (Developer Portal → Bot → Token) trong .env, và b�
 "MESSAGE CONTENT INTENT" cho bot. Bảo mật: nếu đặt DISCORD_ALLOWED_USER_ID thì CHỈ trả lời
 user đó (khuyến nghị mạnh — tránh lộ dữ liệu). Prefix mặc định `!`. Xem docs/13-notify.md.
 """
-import asyncio
+import asyncio, time
 from .. import config
 from .bot_core import handle, menu_commands
 from .reminders import ClassReminder
+from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min
+from ..i18n import t
 
 PREFIX = "!"
 
@@ -58,6 +60,18 @@ def run():
 
         for _n, _d in menu_commands():
             tree.command(name=_n, description=(_d or _n)[:100])(_make(_n))
+
+        async def _update_cmd(interaction):                       # /update — chỉ chủ tài khoản
+            if allow and str(interaction.user.id) != allow:
+                await interaction.response.send_message("⛔ Không có quyền · not allowed.", ephemeral=True)
+                return
+            await interaction.response.defer(thinking=True)
+            summary, do_restart = await client.loop.run_in_executor(None, perform_update)
+            await interaction.followup.send(summary[:1900])
+            if do_restart:
+                restart()                                         # thay tiến trình → quay lại với mã mới
+        tree.command(name="update",
+                     description=t("Cập nhật code + khởi động lại", "Update code + restart")[:100])(_update_cmd)
     except Exception as e:                                        # noqa: BLE001
         print("  (slash command không khả dụng, chỉ dùng prefix '!':", e, ")")
         tree = None
@@ -85,7 +99,15 @@ def run():
                 print("  ⏰ nhắc lỗi · reminder error:", e)
             await asyncio.sleep(60)
 
-    _started = {"reminder": False}
+    # Tự cập nhật khi đang chạy (opt-in FAP_AUTOUPDATE_MIN>0): pull → selftest → tự khởi động lại.
+    async def _autoupdate_loop():
+        await client.wait_until_ready()
+        last = 0.0
+        while not client.is_closed():
+            last = await client.loop.run_in_executor(None, maybe_autoupdate, last, time.time())
+            await asyncio.sleep(60)
+
+    _started = {"reminder": False, "autoupdate": False}
 
     @client.event
     async def on_ready():
@@ -98,6 +120,10 @@ def run():
         if not _started["reminder"]:                              # on_ready có thể bắn lại khi reconnect -> chỉ chạy 1 lần
             _started["reminder"] = True
             client.loop.create_task(_reminder_loop())
+        if not _started["autoupdate"] and autoupdate_min() > 0:
+            _started["autoupdate"] = True
+            client.loop.create_task(_autoupdate_loop())
+            print(f"  🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).")
         print(f"🤖 Discord bot online: {client.user}  (prefix '{PREFIX}'"
               + (f", chỉ user {allow})" if allow else ", MỞ cho mọi user)"))
 
@@ -114,6 +140,13 @@ def run():
         if not parts:
             return
         cmd, arg = parts[0], (parts[1] if len(parts) > 1 else None)
+        if cmd.strip().lower() == "update":                     # !update — chỉ chủ tài khoản (đã lọc ở trên)
+            await message.channel.send(t("⏳ Đang cập nhật (git pull + selftest)…", "⏳ Updating (git pull + selftest)…"))
+            summary, do_restart = await client.loop.run_in_executor(None, perform_update)
+            await message.channel.send(summary[:1900])
+            if do_restart:
+                restart()                                       # thay tiến trình → quay lại với mã mới
+            return
         try:
             # handle() gọi HTTP ĐỒNG BỘ (tới 25s/lệnh) -> chạy trong thread executor,
             # KHÔNG chặn event loop async (giữ heartbeat gateway, bot không bị "lag"/offline).

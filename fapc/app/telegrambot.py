@@ -12,6 +12,8 @@ import requests
 from .. import config
 from .bot_core import handle, menu_commands
 from .reminders import ClassReminder
+from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min
+from ..i18n import t
 
 _TIMEOUT = 30   # long-poll: Telegram giữ kết nối tới 30s nếu chưa có update
 
@@ -22,6 +24,8 @@ def _register_menu():
     """Đăng ký danh sách lệnh GỢI Ý — Telegram hiện nút "Menu" ☰ + tự gợi ý khi gõ '/'.
     Không sống-còn: lỗi mạng thì bot vẫn chạy bình thường (chỉ thiếu menu gợi ý)."""
     cmds = [{"command": n, "description": d[:256]} for n, d in menu_commands()]
+    cmds.append({"command": "update",                       # lệnh thường-trú (không có ở web/notify)
+                 "description": t("Cập nhật code + khởi động lại", "Update code + restart")[:256]})
     try:
         r = requests.post(_api("setMyCommands"), json={"commands": cmds}, timeout=15)
         print("📋 Menu lệnh đã đăng ký (gõ '/' để xem gợi ý)." if r.ok
@@ -49,8 +53,12 @@ def run():
     reminder = ClassReminder()
     print(f"⏰ Nhắc trước mỗi tiết {reminder.lead}' (vào chat {allow})." if reminder.enabled()
           else "⏰ Nhắc lịch: TẮT (đặt FAP_REMIND_MINUTES>0 trong .env để bật).")
+    if autoupdate_min():
+        print(t(f"🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).",
+                f"🔄 Update-while-running: ON every {autoupdate_min()}m (FAP_AUTOUPDATE_MIN)."))
     offset = None
     last_tick = 0.0
+    last_update = 0.0
     # Bỏ qua tồn đọng cũ lúc khởi động · skip backlog on startup
     try:
         r = requests.get(_api("getUpdates"), params={"timeout": 0}, timeout=15).json()
@@ -70,6 +78,8 @@ def run():
                     _send(allow, txt)
             except Exception as e:                       # noqa: BLE001 — nhắc lỗi không được làm chết bot
                 print("  nhắc lỗi · reminder error:", e)
+        # Tự cập nhật khi đang chạy (opt-in FAP_AUTOUPDATE_MIN>0): pull → selftest → tự khởi động lại.
+        last_update = maybe_autoupdate(last_update, time.time(), log=lambda m: (print(m), _send(allow, m)))
         try:
             r = requests.get(_api("getUpdates"), params={"timeout": _TIMEOUT, "offset": offset},
                              timeout=_TIMEOUT + 10).json()
@@ -90,6 +100,13 @@ def run():
                 continue
             parts = text.split()
             cmd, arg = parts[0], (parts[1] if len(parts) > 1 else None)
+            if cmd.lstrip("/!").strip().lower() == "update":    # cập nhật khi đang chạy (chỉ chủ chat)
+                _send(chat_id, t("⏳ Đang cập nhật (git pull + selftest)…", "⏳ Updating (git pull + selftest)…"))
+                summary, do_restart = perform_update()
+                _send(chat_id, summary)
+                if do_restart:
+                    restart()                               # thay tiến trình → quay lại với mã mới
+                continue
             try:
                 reply = handle(cmd, arg)
             except SystemExit as e:

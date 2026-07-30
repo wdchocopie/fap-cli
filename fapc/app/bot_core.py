@@ -67,6 +67,7 @@ def help_text():
         "🔔 /notifications — thông báo · 📄 /applications — đơn từ\n"
         "👤 /profile — hồ sơ\n"
         "📋 /status — tổng quan · 📚 /all — tất cả\n"
+        "🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)\n"
         "❓ /help — trợ giúp",
         "📅 /today · /tomorrow · /week — schedule\n"
         "📊 /grades — grades + provisional GPA\n"
@@ -79,6 +80,7 @@ def help_text():
         "🔔 /notifications — notifications · 📄 /applications — applications\n"
         "👤 /profile — student profile\n"
         "📋 /status — overview · 📚 /all — everything\n"
+        "🔄 /update — update the bot + restart (owner only)\n"
         "❓ /help — help")
 
 def _grades_text(token, campus, roll, sem, rows=None):
