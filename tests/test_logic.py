@@ -655,7 +655,7 @@ def test_reminders_lead_config():
     try:
         C.REMIND_MINUTES = "0";   assert R.lead_minutes() == 0 and not R.ClassReminder().enabled()   # tắt
         C.REMIND_MINUTES = "15";  assert R.lead_minutes() == 15
-        C.REMIND_MINUTES = "bad"; assert R.lead_minutes() == 30                # rác -> mặc định 30
+        C.REMIND_MINUTES = "bad"; assert R.lead_minutes() == 0                 # rác -> TẮT (đúng docstring, KHÔNG bật nhầm)
     finally:
         C.REMIND_MINUTES = orig
 
@@ -719,6 +719,39 @@ def test_predict_course():
     hard = predict_course([{"weight": "60", "value": "0"}, {"weight": "40", "value": ""}])
     assert hard["impossible"] is True                       # need=(500-0)/40 = 12.5 > 10 -> không khả thi
     assert predict_course([{"component": "X", "value": "5"}]) is None   # không trọng số -> None
+
+def test_whatif_final_boundary_display_matches_verdict():
+    """Bug audit: môn ĐÃ chốt, raw∈[4.995,5.0) làm tròn lên 5.0 nhưng verdict theo raw thô → '5.0 → NOT passed'.
+    Fix: verdict quyết theo `current` (giá trị HIỂN THỊ) nên 5.0 hiển thị -> PASS (khớp nhau)."""
+    from fapc.core.whatif import predict_course, predict_line
+    p = predict_course([{"weight": "100", "value": "4.997"}], target=5.0)
+    assert p["remaining_w"] == 0 and p["current"] == 5.0
+    assert p["guaranteed"] is True and p["impossible"] is False        # hiển thị 5.0 -> QUA
+    line = predict_line(p, target=5.0)
+    assert ("QUA" in line or "PASS" in line) and "5.0" in line
+    f = predict_course([{"weight": "100", "value": "4.9"}], target=5.0)  # rõ ràng trượt
+    assert f["current"] == 4.9 and f["guaranteed"] is False and f["impossible"] is True
+
+def test_term_gpa_missing_credit_falls_back():
+    """Bug audit: 1 môn CÓ điểm nhưng thiếu tín chỉ trong danh mục → KHÔNG âm thầm bỏ rồi vẫn dán nhãn
+    'theo tín chỉ'; phải rơi về TB cộng TOÀN BỘ (khớp `fap status`)."""
+    import fapc.core.grades as G, fapc.core.subjects as S
+    rows = [{"subjectCode": "A", "averageMark": "8.0"}, {"subjectCode": "B", "averageMark": "6.0"}]
+    try:
+        S.set_index({"A": {"credits": 3.0}})               # B THIẾU tín chỉ
+        g, w = G.term_gpa(rows)
+        assert w is False and g == 7.0                     # TB cộng (8+6)/2 — KHÔNG phải chỉ mình A=8.0 (weighted)
+    finally:
+        S.set_index({})
+
+def test_credits_ceil_terms_left():
+    """Bug audit: còn tín chỉ mà round() làm tròn xuống '~0 kỳ' (mâu thuẫn). Phải ceil → ≥1 kỳ."""
+    import fapc.core.transcript as T
+    rows = ([{"subjectCode": f"A{i}", "averageMark": "8", "credit": "16", "semesterName": f"K{i}"} for i in range(8)]
+            + [{"subjectCode": "Z", "averageMark": "8", "credit": "15", "semesterName": "K8"}])   # 8*16+15=143, 9 kỳ
+    txt = T.credits_text(rows, 145.0)                       # còn 2 tín, avg≈15.9 → ceil(2/15.9)=1 (KHÔNG phải 0)
+    assert ("~1 kỳ" in txt) or ("~1 terms" in txt)
+    assert ("~0 kỳ" not in txt) and ("~0 terms" not in txt)
 
 def test_weekly_recap_offline():
     """Port #2: `weekly` ghép lịch tuần + điểm danh + điểm trong 1 tin (KHÁC alias 'week' cũ)."""

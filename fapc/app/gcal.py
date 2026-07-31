@@ -47,7 +47,19 @@ def _load_creds(interactive=False):
     if creds_ and creds_.valid:
         return creds_
     if creds_ and creds_.expired and creds_.refresh_token:
-        creds_.refresh(Request()); _save(creds_); return creds_
+        try:
+            from google.auth.exceptions import RefreshError
+        except ImportError:
+            RefreshError = Exception
+        try:
+            creds_.refresh(Request())
+        except RefreshError as e:                         # CHỈ token hết hạn/thu hồi (KHÁC lỗi mạng tạm thời → để propagate)
+            if not interactive:                           # cron/calendar-sync: báo GỌN như path token FAP, đừng phun traceback
+                raise SystemExit(t(f"Token Google không refresh được ({type(e).__name__}). Chạy: fap calendar-auth",
+                                   f"Google token could not refresh ({type(e).__name__}). Run: fap calendar-auth"))
+            # interactive (calendar-auth): rơi xuống login lại bên dưới
+        else:
+            _save(creds_); return creds_                  # refresh OK → lưu (ngoài try: lỗi _save không bị nhầm là lỗi refresh)
     if interactive:
         from google_auth_oauthlib.flow import InstalledAppFlow
         if not os.path.exists(CRED_FILE):
@@ -64,8 +76,10 @@ def _load_creds(interactive=False):
 
 def _save(creds_):
     os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-    with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+    tmp = TOKEN_FILE + ".tmp"                              # ghi nguyên tử: tmp -> os.replace (khỏi cụt file lúc bị ngắt)
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(creds_.to_json())
+    os.replace(tmp, TOKEN_FILE)
     try: os.chmod(TOKEN_FILE, 0o600)
     except Exception: pass
 

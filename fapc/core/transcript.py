@@ -7,7 +7,7 @@
 Nguồn: AcademicTranscript (cs12 rollNumber,campusCode). Tài khoản chưa hoàn tất kỳ nào
 thì server trả rỗng — khi đó in thông báo thay vì lỗi. Cột hiển thị theo đúng field server trả.
 """
-import re
+import re, math
 from .api import creds, call, as_list, check_auth
 from ..i18n import t
 from .. import fmt
@@ -149,7 +149,7 @@ def credits_text(rows, total):
              t(f"{n_pass} môn đã qua, trong {len(per_sem)} kỳ", f"{n_pass} subjects passed, across {len(per_sem)} terms")]
     if per_sem and earned < total:
         avg = earned / len(per_sem)
-        left = max(0, round((total - earned) / avg)) if avg else 0
+        left = max(1, math.ceil((total - earned) / avg)) if avg else 0   # ceil: còn tín chỉ → ≥1 kỳ (round làm tròn xuống 0)
         lines.append(t(f"Nhịp ~{avg:.0f} tín/kỳ → còn ~{left} kỳ (ước lượng)",
                        f"~{avg:.0f} cr/term → ~{left} terms left (estimate)"))
     lines.append(t("(tổng chương trình là ước lượng — đặt FAP_TOTAL_CREDITS trong .env cho đúng)",

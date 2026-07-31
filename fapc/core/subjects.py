@@ -10,7 +10,7 @@ lượt sau đọc cache, KHÔNG gọi mạng. `load()` chỉ ĐỌC cache (khô
 trễ). KHÔNG bao giờ raise: thiếu danh mục → trả mã trơ / 0 tín chỉ (mọi nơi degrade êm).
 """
 import os, json
-from .api import call, as_list, checksum_login
+from .api import call_login_retry, as_list
 from .. import fmt
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,9 +19,9 @@ CACHE = os.path.join(_ROOT, "output", "subjects_catalog.json")
 _INDEX = None        # {code: {"en","vi","credits","replacedBy"}} — memo trong tiến trình (None = chưa nạp)
 
 def fetch_catalog(token, campus, roll):
-    """GetSubjets: toàn bộ danh mục môn của campus. Dùng checksum_login (KHÁC cs12 mặc định)."""
-    _, data = call("GetSubjets", [("campusCode", campus), ("Authen", token)], roll, campus,
-                   checksum_value=checksum_login(campus))
+    """GetSubjets: toàn bộ danh mục môn của campus. Ký bằng checksum_login (KHÁC cs12 mặc định) → override
+    nên call() không tự retry; dùng call_login_retry để thử ±1h (khỏi rỗng danh mục lúc lệch giờ đầu giờ)."""
+    _, data = call_login_retry("GetSubjets", [("campusCode", campus), ("Authen", token)], roll, campus)
     return as_list(data)
 
 def index_of(rows):

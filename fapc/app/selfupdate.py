@@ -19,9 +19,17 @@ import os, sys, subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Vân tay phụ thuộc: đổi ở BẤT KỲ manifest nào (không chỉ pyproject) đều coi là deps_changed.
+_DEP_FILES = ("pyproject.toml", "requirements.txt", "requirements-bot.txt", "requirements-gcal.txt")
+
 
 def _git(*a):
     return subprocess.run(["git", "-C", ROOT, *a], capture_output=True, text=True)
+
+
+def _dep_fingerprint():
+    """Vân tay blob của mọi manifest phụ thuộc đã theo-dõi tại HEAD hiện tại. File không có -> '' (nhất quán)."""
+    return "|".join(_git("rev-parse", f"HEAD:{f}").stdout.strip() for f in _DEP_FILES)
 
 
 def has_git():
@@ -45,7 +53,7 @@ def pull():
                 "message": "Có thay đổi cục bộ chưa commit — `git stash` rồi thử lại.",
                 "detail": dirty}
     before = _git("rev-parse", "HEAD").stdout.strip()
-    pyproj_before = _git("rev-parse", "HEAD:pyproject.toml").stdout.strip()
+    deps_before = _dep_fingerprint()
     pr = _git("pull", "--ff-only")
     if pr.returncode != 0:
         return {"status": "pullerror",
@@ -55,7 +63,7 @@ def pull():
         return {"status": "uptodate", "before": before, "after": after,
                 "message": "Đã ở bản mới nhất."}
     n = _git("rev-list", "--count", f"{before}..{after}").stdout.strip() or "?"
-    deps = _git("rev-parse", "HEAD:pyproject.toml").stdout.strip() != pyproj_before
+    deps = _dep_fingerprint() != deps_before          # đổi ở pyproject HOẶC bất kỳ requirements-*.txt
     return {"status": "updated", "before": before, "after": after, "n": n,
             "deps_changed": deps, "message": f"{before[:7]} → {after[:7]} ({n} commit mới)."}
 
@@ -143,7 +151,8 @@ def maybe_autoupdate(last_check, now_ts, log=print):
                 ok, tail = run_selftest()
                 if ok:
                     log("🔄 Auto-update: " + res["message"] + " — selftest PASS, đang khởi động lại…")
-                    restart()                                  # không trả về
+                    restart()                                  # không trả về (os.execv)
+                    log("⚠️ Auto-update: os.execv KHÔNG khởi động lại được — vẫn chạy mã CŨ, restart thủ công.")
                 else:
                     log("⚠️ Auto-update: đã pull nhưng selftest FAIL — GIỮ mã cũ.\n" + tail[-300:])
     except Exception as e:                                     # noqa: BLE001 — không làm chết loop

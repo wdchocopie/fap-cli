@@ -21,7 +21,7 @@ def lead_minutes():
     try:
         return max(0, int(str(getattr(config, "REMIND_MINUTES", "30") or "0").strip()))
     except (TypeError, ValueError):
-        return 30
+        return 0                          # giá trị rác (vd 'off') → TẮT, đúng như docstring hứa
 
 
 def _key(start, s):

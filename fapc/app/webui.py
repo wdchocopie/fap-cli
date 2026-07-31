@@ -104,6 +104,14 @@ class _H(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
+        # Chống DNS-rebinding: CHỈ phục vụ khi Host là localhost đúng cổng. Bind 127.0.0.1 KHÔNG đủ —
+        # trang web độc có thể rebind tên miền của nó về 127.0.0.1:<port> rồi đọc /me, /q (điểm/lịch/hồ sơ).
+        port = self.server.server_address[1]
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if port == 80:                                    # trình duyệt LƯỢC ':80' (cổng HTTP mặc định) khỏi Host
+            allowed |= {"127.0.0.1", "localhost"}
+        if (self.headers.get("Host") or "").strip().lower() not in allowed:
+            return self._send("forbidden", "text/plain; charset=utf-8", 403)
         u = urllib.parse.urlparse(self.path)
         if u.path == "/":
             return self._send(_page())

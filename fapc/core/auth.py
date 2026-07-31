@@ -17,9 +17,9 @@ Luồng PKCE (đa số): login -> mở browser + LƯU verifier; đăng nhập Go
 
 CHỈ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN.
 """
-import os, sys, json, time, base64, hashlib, secrets, webbrowser, urllib.parse
+import os, sys, json, time, base64, hashlib, secrets, webbrowser, urllib.parse, datetime
 import requests
-from .api import BASE as FAP_BASE, checksum_login, UA
+from .api import BASE as FAP_BASE, checksum_login, UA, _vn_now, _is_checksum_error
 from ..i18n import t
 from .. import fmt
 
@@ -40,14 +40,17 @@ PKCE_STATE = os.path.join(OUT, ".pkce_state.json")
 
 def _save(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    # Tạo file với quyền 0600 ngay từ đầu (POSIX) — tránh khoảng hở quyền rộng. Windows: bỏ qua.
+    # Ghi NGUYÊN TỬ: viết ra .tmp (quyền 0600 ngay từ đầu trên POSIX) rồi os.replace lên đích. Ngắt giữa
+    # chừng / đọc-ghi đua nhau KHÔNG làm token.json cụt → mất token (creds() json.load sẽ không thấy file lỗi).
+    tmp = f"{path}.tmp"
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)
     except OSError:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)                                 # thay thế nguyên tử (POSIX & Windows cùng filesystem)
     try: os.chmod(path, 0o600)
     except OSError: pass
 
@@ -77,15 +80,23 @@ def _post(url, data, raise_on_neterr=True):
 
 # ---------- đổi access_token -> token FAP ----------
 def fap_login_feid(campus, access_token):
-    url = f"{FAP_BASE}/AuthenticationByFeId?campusCode={campus}&checksum={checksum_login(campus)}"
-    try:
-        r = requests.post(url, json={"token": access_token}, headers=UA, timeout=25)
-    except requests.RequestException as e:
-        return None, f"Lỗi mạng ({type(e).__name__}) tới AuthenticationByFeId"   # str(e) nhúng url -> tránh lộ
-    try:
-        return r.status_code, r.json()
-    except ValueError:
-        return r.status_code, r.text
+    # checksum_login là checksum THEO GIỜ → thử ±1h như data-path (call()/current_semester), chống lệch giờ
+    # đầu giờ / đồng hồ máy lệch ~1h (nếu không, login lỗi khó hiểu trong khi `fap grades` vẫn chạy nhờ retry).
+    out = (None, None)
+    for delta in (0, 1, -1):
+        cs = checksum_login(campus, when=_vn_now() + datetime.timedelta(hours=delta))
+        url = f"{FAP_BASE}/AuthenticationByFeId?campusCode={campus}&checksum={cs}"
+        try:
+            r = requests.post(url, json={"token": access_token}, headers=UA, timeout=25)
+        except requests.RequestException as e:
+            return None, f"Lỗi mạng ({type(e).__name__}) tới AuthenticationByFeId"   # str(e) nhúng url -> tránh lộ
+        try:
+            out = (r.status_code, r.json())
+        except ValueError:
+            return r.status_code, r.text
+        if not _is_checksum_error(out):                   # không phải lỗi checksum → dùng luôn (kể cả lỗi khác)
+            break
+    return out
 
 def _do_fap(campus, access_token):
     http, body = fap_login_feid(campus, access_token)

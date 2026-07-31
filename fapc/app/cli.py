@@ -182,7 +182,7 @@ def main():
     elif cmd == "exams-ics":      from ..core.extras import exams_ics; exams_ics()
     elif cmd == "news":
         from ..core.extras import news
-        _kw = next((a for a in rest if not a.startswith("--")), None)             # `fap news học bổng`
+        _kw = " ".join(a for a in rest if not a.startswith("--")) or None         # `fap news học bổng` (giữ NGUYÊN cụm nhiều từ)
         _ty = next((a.split("=", 1)[1] for a in rest if a.startswith("--type=")), "0")
         news(_kw, type=_ty)
     elif cmd == "fees":           from ..core.extras import fees; fees()

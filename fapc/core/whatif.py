@@ -61,8 +61,10 @@ def predict_course(components, target=PASS_MARK, max_mark=MARK_MAX):
     raw = locked / total_w                            # điểm môn nếu phần còn lại = 0 (KHÔNG làm tròn để quyết định)
     current = round(raw, 2)
     if remaining_w <= 0:
+        # Quyết PASS/trượt theo ĐÚNG giá trị HIỂN THỊ (current = round(raw,2)) — tránh "5.0/10 → NOT passed"
+        # khi raw ∈ [4.995, 5.0) làm tròn lên 5.0 nhưng raw thô < target.
         return {"locked": locked, "total_w": total_w, "remaining_w": 0.0, "remaining_pct": 0.0, "needed": 0.0,
-                "guaranteed": raw >= target - 1e-9, "impossible": raw < target - 1e-9, "current": current}
+                "guaranteed": current >= target - 1e-9, "impossible": current < target - 1e-9, "current": current}
     needed = (target * total_w - locked) / remaining_w
     return {"locked": locked, "total_w": total_w, "remaining_w": remaining_w,
             "remaining_pct": round(100 * remaining_w / total_w, 1), "needed": round(needed, 2),

@@ -24,13 +24,18 @@ def _gpa(rows):
     return round(sum(graded) / len(graded), 2) if graded else None
 
 def term_gpa(rows):
-    """(gpa, weighted). Có tín chỉ (danh mục đã cache qua `fap subjects`) → theo TRỌNG SỐ tín chỉ
-    (đúng cách FPT tính); không có → rơi về TB cộng `_gpa`. THUẦN (credit lấy từ subjects memo)."""
+    """(gpa, weighted). CHỈ theo TRỌNG SỐ tín chỉ khi MỌI môn ĐÃ có điểm đều biết tín chỉ (danh mục đã
+    cache qua `fap subjects`). Nếu 1 môn có điểm mà thiếu tín chỉ → rơi về TB cộng `_gpa` (ĐỪNG âm thầm
+    bỏ môn đó rồi vẫn dán nhãn 'theo tín chỉ' → lệch, mâu thuẫn với `fap status`). THUẦN (credit từ memo)."""
     num = den = 0.0
     for r in rows:
-        mk, cr = fmt.safe_float(r.get("averageMark")), subjects.credit_of(r.get("subjectCode", ""))
-        if mk > 0 and cr > 0:
-            num += mk * cr; den += cr
+        mk = fmt.safe_float(r.get("averageMark"))
+        if mk <= 0:
+            continue                                       # môn chưa có điểm — không tính
+        cr = subjects.credit_of(r.get("subjectCode", ""))
+        if cr <= 0:
+            return _gpa(rows), False                       # thiếu tín chỉ 1 môn có điểm → TB cộng cho toàn bộ
+        num += mk * cr; den += cr
     if den:
         return round(num / den, 2), True
     return _gpa(rows), False

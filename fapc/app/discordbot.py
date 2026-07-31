@@ -61,9 +61,10 @@ def run():
         for _n, _d in menu_commands():
             tree.command(name=_n, description=(_d or _n)[:100])(_make(_n))
 
-        async def _update_cmd(interaction):                       # /update — chỉ chủ tài khoản
-            if allow and str(interaction.user.id) != allow:
-                await interaction.response.send_message("⛔ Không có quyền · not allowed.", ephemeral=True)
+        async def _update_cmd(interaction):                       # /update — chỉ CHỦ tài khoản (kể cả chế độ MỞ)
+            if not allow or str(interaction.user.id) != allow:    # ALLOW_ANYONE: allow=None -> vẫn CHẶN /update
+                await interaction.response.send_message(
+                    "⛔ /update chỉ dành cho chủ bot (đặt DISCORD_ALLOWED_USER_ID).", ephemeral=True)
                 return
             await interaction.response.defer(thinking=True)
             summary, do_restart = await client.loop.run_in_executor(None, perform_update)
@@ -140,7 +141,10 @@ def run():
         if not parts:
             return
         cmd, arg = parts[0], (parts[1] if len(parts) > 1 else None)
-        if cmd.strip().lower() == "update":                     # !update — chỉ chủ tài khoản (đã lọc ở trên)
+        if cmd.strip().lower() == "update":                     # !update — chỉ CHỦ tài khoản
+            if not allow or str(message.author.id) != allow:    # chế độ MỞ (allow=None): CHẶN update (tránh self-DoS pull+restart)
+                await message.channel.send("⛔ /update chỉ dành cho chủ bot (đặt DISCORD_ALLOWED_USER_ID).")
+                return
             await message.channel.send(t("⏳ Đang cập nhật (git pull + selftest)…", "⏳ Updating (git pull + selftest)…"))
             summary, do_restart = await client.loop.run_in_executor(None, perform_update)
             await message.channel.send(summary[:1900])

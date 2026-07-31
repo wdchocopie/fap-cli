@@ -151,6 +151,17 @@ def call(endpoint, params, roll, campus, base=BASE, secret=SECRET, timeout=25, c
         _CACHE[key] = (time.time() + ttl, out)
     return out
 
+def call_login_retry(endpoint, params, roll, campus):
+    """call() với checksum_login (override) + TỰ THỬ ±1h. Endpoint ký bằng checksum_login (GetSemester,
+    GetSubjets) là override -> call() KHÔNG tự retry; gom logic retry ở đây để mọi nơi dùng chung."""
+    out = (None, None)
+    for delta in (0, 1, -1):
+        out = call(endpoint, params, roll, campus,
+                   checksum_value=checksum_login(campus, when=_vn_now() + datetime.timedelta(hours=delta)))
+        if not _is_checksum_error(out):
+            break
+    return out
+
 def unwrap(resp):
     """Bóc lớp {code,message,data}. Trả phần data (có thể là list/dict/scalar)."""
     if isinstance(resp, dict) and "data" in resp:
@@ -190,14 +201,8 @@ def current_semester(token, campus, roll):
     if os.environ.get("FAP_SEMESTER"):
         return os.environ["FAP_SEMESTER"]
     try:
-        # checksum_login là override -> call() KHÔNG tự retry; tự thử ±1h tại đây (lệch giờ đầu giờ).
-        out = None
-        for delta in (0, 1, -1):
-            when = _vn_now() + datetime.timedelta(hours=delta)
-            out = call("GetSemester", [("campusCode", campus), ("Authen", token)],
-                       roll, campus, checksum_value=checksum_login(campus, when=when))
-            if not _is_checksum_error(out):
-                break
+        # checksum_login là override -> call() KHÔNG tự retry; call_login_retry lo phần thử ±1h (lệch giờ).
+        out = call_login_retry("GetSemester", [("campusCode", campus), ("Authen", token)], roll, campus)
         if _err_code(out[1]) == "201":          # token hết hạn / checksum vẫn lỗi -> cảnh báo, đừng nuốt im
             print(f"⚠️ Không tự dò được học kỳ (GetSemester lỗi auth/checksum) — "
                   f"tạm dùng {default_semester()!r}. Đặt FAP_SEMESTER trong .env nếu sai.", file=sys.stderr)
