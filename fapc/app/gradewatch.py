@@ -9,7 +9,7 @@ Giống watch-attendance: FAP không đẩy cho mình -> phải POLL. So GetStud
 cho điểm thành phần) với lần trước; chỉ báo phần MỚI/ĐỔI. Mỗi điểm chỉ báo ĐÚNG 1 LẦN
 (nhớ trong output/grade_state.json). Im lặng khi không có gì mới.
 """
-import os, sys, json, time
+import os, sys, json, time, re
 from ..core.api import creds, current_semester, _vn_now
 from ..core.grades import fetch_marks, fetch_components
 from .notify import push
@@ -66,12 +66,33 @@ def compute(marks, detail_fn, state):
                 else:
                     differs = v != ov
                 if v and differs:
-                    events.append(f"• {subj} · {k}: {v}")
+                    events.append({"subj": subj, "item": k, "value": v})
             oa, na = prev.get("avg", ""), snap["avg"]   # so theo SỐ -> '8.5' vs '8.50' không báo nhầm
             if fmt.safe_float(na) > 0 and fmt.safe_float(na) != fmt.safe_float(oa):
-                events.append(t(f"• {subj} · điểm tổng kết: {na}", f"• {subj} · final mark: {na}"))
+                events.append({"subj": subj, "item": None, "value": na})   # item=None => điểm tổng kết môn
         new_state[subj] = snap
     return events, new_state, first_run
+
+def _natkey(s):
+    """Khoá sort TỰ NHIÊN: 'LAB 2' đứng trước 'LAB 10' (tách cụm số ra so theo GIÁ TRỊ, không theo chuỗi)."""
+    return [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", str(s or ""))]
+
+def render_events(events):
+    """THUẦN: [{subj,item,value}] -> chuỗi ĐẸP. Gom theo MÔN (giữ thứ tự môn xuất hiện), sort đầu điểm
+    tự nhiên; item=None = điểm tổng kết môn (để CUỐI khối). Rỗng -> ''."""
+    by_subj = {}
+    for e in events:
+        by_subj.setdefault(e.get("subj", ""), []).append(e)
+    blocks = []
+    for subj, items in by_subj.items():
+        comps  = sorted((e for e in items if e.get("item") is not None),      # 'Final …' xuống cuối, còn lại sort tự nhiên
+                        key=lambda e: (1 if "final" in str(e["item"]).lower() else 0, _natkey(e["item"])))
+        finals = [e for e in items if e.get("item") is None]
+        lines  = [f"📘 {subj}"]
+        lines += [f"   • {e['item']}: {e['value']}" for e in comps]
+        lines += [t(f"   ★ Điểm tổng kết: {e['value']}", f"   ★ Final mark: {e['value']}") for e in finals]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 def _load_state():
     if not os.path.exists(STATE):
@@ -112,7 +133,7 @@ def poll(notify=True):
         return 0
     if not events:
         print(t("Chưa có điểm mới.", "No new marks.")); return 0
-    msg = fmt.header("🎯", t("Có điểm mới!", "New marks!")) + "\n" + "\n".join(events)
+    msg = fmt.header("🎯", t("Có điểm mới!", "New marks!")) + "\n" + render_events(events)
     print(msg)
     if notify:
         sent = push(msg)

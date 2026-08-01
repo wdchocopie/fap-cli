@@ -432,7 +432,7 @@ def test_gradewatch_compute():
     ev, st, first = G.compute(marks, lambda s, c: [{"component": "Assignment", "value": ""}], {})
     assert first is True and ev == []                       # baseline: đầu điểm chưa có giá trị
     ev2, st2, f2 = G.compute(marks, lambda s, c: [{"component": "Assignment", "value": "8.5"}], st)
-    assert f2 is False and any("Assignment" in e and "8.5" in e for e in ev2)   # vừa có điểm -> báo
+    assert f2 is False and any(e["item"] == "Assignment" and e["value"] == "8.5" for e in ev2)   # vừa có điểm -> báo
     ev3, _, _ = G.compute(marks, lambda s, c: [{"component": "Assignment", "value": "8.5"}], st2)
     assert ev3 == []                                        # không đổi -> không báo lại
     ev4, st4, _ = G.compute(marks, lambda s, c: None, st2)  # chi tiết HỎNG -> giữ mốc, không báo bừa
@@ -444,7 +444,22 @@ def test_gradewatch_final_mark_event():
     _, st, _ = G.compute(m0, lambda s, c: [], {})
     m1 = [{"subjectCode": "MAE101", "courseID": 2, "averageMark": "9.0"}]
     ev, _, _ = G.compute(m1, lambda s, c: [], st)
-    assert any("9.0" in e for e in ev)                      # điểm tổng kết 0.0 -> 9.0
+    assert any(e["item"] is None and e["value"] == "9.0" for e in ev)   # điểm tổng kết 0.0 -> 9.0
+
+def test_gradewatch_render_events():
+    """Thông báo điểm mới ĐẸP: gom theo MÔN, sort TỰ NHIÊN (LAB 2 trước LAB 10), điểm tổng kết ở cuối khối."""
+    from fapc.app.gradewatch import render_events, _natkey
+    assert _natkey("LAB 2") < _natkey("LAB 10")            # so số, KHÔNG so chuỗi ('10' < '2' theo chuỗi)
+    ev = [{"subj": "X", "item": "LAB 10", "value": "9"},
+          {"subj": "X", "item": "LAB 2", "value": "8"},
+          {"subj": "X", "item": None, "value": "8.5"},       # điểm tổng kết môn X
+          {"subj": "Y", "item": "Final Exam", "value": "7"}]
+    out = render_events(ev)
+    assert "📘 X" in out and "📘 Y" in out
+    assert out.index("📘 X") < out.index("📘 Y")            # giữ thứ tự môn xuất hiện
+    assert out.index("LAB 2") < out.index("LAB 10")         # sort tự nhiên trong 1 môn
+    assert out.index("LAB 10") < out.index("8.5")           # điểm tổng kết ở CUỐI khối môn
+    assert render_events([]) == ""
 
 def test_weighted_gpa():
     from fapc.core.transcript import _weighted_gpa
@@ -602,7 +617,7 @@ def test_gradewatch_component_no_false_ping_on_reformat():
     ev, st2, _ = G.compute(m, lambda s, c: [{"component": "Lab", "value": "8.50"}], st)
     assert ev == []                                                  # reformat -> không báo nhầm
     ev2, _, _ = G.compute(m, lambda s, c: [{"component": "Lab", "value": "9.0"}], st2)
-    assert any("9.0" in e for e in ev2)                              # đổi giá trị thật -> báo
+    assert any(e["value"] == "9.0" for e in ev2)                     # đổi giá trị thật -> báo
 
 def test_notifications_dedupe():
     import fapc.app.notify as N, fapc.core.extras as E
@@ -872,6 +887,26 @@ def test_news_search():
     assert rows[0]["title"] == "Học bổng & quà"              # &amp; → &
     E.fetch_news("t", "c", "r")                              # không keyword → top-10
     assert seen["ep"] == "GetTop10News"
+
+def test_news_text_render_offline():
+    """news_text render SẠCH: bóc thẻ HTML, tiêu đề + ngày + trích, MỚI NHẤT trước. Field FAP: 'tittle'/'content'/'createDate'."""
+    import fapc.core.extras as E
+    orig = E.fetch_news                                       # KHÔI PHỤC sau test (đừng rò sang smoke ex.news)
+    try:
+        E.fetch_news = lambda *a, **k: [
+            {"tittle": "Tin cũ", "content": "<p>abc</p>", "createDate": "2026-07-01T08:00:00"},
+            {"tittle": "Tin mới &amp; nóng", "content": "<p>xin <b>chào</b> &nbsp; thế giới</p>",
+             "createDate": "2026-07-31T10:00:00"}]
+        out = E.news_text("t", "c", "r")
+        assert out.index("Tin mới") < out.index("Tin cũ")    # mới nhất trước (sort theo createDate desc)
+        assert "&" in out and "&amp;" not in out             # entity đã decode
+        assert "<p>" not in out and "<b>" not in out         # thẻ HTML đã bóc
+        assert "xin chào thế giới" in out                    # gộp khoảng trắng (kể cả &nbsp;), giữ text
+        assert "31/07/2026" in out                           # ngày đã format
+        E.fetch_news = lambda *a, **k: []
+        assert "Không có tin" in E.news_text("t", "c", "r") or "No news" in E.news_text("t", "c", "r")
+    finally:
+        E.fetch_news = orig
 
 def test_calendar_prune_plan():
     """calendar-prune: CHỈ đánh dấu xóa event fapc KHÔNG còn trong lịch hiện tại (giữ event còn, bỏ event thiếu uid)."""

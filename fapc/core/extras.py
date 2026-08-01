@@ -8,7 +8,7 @@
 
 Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa có dữ liệu — xử lý rỗng đàng hoàng.
 """
-import os, datetime
+import os, re, datetime
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth, _vn_now
 from . import subjects
 from ..i18n import t
@@ -158,9 +158,10 @@ def exams():
     print(exams_text(token, campus, roll, current_semester(token, campus, roll)))
 
 # ---------- TIN TỨC ----------
-def fetch_news(token, campus, roll, keyword=None, type="0"):
+def fetch_news(token, campus, roll, keyword=None, type="1"):
     """GetTop10News (mặc định) HOẶC SearchNews khi có `keyword`. checksum_auth(type, campus) (như GetTop10News).
-    Trả list dict đã decode entity. Rỗng nếu lỗi/không có."""
+    Trả list dict đã decode entity. Rỗng nếu lỗi/không có.
+    type mặc định '1' — bảng tin chung của trường (đã probe live: type '0' thường RỖNG với nhiều campus)."""
     if keyword:
         http, data = call("SearchNews",
             [("campusCode", campus), ("Authen", token), ("keysearch", keyword), ("type", str(type))],
@@ -172,15 +173,47 @@ def fetch_news(token, campus, roll, keyword=None, type="0"):
     return [{k: fmt.unescape(v) if isinstance(v, str) else v for k, v in r.items()}
             for r in as_list(data) if isinstance(r, dict)]
 
-def news(keyword=None, type="0"):
-    token, campus, roll = creds()
+def _news_get(n, keys):
+    """Giá trị đầu tiên KHÁC RỖNG trong các khóa ứng viên (field tin của FAP đổi theo campus/kỳ)."""
+    for k in keys:
+        if isinstance(n, dict) and n.get(k) not in (None, ""):
+            return n[k]
+    return ""
+
+def _html_snippet(raw, limit=180):
+    """THUẦN: bóc thẻ HTML + decode entity + gộp khoảng trắng -> đoạn trích 1 dòng (≤limit). Rỗng -> ''."""
+    if not raw:
+        return ""
+    txt = re.sub(r"<[^>]+>", " ", str(raw))               # bỏ thẻ
+    txt = re.sub(r"\s+", " ", fmt.unescape(txt)).strip()  # &nbsp;/&amp;… + gộp trắng (kể cả \xa0)
+    return (txt[:limit].rstrip() + "…") if len(txt) > limit else txt
+
+def _news_line(n):
+    """1 mục tin GỌN: tiêu đề + ngày + trích ngắn. Field FAP thật: 'tittle' (typo của FAP), 'content', 'createDate'."""
+    title = fmt.unescape(_news_get(n, ("tittle", "title", "subject"))) or t("(không tiêu đề)", "(no title)")
+    date = fmt.fmt_date(_news_get(n, ("createDate", "editDate", "entryDate", "date")))
+    snippet = _html_snippet(_news_get(n, ("content", "body", "description")))
+    line = f"• {title}"
+    if date:
+        line += f"\n   🗓 {date}"
+    if snippet:
+        line += f"\n   {snippet}"
+    return line
+
+def news_text(token, campus, roll, keyword=None, type="1", limit=10):
+    """Tin tức render SẠCH (tiêu đề + ngày + trích, MỚI NHẤT trước) — thay bảng thô đổ nguyên HTML."""
     rows = fetch_news(token, campus, roll, keyword, type)
     if not rows:
-        print(t(f"📰 Không có tin{' khớp ' + repr(keyword) if keyword else ''}.",
-                f"📰 No news{' matching ' + repr(keyword) if keyword else ''}.")); return
+        return t(f"📰 Không có tin{' khớp ' + repr(keyword) if keyword else ''}.",
+                 f"📰 No news{' matching ' + repr(keyword) if keyword else ''}.")
+    rows = sorted(rows, key=lambda n: str(_news_get(n, ("createDate", "editDate", "entryDate")) or ""),
+                  reverse=True)[:limit]
     head = t(f"Tin tức · tìm {keyword!r}", f"News · search {keyword!r}") if keyword else t("Tin tức", "News")
-    print(t(f"== {head} ({len(rows)}) ==", f"== {head} ({len(rows)}) =="))
-    print(fmt.table(rows))
+    return "\n".join([fmt.header("📰", head, str(len(rows)))] + [_news_line(n) for n in rows])
+
+def news(keyword=None, type="1"):
+    token, campus, roll = creds()
+    print(news_text(token, campus, roll, keyword, type))
 
 # ---------- HỌC PHÍ / SỐ DƯ ----------
 def fees():

@@ -103,7 +103,7 @@ for mod, nm in [(gw, "g"), (aw, "a")]:
 m0 = [{"subjectCode": "X", "courseID": "1", "averageMark": "0.0"}]
 _, st0, f0 = gw.compute(m0, lambda s, c: [{"component": "A", "value": ""}], {})
 ev1, _, _ = gw.compute(m0, lambda s, c: [{"component": "A", "value": "9.0"}], st0)
-check("gradewatch 2-cycle detects", f0 and any("9.0" in e for e in ev1))
+check("gradewatch 2-cycle detects", f0 and any(e["value"] == "9.0" for e in ev1))
 s0 = [{"subjectCode": "X", "groupName": "G", "numberOfTakenAttendances": 1}]
 d0 = [{"scheduleID": 1, "date": "2026-06-01T00:00:00", "slot": 1, "attendanceStatus": "Present"}]
 _, ast0, af0 = aw.compute(s0, lambda s, gg: d0, {})

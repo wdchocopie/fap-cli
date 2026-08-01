@@ -183,7 +183,7 @@ def main():
     elif cmd == "news":
         from ..core.extras import news
         _kw = " ".join(a for a in rest if not a.startswith("--")) or None         # `fap news học bổng` (giữ NGUYÊN cụm nhiều từ)
-        _ty = next((a.split("=", 1)[1] for a in rest if a.startswith("--type=")), "0")
+        _ty = next((a.split("=", 1)[1] for a in rest if a.startswith("--type=")), "1")   # type 1 = bảng tin trường (0 hay rỗng)
         news(_kw, type=_ty)
     elif cmd == "fees":           from ..core.extras import fees; fees()
     elif cmd == "notifications":  from ..core.extras import notifications; notifications()
