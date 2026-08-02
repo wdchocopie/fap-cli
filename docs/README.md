@@ -26,6 +26,7 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | [15-config](15-config.md) | Mọi khóa trong `.env` · Every `.env` key |
 | [16-troubleshooting](16-troubleshooting.md) | Lỗi thường gặp & cách sửa · Common errors & fixes |
 | [17-architecture](17-architecture.md) | **Kiến trúc & logic toàn bộ code** + bảng hiệu năng máy yếu→mạnh · Architecture, full code logic & performance knobs |
+| [18-roadmap](18-roadmap.md) | 🚧 Việc đã chốt nhưng CHƯA code (gộp dòng LAB, 2 bug thật, session 2 máy, nhiều account) · Agreed but not-yet-implemented work |
 
 ## 🔬 Nội bộ / Reverse-engineering · Internals
 > **VI —** Cách công cụ được dựng nên (đọc nếu muốn hiểu sâu / tự làm lại). **EN —** How it was built.
