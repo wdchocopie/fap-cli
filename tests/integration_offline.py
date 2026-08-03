@@ -57,6 +57,7 @@ api.requests.get = fake_get; api._CACHE.clear()
 try: api.creds()
 except SystemExit: api.creds = lambda: ("SECRETTOKEN123", "FPTU", "HE190000")
 import fapc.app.notify as notify
+_REAL_TELEGRAM = notify._telegram          # giữ hàm THẬT để [I] kiểm việc cắt tin dài
 notify._telegram = lambda t: False; notify._discord = lambda t: False
 import fapc.app.attendwatch as aw, fapc.app.gradewatch as gw
 _tmp = tempfile.mkdtemp()
@@ -116,6 +117,31 @@ ics, n, sk, amb = sched.build_ics(SUCCESS["GetActivityStudent"])
 check("build_ics valid", "BEGIN:VCALENDAR" in ics and n == 1)
 eics, en, esk = ex.build_exam_ics(SUCCESS["GetScheduleExam"] * 2)
 check("exam ics unique UID + reminder", eics.count("BEGIN:VEVENT") == 2 and "-0@fap" in eics and "-1@fap" in eics and "TRIGGER:-P1D" in eics)
+# [I] tin DÀI đi qua _telegram THẬT: phải thành NHIỀU mẩu, không mẩu nào vượt trần, KHÔNG mất chữ
+# (trước đây `text[:4000]` cắt cụt — /grades-detail 6 môn mất 1325 ký tự trên Telegram).
+_posts = []
+class _OKPost:
+    status_code = 200; ok = True; text = "ok"; headers = {}
+    def json(self): return {"ok": True}
+def _fake_post(url, json=None, **k):
+    _posts.append((json or {}).get("text", "")); return _OKPost()
+_real_post, _real_sleep = notify.requests.post, notify.time.sleep
+_real_tok, _real_chat = notify.config.TELEGRAM_TOKEN, notify.config.TELEGRAM_CHAT
+try:
+    notify.requests.post = _fake_post
+    notify.time.sleep = lambda s: None                       # bỏ 0.4s nghỉ giữa 2 mẩu -> test chạy nhanh
+    notify.config.TELEGRAM_TOKEN, notify.config.TELEGRAM_CHAT = "T", "C"
+    long_msg = "\n".join(f"📘 dòng {i} " + "x" * 60 for i in range(200))
+    sent_ok = _cap(lambda: _REAL_TELEGRAM(long_msg))
+    check("telegram tin dài -> nhiều mẩu", sent_ok and len(_posts) > 1, f"{len(_posts)} mẩu")
+    check("telegram mẩu nào cũng <= trần", all(len(p) <= notify.TELEGRAM_LIMIT for p in _posts))
+    check("telegram KHÔNG mất chữ khi cắt", "\n".join(_posts) == long_msg)
+    _posts[:] = []
+    short_ok = _cap(lambda: _REAL_TELEGRAM("một dòng ngắn"))
+    check("telegram tin ngắn vẫn đúng 1 tin", short_ok and _posts == ["một dòng ngắn"])
+finally:
+    notify.requests.post, notify.time.sleep = _real_post, _real_sleep
+    notify.config.TELEGRAM_TOKEN, notify.config.TELEGRAM_CHAT = _real_tok, _real_chat
 
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")

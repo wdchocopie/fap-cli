@@ -68,4 +68,12 @@ for u in fap-watch.service fap-gradewatch.service fap-bot.service; do
     systemctl --user restart "$u" && echo "↻ restart $u"
   fi
 done
+# + instance theo PROFILE (fap-watch@alice.service…): unit template đã bật = có symlink trong
+# default.target.wants. Không có profile nào thì vòng lặp này KHÔNG chạy (hành vi cũ giữ nguyên).
+# Per-PROFILE instances; with no profiles configured this loop simply does nothing.
+for l in "$UD"/default.target.wants/fap-*@*.service; do
+  [ -e "$l" ] || continue
+  u="$(basename "$l")"
+  systemctl --user restart "$u" && echo "↻ restart $u"
+done
 echo "✅ Update xong. (Token hết hạn thì chạy:  ./.venv/bin/fap refresh )"

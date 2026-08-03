@@ -12,14 +12,17 @@ cho điểm thành phần) với lần trước; chỉ báo phần MỚI/ĐỔI.
 import os, sys, json, time, re
 from ..core.api import creds, current_semester, _vn_now
 from ..core.grades import fetch_marks, fetch_components
+from ..core import paths
 from .notify import push
 from .attendwatch import _refresh_token          # dùng chung: tự làm mới token cho service chạy nền
 from .selfupdate import maybe_autoupdate, autoupdate_min
 from ..i18n import t
 from .. import fmt
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-STATE = os.path.join(_ROOT, "output", "grade_state.json")
+STATE = paths.out("grade_state.json")            # theo profile (FAP_PROFILE); chưa đặt ⇒ output/grade_state.json như cũ
+
+# Lệch giờ refresh token lúc khởi động — bảng phân dải dùng chung ở fapc/app/_stagger.py.
+from ._stagger import startup_delay
 
 # Field "tên" và "giá trị" của 1 đầu điểm có thể khác nhau theo campus -> dò generic, không bịa.
 _VAL_KEYS = {"value", "mark", "grade", "score", "point", "averagemark", "result", "valuestr"}
@@ -77,19 +80,123 @@ def _natkey(s):
     """Khoá sort TỰ NHIÊN: 'LAB 2' đứng trước 'LAB 10' (tách cụm số ra so theo GIÁ TRỊ, không theo chuỗi)."""
     return [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", str(s or ""))]
 
+# ── Gộp thông báo điểm mới ────────────────────────────────────────────────────────────────────
+# Tất cả helper dưới đây THUẦN (không mạng/IO) -> test offline được.
+# Nhóm CỐ ĐỊNH theo thứ tự này; phân loại bằng TÊN đầu điểm (FAP không trả loại chuẩn hoá).
+_BUCKETS = (("lab", "🔬"), ("prog", "📝"), ("other", "📎"), ("final", "🏁"))
+
+_RE_LAB   = re.compile(r"\blabs?\b", re.I)
+_RE_PROG  = re.compile(r"progress|mid[- ]?term|quiz", re.I)
+_RE_TAIL  = re.compile(r"^(.*?)[\s.:#-]*(\d+)\s*$")     # 'LAB 12' -> ('LAB', 12)
+
+_RUN_MIN  = 4        # run ngắn hơn thế thì in bình thường (ca 1–3 điểm phải NGẮN như cũ)
+_WIDTH    = 72       # bề ngang tối đa 1 dòng nối bằng ' · ' (chat, không căn cột)
+
+def _bucket_of(item):
+    """Đầu điểm -> tên nhóm. 'final' xét TRƯỚC (giữ đúng thói quen cũ: thi cuối kỳ luôn ở cuối khối)."""
+    s = str(item or "")
+    if "final" in s.lower():
+        return "final"
+    if _RE_LAB.search(s):
+        return "lab"
+    if _RE_PROG.search(s):
+        return "prog"
+    return "other"
+
+def _split_num(name):
+    """'LAB 12' -> ('LAB', 12); không có số ở đuôi -> None."""
+    m = _RE_TAIL.match(str(name or ""))
+    if not m:
+        return None
+    pre = m.group(1).strip()
+    return (pre, int(m.group(2))) if pre else None
+
+def _mode(values):
+    """Giá trị XUẤT HIỆN NHIỀU NHẤT nếu nó chiếm ĐA SỐ THẬT (>50%), còn lại None = 'không có chủ đạo'."""
+    best, cnt = None, 0
+    for v in values:
+        c = values.count(v)
+        if c > cnt:
+            best, cnt = v, c
+    return best if cnt >= 2 and cnt * 2 > len(values) else None
+
+def _collapse_run(prefix, got):
+    """got: [(số, TÊN THẬT, giá trị)] cùng tiền tố -> 1 dòng 'chủ đạo + ngoại lệ', None nếu không gộp được.
+
+    Dải chỉ ghi 'a–b' khi các số LIÊN TIẾP **và không trùng nhau** — 'LAB 1' với 'Lab 1' là hai đầu
+    điểm KHÁC nhau nhưng cùng số, gộp thành dải sẽ khẳng định một con điểm chưa từng nhận. Ngoại lệ
+    in bằng TÊN THẬT của mục (không ghép lại từ prefix) để không đổi hoa/thường của người ta."""
+    if len(got) < _RUN_MIN:
+        return None
+    got  = sorted(got, key=lambda p: p[0])
+    nums = [n for n, _, _ in got]
+    mode = _mode([v for _, _, v in got])
+    if mode is None:                       # mỗi mục một giá trị -> gộp lại chẳng ngắn hơn, in thường
+        return None
+    uniq = sorted(set(nums))
+    contiguous = len(uniq) == len(nums) and uniq[-1] - uniq[0] + 1 == len(uniq)
+    span = f"{uniq[0]}–{uniq[-1]}" if contiguous else ",".join(str(n) for n in nums)
+    head = t(f"{prefix} {span}: toàn {mode}", f"{prefix} {span}: all {mode}")
+    exc  = [f"{name}: {v}" for _, name, v in got if v != mode]
+    return head + ("  ·  " + " · ".join(exc) if exc else "")
+
+def _pack(pieces):
+    """Nối các mẩu bằng ' · ' trên CÙNG 1 dòng, xuống dòng khi quá rộng (nhóm ít mục -> đúng 1 dòng)."""
+    lines, cur = [], ""
+    for p in pieces:
+        cand = p if not cur else cur + " · " + p
+        if cur and len(cand) > _WIDTH:
+            lines.append(cur); cur = p
+        else:
+            cur = cand
+    if cur:
+        lines.append(cur)
+    return lines
+
+def _bucket_lines(emoji, entries):
+    """entries: [(tên, giá trị)] đã sort tự nhiên -> các dòng đã thụt lề, dòng ĐẦU mang emoji nhóm."""
+    runs, order = {}, []
+    for name, val in entries:
+        sp = _split_num(name)
+        key = sp[0].lower() if sp else None
+        if key is None:
+            key = ("\x00single", name)          # mục không đánh số: mỗi mục 1 nhóm riêng
+        if key not in runs:
+            runs[key] = (sp[0] if sp else name, [])
+            order.append(key)
+        runs[key][1].append((sp[1] if sp else None, name, val))
+    body, pend = [], []
+    for key in order:
+        prefix, got = runs[key]
+        line = _collapse_run(prefix, got) if got[0][0] is not None else None
+        if line:
+            body += _pack(pend); pend = []      # giữ đúng thứ tự: xả các mục lẻ trước dòng gộp
+            body.append(line)
+        else:
+            pend += [f"{name}: {val}" for _, name, val in got]
+    body += _pack(pend)
+    return [f"   {emoji} {l}" if i == 0 else f"      {l}" for i, l in enumerate(body)]
+
 def render_events(events):
-    """THUẦN: [{subj,item,value}] -> chuỗi ĐẸP. Gom theo MÔN (giữ thứ tự môn xuất hiện), sort đầu điểm
-    tự nhiên; item=None = điểm tổng kết môn (để CUỐI khối). Rỗng -> ''."""
+    """THUẦN: [{subj,item,value}] -> chuỗi ĐẸP. Gom theo MÔN (giữ thứ tự môn xuất hiện), trong môn chia
+    NHÓM 🔬 Lab / 📝 Progress / 📎 Khác / 🏁 Final, sort đầu điểm tự nhiên, run dài gộp 'chủ đạo + ngoại lệ';
+    item=None = điểm tổng kết môn (để CUỐI khối). Rỗng -> ''.
+
+    Header môn BẮT BUỘC mang số điểm mới: 'LAB 1–12' chỉ là các lab VỪA ĐỔI, không phải toàn bộ lab của môn."""
     by_subj = {}
     for e in events:
         by_subj.setdefault(e.get("subj", ""), []).append(e)
     blocks = []
     for subj, items in by_subj.items():
-        comps  = sorted((e for e in items if e.get("item") is not None),      # 'Final …' xuống cuối, còn lại sort tự nhiên
-                        key=lambda e: (1 if "final" in str(e["item"]).lower() else 0, _natkey(e["item"])))
+        comps  = [e for e in items if e.get("item") is not None]
         finals = [e for e in items if e.get("item") is None]
-        lines  = [f"📘 {subj}"]
-        lines += [f"   • {e['item']}: {e['value']}" for e in comps]
+        n = len(items)
+        lines = [t(f"📘 {subj} · {n} điểm mới", f"📘 {subj} · {n} new mark" + ("s" if n != 1 else ""))]
+        for key, emoji in _BUCKETS:
+            grp = sorted(((str(e["item"]), str(e["value"])) for e in comps if _bucket_of(e["item"]) == key),
+                         key=lambda p: _natkey(p[0]))
+            if grp:
+                lines += _bucket_lines(emoji, grp)
         lines += [t(f"   ★ Điểm tổng kết: {e['value']}", f"   ★ Final mark: {e['value']}") for e in finals]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
@@ -109,10 +216,13 @@ def _load_state():
 
 def _save_state(st):
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    tmp = STATE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    tmp = f"{STATE}.{os.getpid()}.tmp"           # tên RIÊNG theo tiến trình: 2 service cùng profile
+    with open(tmp, "w", encoding="utf-8") as f:  # khởi động sát nhau không ghi đè tmp của nhau
         json.dump(st, f, ensure_ascii=False, indent=2)
     os.replace(tmp, STATE)
+    # Dưới profile, file này là điểm thành phần của NGƯỜI KHÁC -> hạn quyền như auth/gcal/attendwatch.
+    try: os.chmod(STATE, 0o600)
+    except OSError: pass
 
 def poll(notify=True):
     """1 lượt dò. Trả số điểm mới phát hiện."""
@@ -150,7 +260,11 @@ def loop(interval_min=30, refresh_min=50):
     if autoupdate_min():
         print(t(f"🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).",
                 f"🔄 Update-while-running: ON every {autoupdate_min()}m (FAP_AUTOUPDATE_MIN)."))
-    last_refresh = last_update = 0.0
+    last_update = 0.0
+    # Ngủ vài giây (dải riêng ở _stagger) RỒI refresh ngay vòng đầu — lệch với attendwatch/reminders
+    # mà lần poll ĐẦU vẫn có token còn hạn (vòng lặp này tới 60' nên hoãn refresh sang vòng sau là quá muộn).
+    time.sleep(startup_delay("gradewatch"))
+    last_refresh = 0.0
     while True:
         last_update = maybe_autoupdate(last_update, time.time())   # opt-in: pull+selftest → tự restart
         if 6 <= _vn_now().hour <= 22:

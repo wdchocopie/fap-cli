@@ -16,13 +16,18 @@ Mọi lệnh (trừ `test`) dùng chung lõi `bot_core.handle()` rồi đẩy k�
 import os, sys, time, json, datetime
 import requests
 from ..core.schedule import sessions_on_day
-from ..core import subjects
+from ..core import subjects, paths
 from ..i18n import t
 from .. import config, fmt
 
 _UA = {"User-Agent": "fapc/1.0 (+FAP schedule notifier)"}
-_SEEN_NOTIF = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                           "output", "seen_notifications.json")
+_SEEN_NOTIF = paths.out("seen_notifications.json")
+
+# Trần ký tự MỘT tin nhắn của từng kênh (trần thật: Telegram 4096 / Discord 2000 — chừa biên an toàn).
+# Tin dài hơn được CẮT THÀNH NHIỀU MẨU (fmt.chunks) rồi gửi lần lượt — KHÔNG cắt cụt làm mất chữ.
+TELEGRAM_LIMIT = 4000
+DISCORD_LIMIT  = 1900
+_GAP = 0.4      # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩu rất nhỏ: 2–3)
 
 # ---------- kênh ----------
 # Lưu ý: requests.post KHÔNG ném lỗi khi server trả HTTP 4xx/5xx — chỉ ném khi lỗi MẠNG.
@@ -54,37 +59,54 @@ def _post_retry(url, payload):
         r = requests.post(url, json=payload, headers=_UA, timeout=15)
     return r
 
+def _partial(chan, done, total):
+    """Cảnh báo GỬI DỞ: mẩu đầu đã tới nơi nhưng mẩu sau hỏng -> người đọc đang thiếu chữ."""
+    if done:
+        print(t(f"  ⚠️ {chan}: mới gửi {done}/{total} mẩu — phần còn lại CHƯA tới nơi.",
+                f"  ⚠️ {chan}: only {done}/{total} chunks sent — the rest did NOT arrive."))
+    return False                                    # gửi dở KHÔNG bao giờ tính là thành công
+
 def _telegram(text):
+    """Gửi tới Telegram, cắt thành NHIỀU tin ≤ TELEGRAM_LIMIT. True chỉ khi MỌI mẩu đã tới nơi."""
     if not (config.TELEGRAM_TOKEN and config.TELEGRAM_CHAT):
         return False
-    try:
-        r = _post_retry(f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage",
-                        {"chat_id": config.TELEGRAM_CHAT, "text": text[:4000]})
-    except requests.RequestException as e:
-        print("  Telegram lỗi mạng · network:", e); return False
-    try:
-        ok = r.ok and bool(r.json().get("ok"))     # Telegram luôn trả JSON có trường "ok"
-    except ValueError:
-        ok = r.ok
-    if ok:
-        return True
-    print(f"  Telegram lỗi · error: HTTP {r.status_code} — {str(r.text)[:160]}")
-    return False
+    parts = fmt.chunks(text, TELEGRAM_LIMIT)
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
+    for i, part in enumerate(parts):
+        if i:
+            time.sleep(_GAP)
+        try:
+            r = _post_retry(url, {"chat_id": config.TELEGRAM_CHAT, "text": part})
+        except requests.RequestException as e:
+            print("  Telegram lỗi mạng · network:", e); return _partial("Telegram", i, len(parts))
+        try:
+            ok = r.ok and bool(r.json().get("ok"))  # Telegram luôn trả JSON có trường "ok"
+        except ValueError:
+            ok = r.ok
+        if not ok:
+            print(f"  Telegram lỗi · error: HTTP {r.status_code} — {str(r.text)[:160]}")
+            return _partial("Telegram", i, len(parts))
+    return True
 
 def _discord(text):
+    """Gửi tới webhook Discord, cắt thành NHIỀU tin ≤ DISCORD_LIMIT. True chỉ khi MỌI mẩu đã tới nơi."""
     if not config.DISCORD_WEBHOOK_URL:
         return False
-    try:
-        r = _post_retry(config.DISCORD_WEBHOOK_URL, {"content": text[:1900]})
-    except requests.RequestException as e:
-        print("  Discord lỗi mạng · network:", e); return False
-    if r.status_code in (200, 204):                 # webhook thành công = 204 (hoặc 200)
-        return True
-    print(f"  Discord lỗi · error: HTTP {r.status_code} — {str(r.text)[:160]}")
-    return False
+    parts = fmt.chunks(text, DISCORD_LIMIT)
+    for i, part in enumerate(parts):
+        if i:
+            time.sleep(_GAP)
+        try:
+            r = _post_retry(config.DISCORD_WEBHOOK_URL, {"content": part})
+        except requests.RequestException as e:
+            print("  Discord lỗi mạng · network:", e); return _partial("Discord", i, len(parts))
+        if r.status_code not in (200, 204):          # webhook thành công = 204 (hoặc 200)
+            print(f"  Discord lỗi · error: HTTP {r.status_code} — {str(r.text)[:160]}")
+            return _partial("Discord", i, len(parts))
+    return True
 
 def push(text):
-    """Gửi tới mọi kênh đã cấu hình. Trả danh sách kênh đã gửi."""
+    """Gửi tới mọi kênh đã cấu hình. Trả danh sách kênh đã gửi ĐẦY ĐỦ (kênh gửi dở KHÔNG được liệt kê)."""
     sent = []
     if _telegram(text): sent.append("Telegram")
     if _discord(text):  sent.append("Discord")
@@ -107,11 +129,14 @@ def _load_seen():
         return None
 
 def _save_seen(ids):
-    os.makedirs(os.path.dirname(_SEEN_NOTIF), exist_ok=True)
+    paths.ensure_dir(_SEEN_NOTIF)                   # thư mục profile có thể chưa tồn tại
     tmp = _SEEN_NOTIF + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(list(ids), f)
     os.replace(tmp, _SEEN_NOTIF)
+    # 0600 như auth/gcal: dưới chế độ nhiều profile, đây là lịch sử thông báo của NGƯỜI KHÁC.
+    try: os.chmod(_SEEN_NOTIF, 0o600)
+    except OSError: pass
 
 def push_new_notifications():
     """Đẩy CHỈ thông báo MỚI (id chưa từng thấy) lên kênh. Lần đầu chỉ ghi mốc, KHÔNG dội cả danh sách."""

@@ -15,10 +15,12 @@ Chạy (từ thư mục gốc repo):
 """
 import os, json, time, sqlite3
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, checksum_login, _vn_now, DB
+from . import paths
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OUT = os.path.join(ROOT, "output")
-APIOUT = os.path.join(OUT, "api")
+# Học phí / hồ sơ / CCCD nằm ở đây → PHẢI tách theo profile, nếu không người này ghi đè người kia.
+ROOT = paths.ROOT
+OUT = paths.out_dir()          # output/ hoặc output/profiles/<tên>/ (xem core/paths.py)
+APIOUT = paths.out("api")
 
 # Endpoint read-only -> các tham số cơ bản cần gửi (checksum tự thêm).
 SIMPLE = {
@@ -45,9 +47,17 @@ SIMPLE = {
     "GetTop10News":           ["campusCode", "Authen", "type"],
 }
 
+def _own_only(path):
+    """chmod 0600 best-effort: dump API chứa điểm/học phí/CCCD — khi chạy multi-profile đây là PII
+    của NGƯỜI KHÁC. Windows/FS lạ không hỗ trợ thì bỏ qua, đừng làm hỏng cả lượt extract."""
+    try: os.chmod(path, 0o600)
+    except OSError: pass
+
 def save(name, http, data):
-    with open(os.path.join(APIOUT, name + ".json"), "w", encoding="utf-8") as f:
+    path = os.path.join(APIOUT, name + ".json")
+    with open(path, "w", encoding="utf-8") as f:
         json.dump({"http": http, "data": data}, f, ensure_ascii=False, indent=2)
+    _own_only(path)
     code = data.get("code") if isinstance(data, dict) else None
     d = unwrap(data)
     n = len(d) if isinstance(d, (list, dict)) else "-"
@@ -82,9 +92,11 @@ def main():
             try: local[k] = json.loads(v)
             except Exception: local[k] = v
         con.close()
-        with open(os.path.join(OUT, "local_data.json"), "w", encoding="utf-8") as f:
+        local_path = os.path.join(OUT, "local_data.json")
+        with open(local_path, "w", encoding="utf-8") as f:
             json.dump(local, f, ensure_ascii=False, indent=2)
-        print(f"  {len(local)} key -> output/local_data.json")
+        _own_only(local_path)
+        print(f"  {len(local)} key -> {local_path}")
     else:
         print("  (bỏ qua — không có RKStorage; dữ liệu lấy qua API ở [B])")
 
@@ -146,7 +158,7 @@ def main():
     except Exception as e:                       # noqa: BLE001 — endpoint mới, đừng làm hỏng cả extract
         print("  (bỏ qua TKB-tuần:", e, ")")
 
-    print("\n=> Xong. Toàn bộ nằm trong output/")
+    print(f"\n=> Xong. Toàn bộ nằm trong {OUT}{paths.label()}")
     print("⚠️  output/ chứa ĐIỂM / HỌC BẠ / TÀI CHÍNH / HỒ SƠ cá nhân — KHÔNG chia sẻ hay đẩy lên repo công khai.")
 
 if __name__ == "__main__":

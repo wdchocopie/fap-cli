@@ -12,9 +12,10 @@ Chạy (từ thư mục gốc repo):
 """
 import os, re, datetime
 from .api import creds, call, as_list, unwrap, current_semester, check_auth
+from . import paths
 from ..fmt import is_online
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output")
+OUT = paths.out_dir()          # output/ hoặc output/profiles/<tên>/ (xem core/paths.py)
 TZID = "Asia/Ho_Chi_Minh"
 _SLOT_RE = re.compile(r"\(?\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*\)?")
 

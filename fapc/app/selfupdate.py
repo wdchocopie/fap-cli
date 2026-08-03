@@ -125,8 +125,22 @@ def perform_update(run_tests=True):
     return "\n".join(lines), True
 
 
+def owner_checkout():
+    """True khi tiến trình KHÔNG chạy dưới profile khách.
+
+    `git pull` + `os.execv` tác động lên CHECKOUT DÙNG CHUNG của mọi profile, nên chỉ tiến trình của
+    CHỦ MÁY (không profile) mới được phép — dù khách có tự đặt FAP_ALLOW_UPDATE / FAP_AUTOUPDATE_MIN
+    trong .env.<profile> của họ đi nữa. Đây là chốt chặn ở tầng CODE, song song với việc loader .env
+    đã lọc 2 khóa đó (fapc/__init__.py:_OWNER_ONLY_KEYS) — hai lớp, hỏng một vẫn còn một."""
+    from ..core import paths
+    return not paths.profile()
+
+
 def autoupdate_min():
-    """Số phút giữa mỗi lần tự-dò-cập-nhật (FAP_AUTOUPDATE_MIN). 0 = tắt."""
+    """Số phút giữa mỗi lần tự-dò-cập-nhật (FAP_AUTOUPDATE_MIN). 0 = tắt.
+    Chạy dưới profile khách -> LUÔN 0 (xem owner_checkout)."""
+    if not owner_checkout():
+        return 0
     from .. import config
     try:
         return max(0, int(str(getattr(config, "AUTOUPDATE_MIN", "0")).strip() or 0))

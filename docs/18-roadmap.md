@@ -1,9 +1,11 @@
-# 18 · Việc đang làm dở · Work in progress
+# 18 · Nhật ký quyết định · Decision log *(đã triển khai · implemented)*
 
-> **VI —** Kế hoạch đã chốt nhưng CHƯA code. Mở file này ra là làm tiếp được ngay, không cần điều tra lại.
-> **EN —** Agreed but NOT yet implemented. Pick up from here without re-investigating.
+> ✅ **VI —** Cả 4 quyết định ở đây **ĐÃ ĐƯỢC CODE**. Giữ file này lại vì nó chứa **lý do** và [§5 sự thật đã kiểm chứng](#5-sự-thật-đã-kiểm-chứng--verified-facts) — đừng điều tra lại những gì đã đo ở đây.
+> ✅ **EN —** All four decisions below are **IMPLEMENTED**. This file stays because it records the **why** and the [§5 verified facts](#5-sự-thật-đã-kiểm-chứng--verified-facts) — don't re-investigate what was already measured here.
 
-**Chốt ngày:** 2026-08-02 · **Nền:** commit `3c42ca9` · **Trạng thái:** 169/169 test offline PASS
+**Chốt ngày:** 2026-08-02 · **Nền:** commit `3c42ca9` · **Trạng thái lúc chốt:** 169/169 test offline PASS
+
+**Tài liệu người dùng sinh ra từ file này · user-facing docs that came out of this:** [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines) (1 session, 2 máy) · [19-multi-profile](19-multi-profile.md) (nhiều tài khoản) · [15-config](15-config.md) (`FAP_PROFILE`, `FAP_TOKEN_READONLY`, `FAP_ALLOW_UPDATE`) · [16-troubleshooting §5](16-troubleshooting.md#5-chạy-2-máy--nhiều-tài-khoản--two-machines--multi-profile) (409 / nhắc 2 lần / login lại liên tục) · [deploy/README.md](../deploy/README.md).
 
 Mọi số liệu dưới đây là **đo thật** (render offline bằng chính code hiện tại), không phải ước lượng. Đã qua 1 vòng agent kiểm chứng chéo — các chỗ phân tích ban đầu nói sai đã được sửa và ghi chú ở [§5](#5-sự-thật-đã-kiểm-chứng--verified-facts).
 
@@ -11,18 +13,20 @@ Mọi số liệu dưới đây là **đo thật** (render offline bằng chính
 
 ## 0. Bốn quyết định đã chốt · The four decisions
 
-| # | Việc | Quyết định |
-|---|---|---|
-| 1 | Hiển thị thông báo điểm mới | **Nhóm theo loại + gộp dòng LAB** (phương án B+A2) |
-| 2 | 2 bug thật vừa phát hiện | **Sửa cả hai** |
-| 3 | 1 session chạy 2 nơi | **Viết tài liệu + thêm cờ `FAP_TOKEN_READONLY`** |
-| 4 | Nhiều account | **Hướng "bạn bè tự login"** — mỗi người tự `fap login`, dữ liệu chỉ về kênh của chính họ |
+| # | Việc | Quyết định | Trạng thái · Status |
+|---|---|---|---|
+| 1 | Hiển thị thông báo điểm mới | **Nhóm theo loại + gộp dòng LAB** (phương án B+A2) | ✅ `fapc/app/gradewatch.py` — `render_events` gom nhóm 🔬📝📎🏁 + gộp run ≥4, header `· N điểm mới` |
+| 2 | 2 bug thật vừa phát hiện | **Sửa cả hai** | ✅ (a) chunk qua `fmt.chunks` ở `notify.py` + 2 bot (hết cắt cụt) · (b) tên tmp theo PID ở `auth._save` + lệch giờ refresh lúc khởi động ở cả 3 watcher |
+| 3 | 1 session chạy 2 nơi | **Viết tài liệu + thêm cờ `FAP_TOKEN_READONLY`** | ✅ cờ ở `fapc/config.py` + `auth.refresh_tokens()` từ chối kèm banner; tài liệu [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines) + [deploy/README](../deploy/README.md) |
+| 4 | Nhiều account | **Hướng "bạn bè tự login"** — mỗi người tự `fap login`, dữ liệu chỉ về kênh của chính họ | ✅ `fapc/core/paths.py` + 1 loader `.env` duy nhất + dấu chủ sở hữu trên Google Calendar; tài liệu [19-multi-profile](19-multi-profile.md), unit `deploy/fap-*@.service` + `deploy/setup-profile.sh` |
 
 **Thứ tự làm:** §1 → §2 → §3 → §4. §1 không dính gì tới phần còn lại nên làm trước được ngay.
 
 ---
 
-## 1. Gộp dòng LAB cho thông báo điểm mới · Compact grade alert
+## 1. ✅ Gộp dòng LAB cho thông báo điểm mới · Compact grade alert
+
+> ✅ **ĐÃ LÀM · DONE** — `fapc/app/gradewatch.py`: `render_events` nay gom nhóm cố định 🔬 → 📝 → 📎 → 🏁, gộp run ≥4 mục thành "chủ đạo + ngoại lệ" (chỉ khi số **thật sự liên tiếp**), header môn có `· N điểm mới`. Mẫu 47 event: **54 dòng/896 ký tự → 19 dòng/560 ký tự**; ca 3 điểm vẫn ngắn như cũ.
 
 **Vì sao:** hiện tại 1 thông báo = **54 dòng / 896 ký tự**. KHÔNG bị cắt (Discord cắt ở 1900, Telegram 4000) — nên đây thuần là chuyện dễ đọc, **không phải bug**.
 
@@ -68,7 +72,9 @@ Thấp. `render_events` chỉ được gọi 1 chỗ (`gradewatch.py:136`), khô
 
 ---
 
-## 2. Hai bug thật · Two real bugs
+## 2. ✅ Hai bug thật · Two real bugs
+
+> ✅ **ĐÃ LÀM · DONE** — (a) `notify.py`, `telegrambot.py`, `discordbot.py` **chunk** qua `fmt.chunks` (4000 / 1900) thay vì `[:N]`, nghỉ 0.4s giữa mẩu, chỉ báo thành công khi **mọi** mẩu gửi xong. (b) `auth._save` dùng tên tmp theo **PID** + dọn khi lỗi; cả 3 watcher **seed `last_refresh` lệch nhau** lúc khởi động (gradewatch / attendwatch / reminders ở 3 dải thời gian rời nhau) nên `update.sh` restart liên tiếp không còn tạo 3 lượt refresh cùng lúc.
 
 ### (a) 🔴 `/grades-detail` và `/all` đang bị cắt mất chữ — MẤT DỮ LIỆU
 
@@ -97,7 +103,9 @@ Nếu FE Identity xoay vòng refresh_token **và** thu hồi cả grant khi bị
 
 ---
 
-## 3. Một session dùng cả PC lẫn VPS · Shared session
+## 3. ✅ Một session dùng cả PC lẫn VPS · Shared session
+
+> ✅ **ĐÃ LÀM · DONE** — cờ `FAP_TOKEN_READONLY` có ở `fapc/config.py`; `auth.refresh_tokens()` kiểm tra **đầu tiên** rồi in banner 5 dòng song ngữ ra `stderr` (kèm nhãn profile) trước khi `SystemExit`. Tài liệu cho người dùng: **[14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines)** (copy file nào / không copy file nào, doctrine 1-nơi-refresh, vì sao đừng chạy bot 2 nơi), tóm tắt ở **[deploy/README](../deploy/README.md)**, triệu chứng ở **[16-troubleshooting §5](16-troubleshooting.md#5-chạy-2-máy--nhiều-tài-khoản--two-machines--multi-profile)**.
 
 ### (i) Dùng chung 1 lần login → ✅ ĐƯỢC
 
@@ -127,7 +135,9 @@ Rồi `chmod 600` cả hai (scp **không** giữ mode; `auth._save` chmod 0600 n
 
 ---
 
-## 4. Nhiều account · Multi-profile
+## 4. ✅ Nhiều account · Multi-profile
+
+> ✅ **ĐÃ LÀM · DONE** — `fapc/core/paths.py` (`profile()`/`out_dir()`/`out()`/`ensure_dir()`/`label()`) + ~11 hằng đường dẫn chuyển sang `paths.out(...)` **giữ nguyên tên hằng**; `.env` chỉ còn **một** loader (`fapc/__init__.py:load_env()`) hiểu profile và **chặn khóa danh tính**; Google Calendar gắn `fapc_owner=<mã SV>`; state/`api/*.json` chmod `0600`; unit template `deploy/fap-*@.service` + `deploy/setup-profile.sh`. Tài liệu: **[19-multi-profile](19-multi-profile.md)**.
 
 **Hướng đã chốt:** mỗi người bạn **tự chạy `fap login` của họ**, dữ liệu chỉ chảy về kênh của **chính họ**. Không nhận hộ mật khẩu/token của người khác.
 
@@ -135,7 +145,15 @@ Rồi `chmod 600` cả hai (scp **không** giữ mode; `auth._save` chmod 0600 n
 
 Thêm `fapc/core/paths.py` (~25 dòng): `profile()` / `out_dir()` / `out(*parts)`. Viết lại ~11 hằng đường dẫn để gọi `paths.out(...)` nhưng **GIỮ NGUYÊN TÊN hằng ở module level** — `tests/integration_offline.py:63` và `tests/test_logic.py:564` gán thẳng `aw.STATE` / `gw.STATE` / `notify._SEEN_NOTIF`; biến chúng thành hàm là **hỏng cả 2 bộ test**.
 
-### 🚧 Ba cửa ải phải xử lý TRƯỚC khi ship
+### ✅ Ba cửa ải — ĐÃ ĐÓNG cả ba · all three gates CLEARED
+
+| | Đã xử lý thế nào · How it was closed |
+|---|---|
+| ✅ 1 | **Gộp làm MỘT loader.** `fapc/config.py` không còn tự đọc `.env`; nó gọi `fapc/__init__.py:load_env()` (idempotent). Có profile ⇒ nạp `.env.<tên>` **trước** (setdefault = thắng), rồi `.env` gốc **bỏ hẳn** 9 khóa danh tính (`TELEGRAM_*`, `DISCORD_*`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`, `FAP_PROFILE`). Loader còn **ngó `FAP_PROFILE` trong `.env` gốc trước**, nếu không thì đường dẫn theo profile mà env lại của chủ máy = vẫn rò. |
+| ✅ 2 | **Google Calendar: sửa UID + nhãn trong cùng PR** (không phải chặn gcal). Mỗi event mang `fapc_owner=<mã SV>` và `iCalUID` chứa mã SV; `_list_fapc_events` lọc theo nhãn của **chính mình** (lọc lại client-side vì Calendar API không có "khác giá trị này"); event **cũ chưa gắn nhãn** chỉ thuộc profile **mặc định**, và được "nhận nuôi" **cập nhật tại chỗ** (giữ uid cũ) nên không nhân đôi. Liệt kê lỗi ⇒ **DỪNG** thay vì đẩy (tránh nhân đôi cả kỳ). |
+| ✅ 3 | **`output/api/` tách theo profile + chmod 0600.** `extract.OUT/APIOUT`, `subjects.CACHE`, `schedule.OUT`, `extras`, `attendwatch.STATE`, `gradewatch.STATE`, `notify._SEEN_NOTIF`, `gcal.TOKEN_FILE`, `auth.*` đều qua `paths.out(...)`; `api/*.json`, `local_data.json`, `attendance_state.json`, `seen_notifications.json` chmod `0600` (như `auth._save`/`gcal._save` vốn có). **Còn sót:** `gradewatch._save_state` **chưa** chmod `0600` — nên có 1 helper dùng chung thay vì 3 bản sao. |
+
+<details><summary>Nội dung 3 cửa ải lúc chốt (giữ lại để tra cứu) · the original gate table</summary>
 
 | | Vấn đề | Bắt buộc |
 |---|---|---|
@@ -143,17 +161,26 @@ Thêm `fapc/core/paths.py` (~25 dòng): `profile()` / `out_dir()` / `out(*parts)
 | 🔴 | **Google Calendar phá dữ liệu.** `iCalUID` không chứa mã sinh viên (`gcal.py:98`), `_list_fapc_events` lọc bằng mỗi `fapc=1` (`gcal.py:119`), `_prune_plan` xóa mọi event fapc không có trong lần fetch hiện tại (`gcal.py:127-130`) ⇒ `calendar-prune` chạy dưới profile A **xóa sạch cả kỳ của profile B**. Guard 30% (`gcal.py:138-141`) không cứu được vì tỉ lệ tính lại mỗi lần; `--force` bỏ qua luôn. | Fix UID+tag **cùng PR**, hoặc **chặn hẳn** gcal khi có profile |
 | 🔴 | **`output/api/` đè nhau.** `fap extract` ghi tên file cố định (`extract.py:20-21`) — học phí, hồ sơ, CCCD của người này đè lên người kia. Ngoài ra `gradewatch._save_state`, `attendwatch`, `notify._save_seen` **không** chmod 0600 (khác `auth._save`/`gcal._save`). | Tách theo profile + chmod 0600 |
 
+</details>
+
+> 🔴 **CÒN LẠI — việc thủ công, KHÔNG có trong code:** `.gitignore` mới chỉ có dòng `.env` (khớp **đúng** tên đó), nên `.env.<tên>` **SẼ BỊ COMMIT** cùng bot token/chat id của người khác. Phải thêm `.env.*` **và** `!.env.example` **trước khi** tạo profile đầu tiên. Xem [19-multi-profile §3](19-multi-profile.md#3-file-cấu-hình-của-profile--the-per-profile-env-file).
+
 ### ⚠️ Ràng buộc chéo với §3
 Doctrine §3 là "chỉ MỘT nơi được refresh". Nếu một người bạn cũng copy `token.json` về laptop của họ thì profile đó có **hai** nơi refresh → đua rotation, và lần này **người bạn đó không tự sửa được**. ⇒ Doctrine §3 phải thành **chính sách onboarding từng profile**, viết thành tài liệu.
+
+> ✅ **ĐÃ LÀM** — viết thành [19-multi-profile §4 (onboarding)](19-multi-profile.md#4-thêm-một-người--onboarding-a-second-person) + [§6.3](19-multi-profile.md#63--refresh_token-của-mỗi-người-nằm-trên-server-của-bạn--everyones-refresh-token-lives-on-your-server), và nhắc lại ngay trong `deploy/setup-profile.sh`.
 
 ### ⚠️ Bug (b) ở §2 là điều kiện tiên quyết
 3 tiến trình/profile × N profile = **3N** lần refresh đồng thời sau mỗi `update.sh`. Trong cùng 1 profile, 3 tiến trình vẫn dùng chung 1 `oauth_tokens.json` và 1 tên tmp cố định. **Phải sửa §2(b) trước khi làm §4.**
 
-### Câu hỏi còn mở
-- Các profile có **cùng campus** không? (quyết định `subjects_catalog.json` dùng chung được hay phải tách — `GetSubjets` chỉ nhận `campusCode`, dữ liệu công khai theo campus)
-- Google Calendar: dùng chung 1 tài khoản Google hay mỗi người một?
-- `/update` có nên cho mọi profile gọi không? (hiện bất kỳ owner nào cũng `git pull` + restart trên **checkout dùng chung**) → đề xuất thêm `FAP_ALLOW_UPDATE=1` chỉ có trong unit của chủ máy
-- **Đồng ý (không phải kỹ thuật):** refresh_token của mỗi người bạn sẽ nằm trên VPS **của bạn**, scope `openid email profile offline_access`. Mỗi người phải biết và đồng ý rõ ràng.
+> ✅ **ĐÃ LÀM TRƯỚC** — §2(b) xong (tmp theo PID + seed `last_refresh` lệch nhau) nên §4 mới ship. Lưu ý vẫn đúng: **mỗi profile 1 bộ tiến trình riêng**, đừng chạy 2 instance cùng một profile.
+
+### Câu hỏi còn mở → ĐÃ TRẢ LỜI · answered
+
+- ~~Các profile có **cùng campus** không?~~ → **Tách theo profile.** `subjects_catalog.json` nằm trong `output/profiles/<tên>/`: dữ liệu nhỏ, và profile khác campus vẫn ra đúng danh mục. Đổi lại mỗi profile tự dựng cache một lần.
+- ~~Google Calendar: dùng chung 1 tài khoản Google hay mỗi người một?~~ → **Cả hai đều an toàn**, vì quyền sở hữu tính theo **mã sinh viên** (`fapc_owner`) chứ không theo lịch: `calendar-prune` chỉ xóa event mang mã SV của chính nó. Dùng chung 1 tài khoản thì lịch bị **trộn** (không mất dữ liệu) — muốn tách thì đặt `GCAL_CALENDAR_ID` trong `.env.<tên>` (khóa này **không** thừa kế, nhưng mặc định vẫn là `primary`). Mỗi profile phải tự chạy `fap calendar-auth` một lần (token Google riêng theo profile). Chi tiết: [19-multi-profile §6.2](19-multi-profile.md#62--google-calendar-dùng-chung--sharing-one-google-calendar).
+- ~~`/update` có nên cho mọi profile gọi không?~~ → **KHÔNG.** `/update` giờ **TẮT mặc định**, cần `FAP_ALLOW_UPDATE=1` (đúng như đề xuất) và khóa này nằm trong danh sách **không thừa kế**, nên chỉ unit/`.env` của chủ máy bật được. Kiểm tra chủ sở hữu bot vẫn chạy trước như cũ.
+- **Đồng ý (không phải kỹ thuật):** refresh_token của mỗi người bạn sẽ nằm trên VPS **của bạn**, scope `openid email profile offline_access`. Mỗi người phải biết và đồng ý rõ ràng. → Đã thành **quy trình onboarding bắt buộc**, bước 1: [19-multi-profile §4](19-multi-profile.md#4-thêm-một-người--onboarding-a-second-person). `deploy/setup-profile.sh` **từ chối chạy** nếu chưa có token do chính người đó tạo.
 
 ---
 

@@ -6,6 +6,11 @@ device-data/
 # Thông tin đăng nhập / bí mật
 # (LƯU Ý: .gitignore KHÔNG hỗ trợ comment cùng dòng — mỗi pattern phải đứng riêng.)
 .env
+# .env.<profile> (nhiều tài khoản): chứa token/chat id của NGƯỜI KHÁC — tuyệt đối không commit.
+# `.env` ở trên chỉ khớp ĐÚNG tên đó, nên cần thêm pattern này.
+.env.*
+# ...trừ file mẫu (không có bí mật, cần commit).
+!.env.example
 # credentials.json = Google OAuth client (Calendar)
 credentials.json
 legacy/credentials.json
@@ -34,4 +39,6 @@ analysis/strings_clean.txt
 # ===== Cấu hình trợ lý AI / Claude Code (cá nhân — KHÔNG commit) =====
 # Skill + hướng dẫn agent: công cụ dev riêng, không phải sản phẩm của repo.
 .claude/skills/
+# Ghi chú điều phối agent (context pack cho từng lần build) — scratch, không phải sản phẩm.
+.claude/plans/
 AGENTS.md

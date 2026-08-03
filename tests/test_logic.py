@@ -1018,6 +1018,168 @@ def test_predict_course_skips_resit_total():
     p = predict_course(comps, target=5.0)
     assert p["total_w"] == 40.0                               # 10 + 30 (bỏ Total 10 + Resit 30)
 
+# ---- roadmap §18: gộp thông báo · cắt tin dài · profile · máy chỉ-đọc ----
+# Mọi assert dưới đây tránh phụ thuộc NGÔN NGỮ: chỉ bám phần chung của cặp t(vi, en)
+# ('· 5' có trong cả '· 5 điểm mới' lẫn '· 5 new marks') -> không vỡ khi FAP_LANG đổi.
+
+def test_gradewatch_render_events_collapses_long_run():
+    """Ca 'baseline lại' (47 điểm một lúc) làm tin nhắn dài 54 dòng. Run cùng tiền tố ≥4 mục phải gộp
+    thành 'chủ đạo + ngoại lệ'; header môn BẮT BUỘC mang SỐ điểm mới, nếu không 'LAB 1–5' bị đọc nhầm
+    là TOÀN BỘ lab của môn trong khi event chỉ chứa lab VỪA ĐỔI.
+    A run of >=4 same-prefix items collapses to mode + exceptions; the subject header MUST carry the
+    count, otherwise 'LAB 1-5' reads as *all* labs instead of only the ones that just changed."""
+    from fapc.app.gradewatch import render_events, _RUN_MIN, _mode
+    assert _RUN_MIN == 4                                      # ngưỡng gộp (dưới ngưỡng -> in bình thường)
+    ev = [{"subj": "HOD402", "item": f"LAB {i}", "value": "7" if i == 3 else "9"} for i in range(1, 6)]
+    out = render_events(ev)
+    assert "HOD402 · 5" in out                                # số điểm mới ở header môn
+    assert "LAB 1–5" in out                                   # số LIÊN TIẾP -> ghi dải
+    assert "LAB 3: 7" in out                                  # ngoại lệ vẫn hiện đủ giá trị
+    assert "LAB 1: 9" not in out and "LAB 5: 9" not in out    # mục theo chủ đạo KHÔNG lặp lại
+    assert len(out.splitlines()) == 2                         # header + ĐÚNG 1 dòng nhóm 🔬
+    gappy = render_events([{"subj": "X", "item": f"LAB {i}", "value": "9"} for i in (1, 3, 5, 9)])
+    assert "LAB 1–9" not in gappy and "LAB 1,3,5,9" in gappy  # đứt quãng -> KHÔNG nói dối phạm vi
+    assert _mode(["9", "8", "7", "6"]) is None                # mỗi mục một giá trị -> không có chủ đạo
+
+def test_gradewatch_render_events_short_case_stays_short():
+    """Bình thường chỉ 1–3 điểm/lần: cách gộp mới KHÔNG được làm ca ít điểm dài ra.
+    The common 1-3 mark case must stay exactly as short as before — a 2-item run must NOT collapse."""
+    from fapc.app.gradewatch import render_events
+    two = render_events([{"subj": "X", "item": "LAB 1", "value": "8"},
+                         {"subj": "X", "item": "LAB 2", "value": "9"}])
+    assert "LAB 1–2" not in two                               # dưới ngưỡng -> KHÔNG gộp
+    assert "LAB 1: 8" in two and "LAB 2: 9" in two            # liệt kê đủ, nối ' · ' trên 1 dòng
+    assert len(two.splitlines()) == 2                         # header + 1 dòng
+    three = render_events([{"subj": "X", "item": "LAB 12", "value": "8"},
+                           {"subj": "X", "item": "Final exam", "value": "7.6"},
+                           {"subj": "X", "item": None, "value": "8.5"}])   # item=None = điểm tổng kết
+    assert "X · 3" in three                                   # đếm CẢ điểm tổng kết
+    assert len(three.splitlines()) == 4                       # header + 🔬 + 🏁 + ★
+    assert three.splitlines()[-1].lstrip().startswith("★")    # điểm tổng kết ở CUỐI khối môn
+    assert render_events([]) == ""
+
+def test_fmt_chunks_no_data_loss():
+    """fmt.chunks thay cho text[:4000]/[:1900] — cắt cụt LÀ MẤT DỮ LIỆU thật (/grades-detail 6 môn mất
+    3425 ký tự trên Discord). Mọi mẩu ≤ limit, ưu tiên ranh giới dòng, nối lại KHÔNG mất chữ.
+    Chunking replaces hard truncation, which really did drop text; nothing may be lost."""
+    from fapc.fmt import chunks
+    assert chunks("ngắn", 100) == ["ngắn"]                    # dưới hạn -> nguyên văn, 1 mẩu
+    assert chunks("abc", 0) == ["abc"] and chunks("abc", -1) == ["abc"] and chunks("abc", None) == ["abc"]
+    assert chunks("", 10) == [""]                             # LUÔN trả ≥1 phần tử
+    text = "\n".join(f"📘 dòng {i} " + "x" * 20 for i in range(60))
+    parts = chunks(text, 200)
+    assert len(parts) > 1                                     # dài hơn hạn -> nhiều mẩu
+    assert max(len(p) for p in parts) <= 200                  # không mẩu nào vượt hạn
+    assert "\n".join(parts) == text                           # cắt ở RANH GIỚI DÒNG -> ghép lại y nguyên
+    long_line = "y" * 450                                     # 1 dòng dài quá khổ -> buộc cắt CỨNG
+    hard = chunks(long_line, 100)
+    assert len(hard) == 5 and max(len(p) for p in hard) <= 100
+    assert "".join(hard) == long_line                         # cắt cứng cũng KHÔNG mất ký tự nào
+
+def test_paths_profile_resolution():
+    """FAP_PROFILE chưa đặt ⇒ đường dẫn ra ĐÚNG chuỗi cũ <root>/output/<file> — đây là CAM KẾT tương
+    thích ngược (máy đang chạy không phải migrate). Có profile ⇒ output/profiles/<tên>/. Tên độc hại
+    (thoát thư mục) rơi về mặc định, KHÔNG raise: một biến gõ nhầm không được làm chết mọi lệnh.
+    No profile MUST resolve to the exact legacy path; hostile names fall back instead of escaping."""
+    from fapc.core import paths
+    saved = os.environ.get("FAP_PROFILE")
+    try:
+        os.environ.pop("FAP_PROFILE", None)
+        assert paths.profile() == "" and paths.label() == ""
+        assert paths.out_dir() == os.path.join(paths.ROOT, "output")
+        assert paths.out("token.json") == os.path.join(paths.ROOT, "output", "token.json")
+        assert paths.out("api", "x.json") == os.path.join(paths.ROOT, "output", "api", "x.json")
+        os.environ["FAP_PROFILE"] = "alice"
+        assert paths.profile() == "alice" and paths.label() == " [alice]"
+        assert paths.out("token.json") == os.path.join(paths.ROOT, "output", "profiles", "alice", "token.json")
+        for bad in ("../../etc", "", "   ", "a/b", "a\\b", ".", "..", "~", "al ice"):
+            os.environ["FAP_PROFILE"] = bad
+            assert paths.profile() == "", bad                 # tên sai -> coi như KHÔNG có profile
+            assert paths.out_dir() == os.path.join(paths.ROOT, "output"), bad   # không thoát ra ngoài output/
+    finally:
+        if saved is None: os.environ.pop("FAP_PROFILE", None)
+        else: os.environ["FAP_PROFILE"] = saved
+
+def test_auth_token_readonly_refuses_refresh():
+    """FE Identity XOAY VÒNG refresh_token: máy nào refresh trước thì bản của máy kia thành vô hiệu.
+    FAP_TOKEN_READONLY=1 phải CHẶN refresh NGAY (trước mọi đọc file/gọi mạng) và hét TO ra log.
+    Chạy hoàn toàn offline: chỉ vá config, không đụng mạng lẫn oauth_tokens.json."""
+    import fapc.config as C, fapc.core.auth as A
+    assert A._truthy("1") and A._truthy(" TRUE ") and A._truthy("on") and A._truthy("Yes")
+    assert not A._truthy("0") and not A._truthy("") and not A._truthy(None) and not A._truthy("false")
+    old = C.TOKEN_READONLY
+    try:
+        C.TOKEN_READONLY = "0"                                # '0' trong .env = TẮT (bool('0') là True -> bẫy)
+        assert A.token_readonly() is False
+        C.TOKEN_READONLY = "1"
+        assert A.token_readonly() is True
+        out, err, refused = io.StringIO(), io.StringIO(), False
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                A.refresh_tokens()
+            except SystemExit:
+                refused = True
+        assert refused                                        # TỪ CHỐI, không refresh
+        loud = err.getvalue() + out.getvalue()
+        assert "FAP_TOKEN_READONLY" in loud and "!!!!" in loud # banner phải nhìn thấy được trong log
+    finally:
+        C.TOKEN_READONLY = old
+
+def test_env_loader_profile_does_not_inherit_identity_keys():
+    """Lỗi RÒ DỮ LIỆU: profile của bạn bè thừa kế TELEGRAM_CHAT của chủ máy ⇒ điểm của bạn bè bắn vào
+    chat chủ máy. Khóa mang DANH TÍNH không được thừa kế (thiếu ⇒ kênh TẮT HẲN — an toàn); khóa mức
+    MÁY vẫn thừa kế bình thường. Dùng .env GIẢ trong thư mục tạm — KHÔNG bao giờ đọc .env thật.
+    A profile must never inherit the owner's delivery identity; non-identity keys still inherit."""
+    import tempfile, fapc
+    keys = ("FAP_PROFILE", "TELEGRAM_CHAT", "TELEGRAM_TOKEN", "ZZ_FAKE_SHARED_KEY")
+    saved = {k: os.environ.get(k) for k in keys}
+    old_file, old_loaded = fapc.__file__, fapc._ENV_LOADED
+    tmp = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmp, ".env"), "w", encoding="utf-8") as f:          # .env của CHỦ MÁY
+            f.write("TELEGRAM_CHAT=OWNER_CHAT\nTELEGRAM_TOKEN=OWNER_TOKEN\nZZ_FAKE_SHARED_KEY=shared\n")
+        with open(os.path.join(tmp, ".env.alice"), "w", encoding="utf-8") as f:    # alice KHÔNG khai CHAT
+            f.write("TELEGRAM_TOKEN=ALICE_TOKEN\n")
+        for k in keys:
+            os.environ.pop(k, None)
+        os.environ["FAP_PROFILE"] = "alice"
+        fapc.__file__ = os.path.join(tmp, "fapc", "__init__.py")   # -> gốc repo giả = tmp
+        fapc._ENV_LOADED = False                                   # loader idempotent -> mở khoá để nạp lại
+        fapc.load_env()
+        assert os.environ.get("TELEGRAM_CHAT") is None       # KHÔNG thừa kế -> không rò vào chat chủ máy
+        assert os.environ.get("TELEGRAM_TOKEN") == "ALICE_TOKEN"   # .env.<profile> THẮNG .env gốc
+        assert os.environ.get("ZZ_FAKE_SHARED_KEY") == "shared"    # khóa mức máy vẫn thừa kế
+        assert "TELEGRAM_CHAT" in fapc._IDENTITY_KEYS and "GCAL_CALENDAR_ID" in fapc._IDENTITY_KEYS
+    finally:
+        fapc.__file__, fapc._ENV_LOADED = old_file, old_loaded
+        for k, v in saved.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+
+def test_gcal_owner_scoped_uid_and_ownership():
+    """Blocker §4: nhiều profile dùng CHUNG một lịch Google thì prune của profile này XÓA sự kiện của
+    profile kia. Sự kiện nay gắn nhãn fapc_owner=<mã SV>: _is_mine chỉ nhận sự kiện của CHÍNH mình,
+    lịch CŨ (chưa có nhãn) chỉ thuộc profile mặc định; uid cũ đã có trên lịch thì TÁI DÙNG (cập nhật
+    tại chỗ, không nhân đôi, không xóa gì).
+    Ownership is keyed by student roll, so one profile can never claim - let alone prune - another's."""
+    from fapc.app.gcal import _owner, _uids_for, _pick_uid, _is_mine, _current_uids
+    assert _owner("HE170001") == "he170001" and _owner("he-17/0001") == "he170001"
+    assert _owner(None) == "unknown"                          # không có mã SV vẫn phải ra khóa hợp lệ
+    new_a, legacy = _uids_for(MON, "he170001")
+    new_b, legacy_b = _uids_for(MON, "he170002")
+    assert legacy == legacy_b and new_a != new_b              # uid CŨ trùng nhau, uid MỚI tách theo mã SV
+    assert "he170001" in new_a and "he170001" not in legacy
+    assert _pick_uid(MON, "he170001", frozenset()) == new_a   # lịch chưa có gì -> uid mới
+    assert _pick_uid(MON, "he170001", {legacy}) == legacy     # đã có bản cũ CỦA TÔI -> nhận nuôi, không tạo thêm
+    assert _current_uids([MON], "he170001", {legacy}) == {legacy}   # prune tính ĐÚNG uid mà sync đẩy
+    mine  = {"extendedProperties": {"private": {"fapc": "1", "fapc_owner": "he170001"}}}
+    other = {"extendedProperties": {"private": {"fapc": "1", "fapc_owner": "he170002"}}}
+    old   = {"extendedProperties": {"private": {"fapc": "1"}}}      # lịch CŨ, chưa gắn nhãn chủ sở hữu
+    assert _is_mine(mine, "he170001", False)
+    assert not _is_mine(other, "he170001", True)              # KHÔNG BAO GIỜ đụng sự kiện profile khác
+    assert _is_mine(old, "he170001", True)                    # profile mặc định nhận lịch cũ
+    assert not _is_mine(old, "he170001", False)               # profile có tên thì KHÔNG
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

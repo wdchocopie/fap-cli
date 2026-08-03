@@ -1,0 +1,27 @@
+# fap-gradewatch@.service — TEMPLATE: watcher ĐIỂM MỚI cho MỘT profile (nhiều tài khoản / 1 máy).
+# TEMPLATE unit: grade watcher for ONE profile (multi-account on one box).
+#
+# %i = tên profile (phần sau dấu @) -> FAP_PROFILE=%i -> baseline riêng ở
+# output/profiles/<tên>/grade_state.json, kênh gửi đọc từ .env.<tên>.
+# %i = the profile name -> FAP_PROFILE=%i -> its own baseline in
+# output/profiles/<name>/grade_state.json, delivery keys from .env.<name>.
+#
+#   systemctl --user enable --now fap-gradewatch@alice.service
+#   journalctl --user -u fap-gradewatch@alice.service -n 50 -f
+#
+# Nhanh hơn · quicker:  bash deploy/setup-profile.sh alice
+[Unit]
+Description=fap-cli grade watcher [%i] (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+Environment=FAP_PROFILE=%i
+ExecStart=%h/.venv/bin/fap watch-grades loop 60
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=default.target

@@ -9,11 +9,21 @@ phút thì đẩy 1 lời nhắc — MỖI TIẾT CHỈ NHẮC 1 LẦN (nhớ tr
 Lõi `due_reminders()`/`reminder_text()` là THUẦN (không mạng/IO) -> test offline được. `ClassReminder.tick()`
 lo phần có mạng: nạp lại TKB trong ngày (cache), tự refresh token ~50' để bot sống lâu, sinh lời nhắc.
 """
-import time
+import random, time
 from .. import config, fmt
 from ..i18n import t
 from ..core.api import _vn_now, creds, current_semester
 from ..core.schedule import fetch_sessions, sessions_on_day
+
+# Lệch giờ refresh token lúc KHỞI ĐỘNG — bảng phân dải dùng chung ở fapc/app/_stagger.py.
+# reminders chạy TRONG bot (tick ~20–60s) nên KHÔNG ngủ chặn như 2 watcher: chỉ seed mốc, tick dày
+# nên lần refresh đầu vẫn tới sớm.
+from ._stagger import first_refresh_mark
+
+
+def _first_refresh_mark(refresh_min, now):
+    """Giữ tên cũ cho test/tương thích — nay ủy quyền cho _stagger (dải riêng của reminders)."""
+    return first_refresh_mark("reminders", refresh_min, now)
 
 
 def lead_minutes():
@@ -62,13 +72,15 @@ class ClassReminder:
         self._sessions = []
         self._day = None
         self._last_load = 0.0
-        self._last_refresh = 0.0
+        self._last_refresh = 0.0     # 0 = CHƯA đặt mốc; _maybe_refresh() sẽ seed lệch (xem _first_refresh_mark)
 
     def enabled(self):
         return self.lead > 0
 
     def _maybe_refresh(self, now_ts, refresh_min=50):
         """Giữ token FAP sống cho bot chạy nền (bot tương tác vốn không tự refresh)."""
+        if not self._last_refresh:              # tick ĐẦU: seed mốc lệch, đừng refresh ngay cùng lúc với watcher
+            self._last_refresh = _first_refresh_mark(refresh_min, now_ts)
         if now_ts - self._last_refresh > refresh_min * 60:
             try:
                 from .attendwatch import _refresh_token

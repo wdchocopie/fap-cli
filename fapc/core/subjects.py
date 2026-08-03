@@ -11,10 +11,11 @@ trễ). KHÔNG bao giờ raise: thiếu danh mục → trả mã trơ / 0 tín c
 """
 import os, json
 from .api import call_login_retry, as_list
+from . import paths
 from .. import fmt
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CACHE = os.path.join(_ROOT, "output", "subjects_catalog.json")
+# Danh mục để RIÊNG từng profile: dữ liệu nhỏ, và mỗi profile có thể khác campus (GetSubjets theo campus).
+CACHE = paths.out("subjects_catalog.json")   # output/… hoặc output/profiles/<tên>/… (xem core/paths.py)
 
 _INDEX = None        # {code: {"en","vi","credits","replacedBy"}} — memo trong tiến trình (None = chưa nạp)
 
@@ -48,8 +49,10 @@ def _read_cache():
 
 def _write_cache(idx):
     try:
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        tmp = CACHE + ".tmp"
+        paths.ensure_dir(CACHE)                    # thư mục profile có thể chưa tồn tại
+        # tmp RIÊNG theo tiến trình: watch-attendance + watch-grades cùng profile khởi động trong cùng
+        # giây và cả hai gọi subjects.load()/refresh() -> tên tmp dùng chung sẽ ghi đè nhau giữa chừng.
+        tmp = f"{CACHE}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(idx, f, ensure_ascii=False, indent=2)
         os.replace(tmp, CACHE)

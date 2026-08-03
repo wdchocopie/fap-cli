@@ -11,6 +11,10 @@
 #     INTERVAL_ATT=20 INTERVAL_GRD=120 bash deploy/setup-server.sh   # đổi chu kỳ dò (phút)
 #
 #   Gỡ sạch:  bash deploy/setup-server.sh --remove
+#
+#   NHIỀU TÀI KHOẢN trên cùng máy này? Script này dựng cho profile MẶC ĐỊNH (chủ máy).
+#   Mỗi người thêm vào dùng:  bash deploy/setup-profile.sh <tên>   (xem docs/19-multi-profile.md)
+#   MULTI-ACCOUNT? This script sets up the DEFAULT profile; add others with setup-profile.sh <name>.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
@@ -21,7 +25,9 @@ if [ "${1:-}" = "--remove" ]; then
   systemctl --user disable --now $UNITS 2>/dev/null || true
   for u in $UNITS; do rm -f "$UD/$u"; done
   systemctl --user daemon-reload 2>/dev/null || true
-  echo "✅ Đã gỡ toàn bộ service fap-cli."; exit 0
+  echo "✅ Đã gỡ service fap-cli của profile MẶC ĐỊNH."
+  echo "   (Unit theo profile — fap-*@<tên>.service — gỡ riêng: bash deploy/setup-profile.sh --remove <tên>)"
+  exit 0
 fi
 
 EXTRAS="${EXTRAS:-[gcal]}"

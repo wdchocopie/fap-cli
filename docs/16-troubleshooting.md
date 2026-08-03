@@ -185,7 +185,70 @@ $env:PYTHONUTF8 = "1"
 
 ---
 
-## 5. Tự kiểm tra & xem trạng thái · Self-check & status
+## 5. Chạy 2 máy & nhiều tài khoản · Two machines & multi-profile
+
+> **VI —** Nền tảng: [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines) (1 session, 2 máy) và [19-multi-profile](19-multi-profile.md) (nhiều tài khoản).
+> **EN —** Background: [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines) (one session, two machines) and [19-multi-profile](19-multi-profile.md).
+
+### Bot ngừng trả lời / 409 Conflict · bot stops answering / 409
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Bot Telegram **không trả lời gì nữa**; log lặp lại lỗi `getUpdates` mỗi ~5 giây, không bao giờ thoát. · en · The Telegram bot **answers nothing**; the log repeats a `getUpdates` error every ~5s forever. |
+| **Nguyên nhân · Cause** | vi · **Hai tiến trình `fap telegram-bot` cùng một token** (thường: VPS **và** PC, hoặc một unit chạy 2 lần). Telegram trả **409 Conflict**; body 409 vẫn là JSON hợp lệ nên vòng lặp chỉ thấy `ok=false` → in lỗi → ngủ 5s → lặp **vô hạn**. · en · **Two `fap telegram-bot` processes on the same token** (typically VPS **and** PC). Telegram returns **409 Conflict**; the 409 body is still valid JSON, so the poller only sees `ok=false`, sleeps 5s and **loops forever**. |
+| **Cách sửa · Fix** | vi · **Tắt bot ở một máy.** Chỉ chạy bot ở **máy sở hữu token** (VPS): `systemctl --user stop fap-bot` trên máy kia, và **để trống** `TELEGRAM_*` trong `.env` của PC. Nhiều profile: mỗi profile phải có **token bot RIÊNG** — hai profile dùng chung 1 `TELEGRAM_TOKEN` cũng ra đúng lỗi 409 này. · en · **Stop the bot on one machine.** Run it only on the **token-owning box** (the VPS): `systemctl --user stop fap-bot` elsewhere, and leave `TELEGRAM_*` **empty** in the PC's `.env`. With profiles: each profile needs its **own bot token** — two profiles sharing one `TELEGRAM_TOKEN` produce the same 409. |
+
+### Nhắc lịch 2 lần · class reminders fire twice
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Mỗi tiết học nhận **2 tin nhắc** giống hệt nhau (đôi khi cách nhau vài giây). · en · Every class produces **two identical reminders** (sometimes seconds apart). |
+| **Nguyên nhân · Cause** | vi · **Hai bot/watcher đang chạy song song** (2 máy, hoặc 2 unit trên cùng máy). Tập "đã nhắc" nằm **trong RAM**, **không có file state** ⇒ hai tiến trình không thể biết nhau ⇒ trùng **100%**. · en · **Two resident processes running in parallel.** The "already reminded" set lives **in RAM** with **no state file**, so the two can't see each other — duplication is **guaranteed**. |
+| **Cách sửa · Fix** | vi · Chỉ giữ **một** tiến trình có bật nhắc lịch. Kiểm tra: `systemctl --user list-units 'fap-*'` trên **cả hai** máy. Muốn tắt nhắc ở một nơi mà vẫn giữ bot: đặt `FAP_REMIND_MINUTES=0`. · en · Keep **one** reminder-capable process. Check `systemctl --user list-units 'fap-*'` on **both** machines. To keep a bot but silence its reminders, set `FAP_REMIND_MINUTES=0`. |
+
+### Phải login lại liên tục · you keep having to re-login
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Vài giờ/vài ngày một lần lại `Refresh lỗi ... refresh_token hết hạn?` dù mới `fap login` xong. · en · `Refresh lỗi … refresh_token hết hạn?` again and again, hours or days after a fresh `fap login`. |
+| **Nguyên nhân · Cause** | vi · **Hai nơi cùng refresh một session.** `refresh_token` **XOAY VÒNG**: mỗi lần refresh thành công sẽ **vô hiệu hóa** bản cũ ⇒ máy chạy sau cầm token đã chết. Thường gặp khi PC copy `output/` từ VPS rồi vẫn chạy `fap refresh` (hoặc `run-fap.ps1`/cron). · en · **Two places refreshing one session.** The `refresh_token` **rotates** — each successful refresh **invalidates** the previous one, so whichever machine runs second holds a dead token. Classic cause: the PC copied `output/` from the VPS and still runs `fap refresh` (or `run-fap.ps1`/cron). |
+| **Cách sửa · Fix** | vi · Chọn **MỘT** máy sở hữu token (VPS). Trên máy kia: đặt `FAP_TOKEN_READONLY=1` trong `.env`, gỡ mọi task/cron gọi `fap refresh`. Rồi `fap login` lại **một lần** ở máy sở hữu, `scp output/token.json output/oauth_tokens.json` sang máy kia + `chmod 600`. · en · Pick **ONE** owning machine (the VPS). On the other: set `FAP_TOKEN_READONLY=1` and remove every task/cron that calls `fap refresh`. Then `fap login` **once** on the owner and `scp output/token.json output/oauth_tokens.json` over + `chmod 600`. |
+
+### "Máy này là CLIENT CHỈ-ĐỌC — TỪ CHỐI refresh" · READ-ONLY client, refusing to refresh
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Banner đỏ 5 dòng ra `stderr` + `fap refresh` thoát ngay; watcher/bot dần chết vì token hết hạn. · en · A 5-line banner on `stderr` and `fap refresh` exits immediately; watchers/bots die off as the token expires. |
+| **Nguyên nhân · Cause** | vi · `FAP_TOKEN_READONLY` đang bật trên máy này (`.env`, `.env.<profile>`, hoặc `Environment=` trong unit file). · en · `FAP_TOKEN_READONLY` is set here (`.env`, `.env.<profile>`, or an `Environment=` line in the unit file). |
+| **Cách sửa · Fix** | vi · **Đây có phải máy sở hữu token không?** Nếu **có** (máy chạy bot/watcher): **bỏ** `FAP_TOKEN_READONLY` rồi khởi động lại service — nếu không, mọi watcher sẽ im lặng chết. Nếu **không** (máy phụ chỉ xem): đúng như thiết kế — copy `token.json` mới từ máy sở hữu thay vì refresh. · en · **Is this the owning machine?** If **yes** (it runs the bots/watchers): **remove** the flag and restart — otherwise everything silently dies. If **no** (secondary viewer): working as intended — copy a fresh `token.json` from the owner instead of refreshing. |
+
+### Profile không nhận được thông báo nào · a profile gets no notifications
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Chạy với `FAP_PROFILE=alice`: watcher chạy bình thường, log không lỗi, nhưng alice **không nhận tin nào**. · en · With `FAP_PROFILE=alice` the watcher runs fine and logs no error, but alice **receives nothing**. |
+| **Nguyên nhân · Cause** | vi · **Đúng thiết kế.** Các khóa danh tính/kênh gửi (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT`, `DISCORD_*`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`) **KHÔNG** được thừa kế từ `.env` gốc — nếu không, điểm của alice sẽ bắn vào chat của **chủ máy**. Thiếu khóa ⇒ kênh **tắt hẳn**, im lặng. · en · **By design.** Identity/delivery keys are **never** inherited from the root `.env` — otherwise alice's marks would land in the **owner's** chat. A missing key means that channel is simply **off**. |
+| **Cách sửa · Fix** | vi · Điền `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` (hoặc `DISCORD_*`) **của chính alice** vào `<gốc repo>/.env.alice`, rồi khởi động lại unit của alice. Kiểm tra: `FAP_PROFILE=alice fap notify test`. · en · Put **alice's own** `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` (or `DISCORD_*`) in `<repo-root>/.env.alice` and restart her unit. Verify with `FAP_PROFILE=alice fap notify test`. |
+
+### Profile vẫn đọc/ghi vào `output/` của chủ máy · a profile still uses the owner's `output/`
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Đặt `FAP_PROFILE` rồi mà `output/profiles/<tên>/` **không được tạo**, dữ liệu vẫn ra `output/`; có thể có cảnh báo `FAP_PROFILE=... không hợp lệ` ở `stderr`. · en · `FAP_PROFILE` is set but `output/profiles/<name>/` is **never created** and data still lands in `output/`; a `FAP_PROFILE=… is invalid` warning may appear on `stderr`. |
+| **Nguyên nhân · Cause** | vi · Tên profile **sai định dạng** (chỉ cho phép chữ/số/`.` `_` `-`) ⇒ **bị bỏ qua**, chạy như **không có profile** (dùng `.env` + `output/` của chủ máy). Hoặc biến chưa tới được tiến trình (thiếu `Environment=FAP_PROFILE=` trong unit). · en · The name is **malformed** (letters/digits/`._-` only) so it is **ignored** and the process runs with **no profile** — the owner's `.env` and `output/`. Or the variable never reached the process (missing `Environment=FAP_PROFILE=` in the unit). |
+| **Cách sửa · Fix** | vi · Đổi tên profile cho hợp lệ (vd `alice`), hoặc thêm `Environment=FAP_PROFILE=alice` vào unit. Kiểm tra: `FAP_PROFILE=alice fap whoami` phải ra mã SV của alice. · en · Use a valid name (e.g. `alice`) or add `Environment=FAP_PROFILE=alice` to the unit. Verify: `FAP_PROFILE=alice fap whoami` must show alice's roll number. |
+
+### `/update` báo bị cấm · the bot refuses `/update`
+
+| | |
+|---|---|
+| **Triệu chứng · Symptom** | vi · Chủ bot gõ `/update`, bot trả lời rằng lệnh đang bị TẮT (dù trước đây chạy được). · en · The bot owner sends `/update` and the bot replies that the command is disabled (it used to work). |
+| **Nguyên nhân · Cause** | vi · `/update` giờ **TẮT mặc định**: nó `git pull` + khởi động lại trên **checkout dùng chung của mọi profile**, nên phải bật rõ ràng. · en · `/update` is now **off by default**: it pulls and restarts the **checkout every profile shares**, so it must be enabled explicitly. |
+| **Cách sửa · Fix** | vi · Thêm `FAP_ALLOW_UPDATE=1` vào `.env` (hoặc `Environment=FAP_ALLOW_UPDATE=1` trong unit) của **chủ máy** rồi khởi động lại bot. Đừng bật cho profile khách. Thay thế: `bash deploy/update.sh` trên server. · en · Add `FAP_ALLOW_UPDATE=1` to the **owner's** `.env` (or `Environment=…` in the unit) and restart the bot. Don't enable it for guest profiles. Alternative: run `bash deploy/update.sh` on the server. |
+
+---
+
+## 6. Tự kiểm tra & xem trạng thái · Self-check & status
 
 | Lệnh · Command | Dùng để · Use |
 |---|---|

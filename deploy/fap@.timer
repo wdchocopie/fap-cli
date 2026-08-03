@@ -1,0 +1,21 @@
+# fap@.timer — TEMPLATE: chạy fap@<tên>.service mỗi ngày 07:00 (một profile một timer).
+# TEMPLATE timer: runs fap@<name>.service daily at 07:00 (one timer per profile).
+#
+#   systemctl --user daemon-reload && systemctl --user enable --now fap@alice.timer
+#   systemctl --user list-timers 'fap@*'
+#
+# RandomizedDelaySec: nhiều profile cùng 07:00 sẽ lệch nhau tối đa 15' — mỗi profile có token
+# riêng nên không đua rotation, nhưng vẫn nên gọi FAP nhẹ tay.
+# RandomizedDelaySec spreads several profiles over 15 minutes — each has its own token so there is
+# no rotation race, but be gentle with the FAP server anyway.
+[Unit]
+Description=Run fap-cli daily at 07:00 for profile %i (vi · en)
+
+[Timer]
+Unit=fap@%i.service
+OnCalendar=*-*-* 07:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

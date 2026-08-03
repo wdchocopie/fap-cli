@@ -63,6 +63,31 @@ def gpa_val(g):
     from .i18n import t                       # import trong hàm: fmt KHÔNG import i18n ở top (tránh vòng)
     return g if g is not None else t("chưa có", "n/a")
 
+def chunks(text, limit):
+    """THUẦN: cắt `text` thành các mẩu ≤ `limit` ký tự để gửi NHIỀU tin thay vì cắt cụt.
+
+    Ưu tiên cắt ở RANH GIỚI DÒNG (chat đọc mới xuôi); dòng đơn dài hơn `limit` mới cắt cứng.
+    Luôn trả ≥1 phần tử (text rỗng -> ['']), không mẩu nào vượt `limit` -> gọi thẳng vào API chat
+    được mà không sợ mất chữ. `limit` <= 0 -> trả nguyên văn (không cắt)."""
+    text = "" if text is None else str(text)
+    if limit is None or limit <= 0 or len(text) <= limit:
+        return [text]
+    out, cur = [], ""
+    for line in text.split("\n"):
+        while len(line) > limit:                  # 1 dòng dài quá khổ -> buộc phải cắt cứng
+            if cur:
+                out.append(cur); cur = ""
+            out.append(line[:limit]); line = line[limit:]
+        add = line if not cur else cur + "\n" + line
+        if len(add) <= limit:
+            cur = add
+        else:
+            out.append(cur); cur = line
+    if cur or not out:
+        out.append(cur)
+    return out
+
+
 def table(rows):
     """Bảng generic (chuỗi) theo ĐÚNG field server trả — KHÔNG bịa cột. Dùng chung cho
     transcript / fees / news / điểm-thành-phần. rows không phải dict -> liệt kê thô."""

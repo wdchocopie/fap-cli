@@ -27,8 +27,11 @@ fap calendar-sync --prune          # đồng bộ + LIỆT KÊ event mồ côi (
 fap calendar-sync --prune --yes    # + XÓA thật event mồ côi
 fap calendar-prune                 # chỉ dọn (không đẩy lại); --yes để xóa; --force nếu >30%
 ```
-> **An toàn:** prune **CHỈ xóa event do fap-cli tạo** (lọc theo nhãn riêng `extendedProperties.private.fapc=1`) — **không bao giờ đụng event cá nhân**. Dry-run mặc định; **từ chối nếu >30%** bị xóa (phòng lấy lịch lỗi), ép bằng `--force`.
-**EN —** `calendar-sync` upserts by `iCalUID` (room/time edits auto-fix on re-run); add `--prune` to delete class events for sessions no longer on FAP. Prune only ever touches fap-cli's own events (tagged `fapc=1`) — never your personal events. Dry-run by default; refuses if >30% would be deleted.
+> **An toàn:** prune **CHỈ xóa event do fap-cli tạo CHO CHÍNH MÃ SINH VIÊN NÀY** — mỗi event mang nhãn riêng `extendedProperties.private.fapc_owner=<mã SV>` (kèm `fapc=1` cho tương thích ngược), và bộ lọc chỉ nhận nhãn của chính mình. **Không bao giờ đụng event cá nhân, cũng không đụng lịch của người khác dùng chung calendar.** Dry-run mặc định; **từ chối nếu >30%** bị xóa (phòng lấy lịch lỗi), ép bằng `--force`.
+**EN —** `calendar-sync` upserts by `iCalUID` (room/time edits auto-fix on re-run); add `--prune` to delete class events for sessions no longer on FAP. Prune only ever touches events fap-cli created **for this roll number** (tagged `fapc_owner=<roll>`) — never your personal events and never another person's, even on a shared calendar. Dry-run by default; refuses if >30% would be deleted.
+
+> 👥 **VI —** Nhiều tài khoản trên 1 máy (`FAP_PROFILE`)? Mỗi profile có token Google **riêng** (`output/profiles/<tên>/gcal_token.json`) nên phải **tự chạy `fap calendar-auth` một lần**; `credentials.json` ở gốc repo dùng chung. Event **cũ chưa có nhãn `fapc_owner`** (tạo bởi bản fap-cli trước) chỉ thuộc về **profile mặc định** — profile có tên không bao giờ đụng vào. Chi tiết: [19-multi-profile §6.2](19-multi-profile.md#62--google-calendar-dùng-chung--sharing-one-google-calendar).
+> 👥 **EN —** Running several accounts (`FAP_PROFILE`)? Each profile keeps its **own** Google token (`output/profiles/<name>/gcal_token.json`) and must run **`fap calendar-auth` once**; the root `credentials.json` is shared. **Untagged legacy events** belong to the **default profile only** — a named profile never touches them.
 
 **VI — Tách hẳn khỏi lịch cá nhân (KHUYÊN):** tạo một Google Calendar riêng (vd "Lịch học FAP"), lấy **Calendar ID** của nó (Settings của calendar đó → *Integrate calendar* → *Calendar ID*) rồi đặt trong `.env`:
 ```dotenv

@@ -143,8 +143,8 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
 > **VI —** Ngôn ngữ tin (vi/en) theo `FAP_LANG` trong `.env` (mặc định `vi`). Ngày "hôm nay/ngày mai" tính theo **giờ VN (Asia/Ho_Chi_Minh)** — cố định trong code, không phải biến `.env`.
 > **EN —** Message language (vi/en) follows `FAP_LANG` in `.env` (default `vi`). "Today/tomorrow" is computed in **VN time (Asia/Ho_Chi_Minh)** — hard-coded, not an `.env` key.
 
-> **VI —** Telegram cắt ở 4000 ký tự, Discord ở 1900 ký tự mỗi tin — lịch một ngày luôn nằm dưới mức này.
-> **EN —** Telegram caps at 4000 chars, Discord at 1900 chars per message — a single day's digest is always well under.
+> **VI —** Mỗi tin có trần 4000 ký tự (Telegram) / 1900 (Discord) — lịch một ngày luôn nằm dưới mức này. Tin **dài hơn** (vd `/grades-detail`, `/all` nhiều môn) **không còn bị cắt cụt**: nó được **chia thành nhiều tin** gửi liên tiếp (nghỉ ~0.4s giữa các mẩu, ưu tiên cắt ở ranh giới dòng). Nhận 2–3 tin liền nhau là **bình thường**.
+> **EN —** Each message is capped at 4000 chars (Telegram) / 1900 (Discord) — one day's digest is always well under. **Longer** replies (e.g. `/grades-detail`, `/all` with many courses) are **no longer truncated**: they are **split across several messages** sent back-to-back (~0.4s apart, cut at line boundaries). Getting 2–3 messages in a row is **expected**.
 
 ---
 
@@ -191,6 +191,12 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 
 > 🔒 **VI —** Bot chỉ trả lời **CHỦ tài khoản** để không lộ điểm/dữ liệu cho người lạ. Telegram: chỉ chat `TELEGRAM_CHAT`. Discord: chỉ user `DISCORD_ALLOWED_USER_ID` (nếu để trống → cảnh báo & trả lời mọi người, **nên đặt**).
 > 🔒 **EN —** A bot only answers the **account owner** so it never leaks your grades to strangers. Telegram: only chat `TELEGRAM_CHAT`. Discord: only user `DISCORD_ALLOWED_USER_ID` (empty → it warns and replies to everyone, so **set it**).
+
+> 🔑 **VI —** Lệnh **`/update`** (`git pull` + selftest + tự khởi động lại) **TẮT mặc định**: nó tác động lên **checkout dùng chung**, nên ngoài việc phải là chủ bot còn cần `FAP_ALLOW_UPDATE=1` trên máy chạy bot. Xem [15-config](15-config.md) · [19-multi-profile](19-multi-profile.md).
+> 🔑 **EN —** The **`/update`** command is **off by default**: it acts on the **shared checkout**, so besides being the bot owner you also need `FAP_ALLOW_UPDATE=1` on the host.
+
+> ⚠️ **VI —** **Đừng chạy CÙNG một `TELEGRAM_TOKEN` ở hai nơi** (vd VPS *và* PC): Telegram trả **409 Conflict**, bot lặp vô hạn và **ngừng trả lời**; nhắc lịch cũng **trùng 100%**. Xem [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines).
+> ⚠️ **EN —** **Never run the same `TELEGRAM_TOKEN` in two places** (e.g. VPS *and* PC): Telegram returns **409 Conflict**, the poller spins forever and the bot **stops answering**; reminders also **always double**.
 
 > 📋 **VI —** Bot **tự đăng ký danh sách lệnh gợi ý** lúc khởi động — khỏi nhớ lệnh. Telegram hiện nút **Menu ☰** cạnh ô nhập + tự gợi ý khi gõ `/`. Discord có **slash command** (`/today`, `/grades`, `/whatif`…) hiện ngay khi gõ `/`. Danh sách đầy đủ vẫn là `/help`. Nguồn lệnh: `COMMAND_INFO` trong `fapc/app/bot_core.py` (thêm 1 dòng là cả 2 nền tảng có ngay).
 > 📋 **EN —** The bots **auto-register a suggested command list** on startup — no need to memorize. Telegram shows a **Menu ☰** button + autocompletes as you type `/`. Discord exposes **slash commands** (`/today`, `/grades`, `/whatif`…) the moment you type `/`. Full list is still `/help`. Source of truth: `COMMAND_INFO` in `fapc/app/bot_core.py` (add one line → both platforms get it).

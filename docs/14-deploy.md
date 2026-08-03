@@ -9,6 +9,9 @@
 > ⚡ **VI —** **Script sẵn dùng** đã có trong [`deploy/`](../deploy/) (xem [deploy/README.md](../deploy/README.md)) — không cần gõ tay theo các mục dưới: `run-fap.ps1`/`run-fap.cmd` + `register-task-windows.ps1` (Windows), `run-fap.sh`/`crontab.example`/`fap.service`+`fap.timer` (Linux), `Dockerfile`+`docker-run.sh` (Docker). Các mục dưới giải thích từng cách.
 > ⚡ **EN —** **Ready-made scripts** already live in [`deploy/`](../deploy/) (see [deploy/README.md](../deploy/README.md)) — you don't have to type the recipes below by hand. The sections below explain each method.
 
+> 🔗 **VI —** Dùng **1 lần login cho 2 máy** (VPS chạy bot + PC chỉ xem) → **[§9](#9-một-session-hai-máy--one-session-two-machines)**. Chạy **nhiều tài khoản** trên 1 máy → **[§10](#10-nhiều-tài-khoản-trên-1-máy--several-accounts-on-one-box)** + [19-multi-profile](19-multi-profile.md).
+> 🔗 **EN —** **One login across two machines** (VPS runs the bots, PC just looks) → **[§9](#9-một-session-hai-máy--one-session-two-machines)**. **Several accounts** on one box → **[§10](#10-nhiều-tài-khoản-trên-1-máy--several-accounts-on-one-box)** + [19-multi-profile](19-multi-profile.md).
+
 ---
 
 ## 1. Vòng đời token · Token lifecycle
@@ -241,4 +244,83 @@ fap refresh && fap banrisk || fap notify test   # nếu nguy cơ (exit 2) -> g�
 
 ---
 
-**VI —** Liên quan · **EN —** See also: `docs/05-checksum-map.md` (checksum), `.env.example` (cấu hình · config), `fap doctor` (tự kiểm tra · self-check).
+## 9. Một session, hai máy · One session, two machines
+
+**VI —** Muốn **VPS chạy bot/watcher 24/7** mà **PC vẫn xem được** (`fap status`, `fap web`…) — **không phải login hai lần**? Được, nhưng phải theo đúng luật dưới đây.
+**EN —** Want the **VPS running the bots/watchers 24/7** while your **PC can still look at the data** (`fap status`, `fap web`…) — **without logging in twice**? Yes, but only under the rules below.
+
+### 9.1 Dùng chung 1 lần login → ✅ ĐƯỢC · Sharing one login → ✅ OK
+
+**VI —** Token FAP là **bearer-style** (gửi ở header `Authen` trong mọi call), **không gắn thiết bị**: User-Agent cố định `okhttp/4.9.2`, checksum chỉ phụ thuộc **đồng hồ** (đã tự retry ±1h), bước đổi token chỉ gửi `{"token": access_token}`. Nghĩa là **copy file token sang máy khác là chạy được**.
+**EN —** The FAP token is **bearer-style** (sent in the `Authen` header on every call) with **no device binding**: the User-Agent is a fixed `okhttp/4.9.2`, the checksum depends only on the **clock** (already retried ±1h), and the exchange step posts just `{"token": access_token}`. So **copying the token files to another machine simply works**.
+
+```bash
+# Trên máy ĐÃ login (VPS = máy sở hữu token) · from the machine that already logged in
+scp output/token.json output/oauth_tokens.json user@pc:~/fap-cli/output/
+# Trên máy nhận · on the receiving machine — scp KHÔNG giữ quyền file · scp does NOT preserve mode
+chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens.json
+```
+
+| File | Copy? | Vì sao · Why |
+|---|---|---|
+| `output/token.json` | ✅ | token FAP dùng cho mọi lệnh đọc · the FAP token every read command uses |
+| `output/oauth_tokens.json` | ✅ | cần cho `fap refresh` (đọc `refresh_token`) · needed by `fap refresh` |
+| `output/.pkce_state.json` | ❌ **KHÔNG** | tạm thời, **dùng đúng 1 lần**, bị tiêu thụ khi `exchange` · transient, **single-use**, consumed at `exchange` |
+| `output/grade_state.json` | ❌ **KHÔNG** | baseline **riêng từng máy** — copy sang ⇒ **báo trùng hoặc báo sót điểm** · per-machine baseline; copying causes **duplicate or missed alerts** |
+| `output/attendance_state.json` | ❌ **KHÔNG** | như trên · same |
+| `output/seen_notifications.json` | ❌ **KHÔNG** | như trên · same |
+| `credentials.json`, `output/gcal_token.json` | *(chỉ khi máy đó thật sự `calendar-sync`)* | Google Calendar, không liên quan token FAP · unrelated to the FAP token |
+
+### 9.2 🔴 Chỉ MỘT máy được refresh · Exactly ONE machine may refresh
+
+**VI —** `refresh_token` **XOAY VÒNG**: mỗi lần `fap refresh` thành công, FE Identity cấp `refresh_token` mới và **vô hiệu hóa cái cũ**. Hai máy cùng refresh ⇒ máy nào chạy sau cầm token đã chết ⇒ **phải login lại liên tục**.
+**EN —** The `refresh_token` **ROTATES**: each successful `fap refresh` mints a new one and **invalidates the old**. Two machines refreshing ⇒ whichever runs second holds a dead token ⇒ **you end up re-logging-in constantly**.
+
+**Doctrine:**
+
+| Máy · Machine | Vai trò · Role | Cấu hình `.env` · `.env` setup |
+|---|---|---|
+| **VPS** | **SỞ HỮU token** — nơi refresh **DUY NHẤT**, chạy bot + watcher · **OWNS the token** — the **only** refresher, runs bots + watchers | `FAP_TOKEN_READONLY=` *(để trống · empty)*, `TELEGRAM_*`/`DISCORD_*` điền đủ · filled in |
+| **PC** | **CHỈ ĐỌC** — `fap status`, `grades`, `week`, `whatif`, `web`, `whoami` · **READ-ONLY** | `FAP_TOKEN_READONLY=1`, `TELEGRAM_*`/`DISCORD_*` **để trống** · **left empty** |
+
+```dotenv
+# .env trên PC · on the PC
+FAP_TOKEN_READONLY=1
+TELEGRAM_TOKEN=
+TELEGRAM_CHAT=
+DISCORD_WEBHOOK_URL=
+```
+
+**VI —** Có cờ này, `fap refresh` trên PC **từ chối chạy** và in banner đỏ 5 dòng ra `stderr` giải thích tại sao — thay vì lỡ tay làm hỏng token của VPS.
+**EN —** With that flag set, `fap refresh` on the PC **refuses** and prints a loud 5-line banner to `stderr` explaining why — instead of quietly wrecking the VPS's token.
+
+> 🛑 **VI —** **TUYỆT ĐỐI đừng đặt `FAP_TOKEN_READONLY=1` trên VPS.** Máy sở hữu token mà bị cấm refresh thì token hết hạn và **mọi watcher im lặng ngừng chạy**. Banner in ra `stderr` (kèm nhãn profile) chính là để bạn thấy ngay trong `journalctl` nếu đặt nhầm.
+> 🛑 **EN —** **Never set `FAP_TOKEN_READONLY=1` on the VPS.** Block the owning machine from refreshing and the token expires while **every watcher silently stops**. The `stderr` banner (with the profile label) exists so a misplaced flag is obvious in `journalctl`.
+
+**VI —** Token trên PC hết hạn thì **không** login lại ở PC — chỉ cần copy lại `output/token.json` từ VPS (`scp` + `chmod 600`). Login lại ở PC cũng hợp lệ, nhưng nó **xoay** `refresh_token` và giết bản của VPS.
+**EN —** When the PC's token expires, don't re-login there — just re-copy `output/token.json` from the VPS (`scp` + `chmod 600`). Re-logging-in on the PC also works, but it **rotates** the `refresh_token` and kills the VPS's copy.
+
+### 9.3 ❌ ĐỪNG chạy bot/watcher ở cả hai nơi · ❌ DON'T run bots/watchers in both places
+
+| Chạy trùng cái gì · Duplicated | Chuyện gì xảy ra · What happens |
+|---|---|
+| `fap telegram-bot` | **Telegram trả 409 Conflict** cho `getUpdates`. Body 409 vẫn là JSON hợp lệ nên vòng lặp chỉ thấy `ok=false` → in lỗi → ngủ 5s → lặp lại **mãi mãi**. Bot coi như **ngừng trả lời**. · Telegram answers `getUpdates` with **409 Conflict**; the poller only sees `ok=false`, sleeps 5s and **spins forever** — the bot effectively **stops answering**. |
+| Nhắc lịch trước giờ học · Class reminders | **Nhắc 2 lần, 100%.** Tập "đã nhắc" nằm **trong RAM**, không có file state ⇒ hai tiến trình không thể biết nhau. · **Guaranteed double reminders** — the "already sent" set lives **in RAM** with no state file, so the two processes can't know about each other. |
+| `watch-attendance` / `watch-grades` | Hai baseline riêng ⇒ **mỗi máy báo một lần** cùng một điểm/buổi. · Two separate baselines ⇒ **each machine alerts once** for the same mark/session. |
+
+**VI —** Quy tắc: **VPS chạy tiến trình thường trú, PC chỉ gõ lệnh đọc.**
+**EN —** The rule: **residents on the VPS, read-only commands on the PC.**
+
+---
+
+## 10. Nhiều tài khoản trên 1 máy · Several accounts on one box
+
+**VI —** Muốn chạy tài khoản của **nhiều người** trên cùng một checkout (mỗi người một token, một kênh Telegram, một service riêng)? Xem [19-multi-profile.md](19-multi-profile.md) — biến `FAP_PROFILE`, unit mẫu `fap-*@<tên>.service`, và **yêu cầu đồng ý**: mỗi người **tự chạy `fap login`** của họ.
+**EN —** Want **several people's** accounts on one checkout (own token, own Telegram channel, own service each)? See [19-multi-profile.md](19-multi-profile.md) — the `FAP_PROFILE` variable, the `fap-*@<name>.service` template units, and the **consent requirement**: each person **runs their own `fap login`**.
+
+> ⚠️ **VI —** Doctrine ở §9.2 ("chỉ MỘT nơi được refresh") áp dụng cho **từng profile**, không phải cho cả máy.
+> ⚠️ **EN —** The §9.2 doctrine ("exactly one refresher") applies **per profile**, not per machine.
+
+---
+
+**VI —** Liên quan · **EN —** See also: `docs/05-checksum-map.md` (checksum), `docs/19-multi-profile.md` (nhiều tài khoản · multi-profile), `.env.example` (cấu hình · config), `fap doctor` (tự kiểm tra · self-check).

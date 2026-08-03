@@ -19,10 +19,16 @@ Cơ chế (reverse từ app com.fuct, React Native + Hermes):
 """
 import os, sys, json, sqlite3, hmac, hashlib, base64, datetime, time, urllib.parse
 import requests
+from . import paths
 
-# In tiếng Việt/emoji không lỗi trên console Windows (cp1252)
+# In tiếng Việt/emoji không lỗi trên console Windows (cp1252) — CẢ stderr: banner cảnh báo
+# (vd FAP_TOKEN_READONLY ở auth._refuse_refresh) in ra stderr, không sửa thì thành \uXXXX khó đọc.
 try:
     sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+try:
+    sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
@@ -31,9 +37,10 @@ LOGIN_PREFIX = "TlKiA0340pY6Hkio4kaTLFMvxK7GIOlr6xqV7mVAI4bRch7sfjOOx7FnIpV1dwvv
 BASE         = "https://api.fpt.edu.vn/fap/api/MyFAP"
 
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TOKEN_JSON = os.path.join(_ROOT, "output", "token.json")
+_ROOT = paths.ROOT
+TOKEN_JSON = paths.out("token.json")            # theo FAP_PROFILE; chưa đặt biến ⇒ <repo>/output/token.json
 DB = os.path.join(_ROOT, "device-data", "com.fuct", "databases", "RKStorage")   # legacy (pull_token.py)
+                                                # ↑ KHÔNG per-profile: dump máy ảo cũ, không phải state profile
 UA = {"User-Agent": "okhttp/4.9.2"}
 
 

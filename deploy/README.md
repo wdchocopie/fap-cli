@@ -14,6 +14,7 @@
 |---|---|---|
 | **`setup-server.sh`** | **Linux server** | **TỰ DỰNG TẤT CẢ bằng 1 lệnh**: venv + cài + systemd (job hằng ngày + watch-attendance + watch-grades + bot tùy chọn) · **one-command full server setup** |
 | **`update.sh`** | **Linux server** | **CẬP NHẬT bằng 1 lệnh**: `git pull` + cài lại (nếu deps đổi) + selftest + restart service đang bật. `--auto` (cho timer), `--schedule`/`--unschedule` (auto-update hằng tuần) · **one-command update** |
+| **`setup-profile.sh`** | **Linux server** | **THÊM 1 NGƯỜI NỮA**: dựng unit riêng cho một `FAP_PROFILE` (token/kênh gửi/baseline tách hẳn). `--remove <tên>` để gỡ · **add another account**: per-profile units |
 | **`update.ps1`** | **Windows** | cập nhật trên Windows: pull + cài lại + restart Scheduled Task đang chạy. `-Schedule`/`-Unschedule` auto-update · Windows update |
 | `fap-update.service` + `fap-update.timer` | Linux (systemd) | **auto-update hằng tuần** (CN 03:00) — cài bằng `update.sh --schedule` · weekly auto-update |
 | `run-fap.ps1` | Windows (PowerShell) | wrapper có log + dừng-khi-lỗi · logging wrapper |
@@ -27,6 +28,7 @@
 | `fap-bot.service` | Linux (systemd) | bot Telegram thường trú (auto-restart) · resident interactive bot |
 | `fap-watch.service` | Linux (systemd) | theo dõi điểm danh near-real-time (auto-restart) · resident attendance watcher |
 | `fap-gradewatch.service` | Linux (systemd) | theo dõi **điểm mới** (thành phần/tổng kết, auto-restart) · resident grade watcher |
+| `fap@.service` + `fap@.timer`, `fap-watch@.service`, `fap-gradewatch@.service`, `fap-bot@.service` | Linux (systemd) | **unit TEMPLATE theo profile** — `%i` = tên profile, unit tự đặt `FAP_PROFILE=%i`. Bật: `systemctl --user enable --now fap-watch@alice.service` · **per-profile template units** |
 | `Dockerfile` + `docker-run.sh` + `../.dockerignore` | Docker | đóng gói (tùy chọn) · container (optional) |
 
 ## Bắt đầu nhanh · Quickstart
@@ -40,6 +42,8 @@ bash deploy/setup-server.sh                       # job hằng ngày + 2 watcher
 EXTRAS='[gcal,bot]' bash deploy/setup-server.sh   # + bot Telegram thường trú
 # Gỡ sạch:  bash deploy/setup-server.sh --remove
 ```
+> ⚠️ **VI —** `scp -r output/` ở trên chỉ dành cho **lần dựng đầu tiên** (server chưa có gì). Nếu **máy nguồn đã từng chạy watcher**, đừng copy cả thư mục: nó mang theo `grade_state.json` / `attendance_state.json` / `seen_notifications.json` (baseline **riêng từng máy**) và `.pkce_state.json` (dùng 1 lần) ⇒ báo trùng/báo sót. Chỉ copy **2 file token** — xem [§ Một session, hai máy](#-một-session-hai-máy--one-session-two-machines).
+> ⚠️ **EN —** The `scp -r output/` above is for a **first-time** setup only. If the source machine has ever run a watcher, don't copy the whole folder — it carries the **per-machine** baselines and the single-use `.pkce_state.json`, causing duplicate/missed alerts. Copy **only the 2 token files** — see [§ One session, two machines](#-một-session-hai-máy--one-session-two-machines).
 ## 🔄 Cập nhật · Update — mọi trường hợp
 
 **Code cập nhật ≠ token hết hạn.** Update CODE = bên dưới; token hết hạn = `fap refresh` (riêng).
@@ -57,6 +61,7 @@ EXTRAS='[gcal,bot]' bash deploy/update.sh   # khớp extras lúc setup (chỉ c�
 ```
 > **`fap update`** (mọi nền) tự bắt: bản ZIP/không-git, **thay đổi cục bộ chưa commit** (nhắc `git stash`), **diverged/mất mạng** (nhắc `--rebase`), **deps đổi** (nhắc cài lại), **đã mới nhất**. Nó KHÔNG tự restart service (không đoán được bạn chạy kiểu gì) — `update.sh`/`update.ps1` mới tự restart.
 > ⚠️ Auto-update tiện nhưng bản mới lỗi sẽ restart theo. Muốn chắc thì update **thủ công** + xem `fap selftest`.
+> 🔑 **Lệnh `/update` trong bot giờ TẮT mặc định** — nó `git pull` + khởi động lại **checkout dùng chung của mọi profile**. Muốn dùng: thêm `FAP_ALLOW_UPDATE=1` vào `.env` (hoặc `Environment=FAP_ALLOW_UPDATE=1` trong unit) của **chủ máy**, rồi restart bot. Kiểm tra chủ sở hữu bot vẫn chạy trước như cũ. · **The bot's `/update` is now off by default**; enable it with `FAP_ALLOW_UPDATE=1` in the **owner's** `.env`/unit only.
 > Script tự: tạo `.venv`, `pip install -e .`, kiểm `fap refresh`, cài systemd `--user` units (đường dẫn thật), bật `enable-linger` (chạy cả khi logout). **Bước login phải làm trên máy có trình duyệt** (OAuth Google) rồi copy `output/` lên — server headless không tự login được.
 
 **Windows** *(PowerShell ở gốc repo · from repo root)*
@@ -78,6 +83,49 @@ crontab -e                                 # rồi dán 1 dòng từ crontab.exa
 ```bash
 ./deploy/docker-run.sh                     # build + run, mount .env/credentials/output từ host
 ```
+
+## 🔗 Một session, hai máy · One session, two machines
+
+**VI —** VPS chạy bot/watcher 24/7, PC vẫn xem được dữ liệu — **chỉ login một lần**. Token FAP là bearer, **không gắn thiết bị**, nên copy sang máy khác là chạy. Chi tiết & lý do: [../docs/14-deploy.md §9](../docs/14-deploy.md#9-một-session-hai-máy--one-session-two-machines).
+**EN —** The VPS runs the bots/watchers 24/7 while the PC can still read your data — on **one login**. The FAP token is bearer-style with **no device binding**, so copying it works. Full reasoning: [../docs/14-deploy.md §9](../docs/14-deploy.md#9-một-session-hai-máy--one-session-two-machines).
+
+```bash
+# Từ máy SỞ HỮU token (VPS) sang máy phụ · from the token-OWNING machine to the secondary one
+scp output/token.json output/oauth_tokens.json user@pc:~/fap-cli/output/
+ssh user@pc 'chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens.json'   # scp KHÔNG giữ mode
+```
+
+| Copy? | File |
+|---|---|
+| ✅ | `output/token.json`, `output/oauth_tokens.json` |
+| ❌ | `output/.pkce_state.json` *(dùng 1 lần · single-use)* |
+| ❌ | `output/grade_state.json`, `output/attendance_state.json`, `output/seen_notifications.json` *(baseline riêng từng máy — copy = báo trùng/báo sót · per-machine baselines; copying causes duplicate/missed alerts)* |
+
+> 🔴 **VI —** `refresh_token` **XOAY VÒNG** ⇒ **chỉ MỘT máy được refresh**: VPS. Trên PC đặt `FAP_TOKEN_READONLY=1` và **để trống** `TELEGRAM_*`/`DISCORD_*`. **ĐỪNG** đặt cờ này trên VPS — token sẽ hết hạn và mọi watcher chết lặng.
+> 🔴 **EN —** The `refresh_token` **rotates** ⇒ **only ONE machine may refresh**: the VPS. On the PC set `FAP_TOKEN_READONLY=1` and leave `TELEGRAM_*`/`DISCORD_*` empty. **Never** set that flag on the VPS — the token expires and every watcher silently dies.
+
+> ❌ **VI —** **ĐỪNG chạy bot/watcher ở cả hai máy.** Telegram trả **409 Conflict** và bot lặp vô hạn (coi như ngừng trả lời); **nhắc lịch bị trùng 100%** (tập "đã nhắc" nằm trong RAM, không có file state); watcher hai baseline ⇒ mỗi máy báo một lần.
+> ❌ **EN —** **Never run the bots/watchers on both.** Telegram returns **409 Conflict** and the poller spins forever (the bot stops answering); **class reminders always double** (the sent-set is in RAM, there is no state file); two watchers = two baselines = two alerts.
+
+## 👥 Nhiều tài khoản trên 1 máy · Several accounts on one box
+
+**VI —** Mỗi người **tự chạy `fap login` của họ** (yêu cầu **đồng ý**, không nhận hộ token/mật khẩu). Đầy đủ: [../docs/19-multi-profile.md](../docs/19-multi-profile.md).
+**EN —** Each person **runs their own `fap login`** (a **consent** requirement — never handle someone else's password/token). Full guide: [../docs/19-multi-profile.md](../docs/19-multi-profile.md).
+
+```bash
+# 1) .gitignore PHẢI có  .env.*  và  !.env.example  (nếu không, .env.alice bị commit)
+# 2) alice tự khai kênh gửi của chính mình:
+cp .env.example .env.alice && chmod 600 .env.alice     # alice điền TELEGRAM_* CỦA ALICE
+# 3) TRÊN MÁY CÓ BROWSER, alice tự chạy:  FAP_PROFILE=alice fap login
+#    rồi copy 2 file token vào  output/profiles/alice/  + chmod 600
+# 4) dựng service riêng cho alice:
+bash deploy/setup-profile.sh alice                        # watcher điểm danh + điểm
+UNITS='watch,grades,bot' bash deploy/setup-profile.sh alice
+bash deploy/setup-profile.sh --remove alice               # gỡ · remove
+```
+
+> **VI —** Trạng thái của alice nằm ở `output/profiles/alice/`, cấu hình ở `.env.alice`. Khóa danh tính (`TELEGRAM_*`, `DISCORD_*`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`) **không thừa kế** từ `.env` chủ máy — profile thiếu khóa thì kênh đó **tắt hẳn** (cố ý). `bash deploy/update.sh` khởi động lại **cả** unit mặc định lẫn mọi `fap-*@<tên>.service` đang bật.
+> **EN —** Alice's state lives in `output/profiles/alice/`, her config in `.env.alice`. Identity keys are **never inherited** from the owner's `.env` — a profile missing one has that channel **off** (deliberately). `bash deploy/update.sh` restarts **both** the default units and every enabled `fap-*@<name>.service`.
 
 ## 🗓️ Lịch thông báo đề xuất · Recommended notification schedule
 

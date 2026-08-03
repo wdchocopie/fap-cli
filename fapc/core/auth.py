@@ -20,8 +20,9 @@ CHỈ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN.
 import os, sys, json, time, base64, hashlib, secrets, webbrowser, urllib.parse, datetime
 import requests
 from .api import BASE as FAP_BASE, checksum_login, UA, _vn_now, _is_checksum_error
+from . import paths
 from ..i18n import t
-from .. import fmt
+from .. import config, fmt
 
 # ===== FE Identity (OIDC) — từ /.well-known/openid-configuration =====
 ISSUER       = "https://feid.fpt.edu.vn"
@@ -32,25 +33,34 @@ CLIENT_ID    = "fap-mobile-front-end"          # public client (PKCE, không sec
 REDIRECT_URI = "io.identityserver.demo:/oauthredirect"
 SCOPE        = "openid email profile offline_access"   # thêm fsp-mobile-front-end/identity-service nếu token bị từ chối
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OUT  = os.path.join(ROOT, "output")
-OAUTH_JSON = os.path.join(OUT, "oauth_tokens.json")
-TOKEN_JSON = os.path.join(OUT, "token.json")
-PKCE_STATE = os.path.join(OUT, ".pkce_state.json")
+# Đường dẫn state đi qua paths.* để hỗ trợ NHIỀU PROFILE (FAP_PROFILE). Chưa đặt biến ⇒ y HỆT như cũ.
+ROOT = paths.ROOT
+OUT  = paths.out_dir()
+OAUTH_JSON = paths.out("oauth_tokens.json")
+TOKEN_JSON = paths.out("token.json")
+PKCE_STATE = paths.out(".pkce_state.json")
 
 def _save(path, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    paths.ensure_dir(path)
     # Ghi NGUYÊN TỬ: viết ra .tmp (quyền 0600 ngay từ đầu trên POSIX) rồi os.replace lên đích. Ngắt giữa
     # chừng / đọc-ghi đua nhau KHÔNG làm token.json cụt → mất token (creds() json.load sẽ không thấy file lỗi).
-    tmp = f"{path}.tmp"
+    # Tên tmp phải RIÊNG THEO TIẾN TRÌNH: 3 watcher thường trú (reminders/gradewatch/attendwatch) khởi động
+    # cùng lúc sau update.sh và cùng _save() một file — dùng chung "{path}.tmp" thì tiến trình này ghi đè
+    # tmp của tiến trình kia giữa chừng → os.replace lên đích một file CỤT.
+    tmp = f"{path}.{os.getpid()}.tmp"
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-    except OSError:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)                                 # thay thế nguyên tử (POSIX & Windows cùng filesystem)
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+        except OSError:
+            with open(tmp, "w", encoding="utf-8") as f:   # filesystem không có mode POSIX -> ghi thường
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)                             # thay thế nguyên tử (POSIX & Windows cùng filesystem)
+    except BaseException:                                 # noqa: BLE001 — kể cả Ctrl+C: đừng để rác .tmp lại
+        try: os.remove(tmp)
+        except OSError: pass
+        raise
     try: os.chmod(path, 0o600)
     except OSError: pass
 
@@ -204,7 +214,44 @@ def exchange_code(redirected):
                          "(code chỉ sống ~vài chục giây & dùng 1 lần — chạy lại 'login'.)")
     return _finalize(j, st["campus"])
 
+def _truthy(v):
+    """'1'/'true'/'yes'/'on' (không phân biệt hoa thường) -> True. Dùng cho cờ ENV, KHÔNG dùng bool()
+    vì bool('0') == True — chuỗi '0' trong .env phải hiểu là TẮT."""
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def token_readonly():
+    """Máy này có bị cấm refresh không? (FAP_TOKEN_READONLY — xem docs/18-roadmap.md §3)."""
+    return _truthy(config.TOKEN_READONLY)
+
+
+def _refuse_refresh():
+    """In banner THẬT TO rồi raise SystemExit. Watcher nuốt SystemExit và chỉ in `e` một dòng, nên phải
+    tự in ra stderr ở đây — nếu cờ bị đặt NHẦM trên máy sở hữu token, log vẫn phải hét lên."""
+    bar = "!" * 64
+    msg = t("Máy này là CLIENT CHỈ-ĐỌC — TỪ CHỐI refresh token.",
+            "This machine is a READ-ONLY CLIENT — REFUSING to refresh the token.")
+    why = t("FAP_TOKEN_READONLY đang bật. refresh_token bị FE Identity XOAY VÒNG: máy nào refresh trước "
+            "thì bản của máy kia thành vô hiệu.",
+            "FAP_TOKEN_READONLY is set. FE Identity ROTATES the refresh_token: whichever machine "
+            "refreshes first invalidates the other machine's copy.")
+    how = t("Refresh chỉ được chạy trên MÁY SỞ HỮU token (VPS). Máy này chỉ chạy lệnh ĐỌC "
+            "(status/grades/week/whatif/web/whoami). Nếu ĐÂY chính là máy sở hữu token: bỏ "
+            "FAP_TOKEN_READONLY trong .env / unit file rồi khởi động lại — nếu không, token sẽ HẾT HẠN "
+            "và mọi watcher im lặng ngừng chạy.",
+            "Refresh may only run on the machine that OWNS the token (the VPS). This machine runs "
+            "READ-ONLY commands (status/grades/week/whatif/web/whoami). If THIS is the owning machine: "
+            "remove FAP_TOKEN_READONLY from .env / the unit file and restart — otherwise the token WILL "
+            "EXPIRE and every watcher silently stops.")
+    for line in (bar, f"🛑 {msg}{paths.label()}", f"   {why}", f"   {how}", bar):
+        print(line, file=sys.stderr, flush=True)
+    raise SystemExit(f"🛑 {msg} " + t("(FAP_TOKEN_READONLY=1 — refresh trên máy sở hữu token.)",
+                                      "(FAP_TOKEN_READONLY=1 — refresh on the token-owning machine.)"))
+
+
 def refresh_tokens():
+    if token_readonly():                      # CẤM xoay refresh_token của máy khác (docs/18-roadmap.md §3)
+        _refuse_refresh()
     if not os.path.exists(OAUTH_JSON):
         raise SystemExit("Chưa có oauth_tokens.json — chạy 'login'.")
     old = json.load(open(OAUTH_JSON, encoding="utf-8")); rt = old.get("refresh_token")

@@ -1,0 +1,27 @@
+# fap@.service — TEMPLATE: job hằng ngày (refresh -> calendar-sync -> notify today) cho MỘT profile.
+# TEMPLATE unit: the daily one-shot for ONE profile.
+#
+# %i = tên profile -> FAP_PROFILE=%i -> token/lịch/baseline của ĐÚNG người đó.
+# %i = the profile name -> FAP_PROFILE=%i -> that person's token/calendar/baseline.
+#
+# Cặp với fap@.timer:  systemctl --user enable --now fap@alice.timer
+# Pairs with fap@.timer.
+#
+# Mỗi profile phải tự chạy `FAP_PROFILE=<tên> fap calendar-auth` MỘT LẦN trước khi calendar-sync
+# chạy được (token Google nằm ở output/profiles/<tên>/gcal_token.json).
+# Each profile must run `FAP_PROFILE=<name> fap calendar-auth` ONCE before calendar-sync works.
+[Unit]
+Description=fap-cli daily pull [%i] (vi · en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+Environment=FAP_PROFILE=%i
+# Chạy tuần tự; refresh lỗi (exit != 0) thì các bước sau KHÔNG chạy.
+# Sequential; if refresh exits non-zero the later steps do NOT run.
+ExecStart=%h/.venv/bin/fap refresh
+ExecStart=%h/.venv/bin/fap calendar-sync
+ExecStart=%h/.venv/bin/fap notify today

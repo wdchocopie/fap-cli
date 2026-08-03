@@ -10,7 +10,7 @@ Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa c�
 """
 import os, re, datetime
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth, _vn_now
-from . import subjects
+from . import subjects, paths
 from ..i18n import t
 from .. import fmt
 
@@ -366,8 +366,8 @@ def exams_ics():
     if not n:
         print(t(f"⚠️ Không đọc được ngày/giờ của {skipped} dòng lịch thi — gửi `fap exams` cho tôi để chỉnh parser.",
                 f"⚠️ Couldn't parse date/time for {skipped} exam rows — share `fap exams` output to tune.")); return
-    out = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output")
-    os.makedirs(out, exist_ok=True)               # output/ có thể chưa tồn tại (checkout sạch / chưa login)
+    out = paths.out_dir()                         # output/ hoặc output/profiles/<tên>/ (xem core/paths.py)
+    os.makedirs(out, exist_ok=True)               # thư mục có thể chưa tồn tại (checkout sạch / chưa login)
     path = os.path.join(out, "lichthi.ics")
     with open(path, "w", encoding="utf-8") as f:
         f.write(ics)

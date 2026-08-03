@@ -18,7 +18,7 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 |---|---|
 | [12-google-calendar](12-google-calendar.md) | Đồng bộ lên Google Calendar + cấu hình Google Cloud · Sync to Google Calendar + Cloud setup |
 | [13-notify](13-notify.md) | Gửi lịch lên Telegram & Discord · Push schedule to Telegram & Discord |
-| [14-deploy](14-deploy.md) | Tự động hóa định kỳ (Task Scheduler / cron / systemd / Docker) · Scheduling |
+| [14-deploy](14-deploy.md) | Tự động hóa định kỳ (Task Scheduler / cron / systemd / Docker) + **1 session dùng cho 2 máy** (§9) · Scheduling + one login across two machines |
 
 ## ⚙️ Tham chiếu · Reference
 | Tài liệu · Doc | Nội dung · About |
@@ -26,7 +26,8 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | [15-config](15-config.md) | Mọi khóa trong `.env` · Every `.env` key |
 | [16-troubleshooting](16-troubleshooting.md) | Lỗi thường gặp & cách sửa · Common errors & fixes |
 | [17-architecture](17-architecture.md) | **Kiến trúc & logic toàn bộ code** + bảng hiệu năng máy yếu→mạnh · Architecture, full code logic & performance knobs |
-| [18-roadmap](18-roadmap.md) | 🚧 Việc đã chốt nhưng CHƯA code (gộp dòng LAB, 2 bug thật, session 2 máy, nhiều account) · Agreed but not-yet-implemented work |
+| [18-roadmap](18-roadmap.md) | ✅ Nhật ký 4 quyết định (gộp dòng LAB, 2 bug thật, session 2 máy, nhiều account) — **đã triển khai** + sự thật đã kiểm chứng · decision log, now implemented + verified facts |
+| [19-multi-profile](19-multi-profile.md) | **Nhiều tài khoản trên 1 máy**: `FAP_PROFILE`, `.env.<tên>`, onboarding (mỗi người TỰ login), 1 unit systemd/profile · Multi-profile: per-account state, config, consent-first onboarding, per-profile units |
 
 ## 🔬 Nội bộ / Reverse-engineering · Internals
 > **VI —** Cách công cụ được dựng nên (đọc nếu muốn hiểu sâu / tự làm lại). **EN —** How it was built.

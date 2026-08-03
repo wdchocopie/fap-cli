@@ -1,0 +1,35 @@
+# fap-bot@.service — TEMPLATE: bot Telegram thường trú cho MỘT profile (nhiều tài khoản / 1 máy).
+# TEMPLATE unit: resident Telegram bot for ONE profile (multi-account on one box).
+#
+# 🔴 MỖI PROFILE PHẢI CÓ BOT TOKEN RIÊNG. Hai tiến trình dùng CHUNG một TELEGRAM_TOKEN sẽ bị
+#    Telegram trả 409 Conflict và cả hai bot ngừng trả lời. Khai TELEGRAM_TOKEN + TELEGRAM_CHAT
+#    của chính người đó trong <gốc repo>/.env.<tên> (KHÔNG thừa kế từ .env của chủ máy).
+# 🔴 EACH PROFILE NEEDS ITS OWN BOT TOKEN. Two processes sharing one TELEGRAM_TOKEN get 409
+#    Conflict from Telegram and both bots stop answering. Put that person's own TELEGRAM_TOKEN +
+#    TELEGRAM_CHAT in <repo-root>/.env.<name> (never inherited from the owner's .env).
+#
+# Lệnh /update CỐ Ý không được bật ở đây: nó `git pull` + khởi động lại CHECKOUT DÙNG CHUNG của
+# mọi profile. Chỉ unit của CHỦ MÁY mới thêm  Environment=FAP_ALLOW_UPDATE=1.
+# /update is deliberately NOT enabled here: it pulls & restarts the checkout EVERY profile shares.
+# Only the owner's unit adds  Environment=FAP_ALLOW_UPDATE=1.
+#
+#   systemctl --user enable --now fap-bot@alice.service
+#   journalctl --user -u fap-bot@alice.service -n 50 -f
+#
+# Nhanh hơn · quicker:  UNITS='watch,grades,bot' bash deploy/setup-profile.sh alice
+[Unit]
+Description=fap-cli interactive Telegram bot [%i] (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+Environment=PYTHONUNBUFFERED=1
+Environment=FAP_PROFILE=%i
+ExecStart=%h/.venv/bin/fap telegram-bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

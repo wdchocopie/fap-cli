@@ -1,0 +1,33 @@
+# fap-watch@.service — TEMPLATE: watcher ĐIỂM DANH cho MỘT profile (nhiều tài khoản / 1 máy).
+# TEMPLATE unit: attendance watcher for ONE profile (multi-account on one box).
+#
+# %i = tên profile (phần sau dấu @). Unit đặt FAP_PROFILE=%i nên trạng thái nằm ở
+# output/profiles/<tên>/ và cấu hình đọc .env.<tên> — KHÔNG đè lên tài khoản khác.
+# %i = the profile name (whatever follows the @). FAP_PROFILE=%i keeps state in
+# output/profiles/<name>/ and config in .env.<name> — never colliding with another account.
+#
+#   cp deploy/fap-watch@.service ~/.config/systemd/user/   (sửa đường dẫn · fix the paths)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fap-watch@alice.service
+#   journalctl --user -u fap-watch@alice.service -n 50 -f
+#
+# Nhanh hơn:  bash deploy/setup-profile.sh alice   (tự thay đường dẫn + bật)
+# Quicker:    bash deploy/setup-profile.sh alice   (rewrites paths + enables it)
+#
+# Profile MẶC ĐỊNH (chủ máy) vẫn dùng fap-watch.service (không có @) — hai loại chạy song song được.
+# The DEFAULT profile keeps using plain fap-watch.service — both kinds coexist.
+[Unit]
+Description=fap-cli attendance watcher [%i] (vi en)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/fap-cli
+Environment=PYTHONUTF8=1
+Environment=FAP_PROFILE=%i
+ExecStart=%h/.venv/bin/fap watch-attendance loop 15
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

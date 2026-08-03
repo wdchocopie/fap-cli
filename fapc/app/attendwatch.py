@@ -17,16 +17,24 @@ So với lần trước (theo `scheduleID`) để phát hiện buổi MỚI đư
 RẺ với server: dò GetStudentAttendances (1 lời gọi); chỉ tải chi tiết môn nào có số buổi tăng.
 Trạng thái lưu ở output/attendance_state.json (đã .gitignore).
 """
-import os, sys, json, time
+import os, sys, json, time, random
 from ..core.api import creds, current_semester, call, as_list, _vn_now, _err_code
 from ..core.attendance import fetch as fetch_agg          # GetStudentAttendances
+from ..core import paths
 from .notify import push
 from .selfupdate import maybe_autoupdate, autoupdate_min
 from ..i18n import t
 from .. import config, fmt
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-STATE = os.path.join(_ROOT, "output", "attendance_state.json")
+STATE = paths.out("attendance_state.json")   # output/… hoặc output/profiles/<tên>/… (xem core/paths.py)
+
+# Lệch giờ refresh token lúc KHỞI ĐỘNG — bảng phân dải nằm ở fapc/app/_stagger.py (dùng chung
+# với gradewatch + reminders; trước đây 3 file tự chế 3 kiểu và các dải chồng nhau).
+from ._stagger import startup_delay, first_refresh_mark
+
+def _first_refresh_mark(refresh_min, now=None):
+    """Giữ tên cũ cho test/tương thích — nay ủy quyền cho _stagger (dải riêng của attendwatch)."""
+    return first_refresh_mark("attendwatch", refresh_min, now)
 
 # Ngày & nhãn trạng thái dùng chung từ fmt (giữ tên _fmt_date cho test cũ).
 _fmt_date = fmt.fmt_date
@@ -97,11 +105,14 @@ def _load_state():
         return {}
 
 def _save_state(st):
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    paths.ensure_dir(STATE)                               # thư mục profile có thể chưa tồn tại
     tmp = STATE + ".tmp"                                  # ghi ATOMIC: tmp rồi replace -> không để JSON dở
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False, indent=2)
     os.replace(tmp, STATE)
+    # Lịch sử điểm danh = PII (của người khác khi chạy multi-profile) -> chỉ chủ file đọc được.
+    try: os.chmod(STATE, 0o600)
+    except OSError: pass                                  # Windows/FS lạ: best-effort, đừng làm chết watcher
 
 def _event_line(subj, r):
     return (f"• {subj} · {_fmt_date(r.get('date'))} · slot {r.get('slot')}\n"
@@ -170,7 +181,12 @@ def loop(interval_min=15, absent_only=None, refresh_min=50):
     if autoupdate_min():
         print(t(f"🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).",
                 f"🔄 Update-while-running: ON every {autoupdate_min()}m (FAP_AUTOUPDATE_MIN)."))
-    last_refresh = last_update = 0.0
+    last_update = 0.0
+    # Ngủ vài giây (dải riêng của service này) RỒI refresh ngay ở vòng đầu: vẫn lệch với
+    # gradewatch/reminders, nhưng lần poll ĐẦU vẫn có token còn hạn. Nếu chỉ seed last_refresh thì
+    # lần refresh đầu bị đẩy sang vòng lặp sau — với watcher 15–60' là quá muộn khi khởi động lạnh.
+    time.sleep(startup_delay("attendwatch"))
+    last_refresh = 0.0
     while True:
         last_update = maybe_autoupdate(last_update, time.time())   # opt-in: pull+selftest → tự restart
         if 6 <= _vn_now().hour <= 21:
