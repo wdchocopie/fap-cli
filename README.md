@@ -34,7 +34,10 @@ fap refresh      # các lần sau: làm mới token (không cần browser) · he
 - Import lịch · Import calendar: Google Calendar → **Settings → Import & Export** → `output/lichhoc.ics`.
 - Đẩy thẳng lên Google Calendar · push directly: `fap calendar-auth` rồi `fap calendar-sync`.
 - Gửi lên Telegram/Discord · push to chat: cấu hình `.env` (xem `.env.example`) rồi `fap notify today`.
-- Xem nhanh · quick view: `fap status` (tổng quan hôm nay · today overview), `fap week` (lịch tuần · weekly), `fap whatif 8` (mô phỏng GPA · GPA what-if).
+- Bot tương tác · interactive bots: `fap telegram-bot` / `fap discord-bot`, rồi gõ **`/menu`** (Telegram) hoặc **`!menu`** (Discord) để hiện **bảng NÚT BẤM** — chạm là chạy lệnh, khỏi nhớ. · tap-to-run button panel.
+- Xem nhanh · quick view: `fap status` (tổng quan hôm nay · today overview), `fap today` / `fap tomorrow`, `fap week` (lịch tuần · weekly), `fap whatif 8` (mô phỏng GPA · GPA what-if).
+- Lịch **cả kỳ** 1 màn hình · whole-term view: `fap semester` (mẫu lặp hằng tuần · weekly pattern), `fap semester weeks` (mỗi tuần 1 dòng · one line per week), `fap semester list` (từng ngày · day-by-day), `fap semester Fall2026` (kỳ khác · another term). ⚠️ Mẫu **suy ra từ lịch xếp** nên không phản ánh buổi huỷ/nghỉ lễ — tuần nào nghi ngờ thì `fap week-exact`.
+- Điểm thành phần **1 môn** cho nhanh · one-subject components: `fap grades-detail IAP301` (kỳ 6 môn: 8 → 3 request).
 - Hiện **tên môn** thay vì mã trơ: chạy `fap subjects` **một lần** → tên + tín chỉ xuất hiện ở grades/điểm danh/lịch/bot/web (và GPA kỳ tính **theo tín chỉ**). · run `fap subjects` once → names + credits everywhere.
 - Tổng kết tuần 1 tin · weekly recap: `fap weekly` (lịch + điểm danh + điểm → kênh chat).
 - Lớp đang học · my classes: `fap courses` (môn / lớp / giảng viên / phòng — `GetCourseOfSemester`, fallback từ TKB).

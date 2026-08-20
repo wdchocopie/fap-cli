@@ -6,8 +6,11 @@
 > **VI —** Cài đặt: `pip install -e .` ở thư mục gốc repo (tạo lệnh `fap`). Muốn dùng Google Calendar: `pip install -e ".[gcal]"`. Chỉ thao tác trên **TÀI KHOẢN CỦA CHÍNH BẠN**.
 > **EN —** Install: `pip install -e .` from the repo root (creates the `fap` command). For Google Calendar: `pip install -e ".[gcal]"`. Use it for **YOUR OWN ACCOUNT** only.
 
-> **VI —** Gọi `fap` không kèm lệnh (hoặc lệnh lạ) sẽ in bảng trợ giúp song ngữ. Nếu tiếng Việt/emoji bị vỡ trên console Windows, chạy `chcp 65001` hoặc đặt `PYTHONUTF8=1`.
-> **EN —** Running `fap` with no command (or an unknown one) prints the bilingual help. If Vietnamese/emoji is garbled on the Windows console, run `chcp 65001` or set `PYTHONUTF8=1`.
+> **VI —** Gọi `fap` không kèm lệnh (hoặc lệnh **thật sự** lạ) sẽ in bảng trợ giúp song ngữ. Nếu tiếng Việt/emoji bị vỡ trên console Windows, chạy `chcp 65001` hoặc đặt `PYTHONUTF8=1`.
+> **EN —** Running `fap` with no command (or a **genuinely** unknown one) prints the bilingual help. If Vietnamese/emoji is garbled on the Windows console, run `chcp 65001` or set `PYTHONUTF8=1`.
+
+> ✅ **VI — Mọi lệnh của bot đều CHẠY được từ CLI.** Trước đây `fap today` / `fap tomorrow` in nhầm trang HELP vì không có nhánh CLI riêng. Nay CLI có **nhánh dự phòng chung**: lệnh nào nằm trong `bot_core.COMMAND_INFO` mà chưa có bản CLI riêng sẽ chạy thẳng qua lõi bot (`fapc/app/cli.py` → `_core_cmd()` → `bot_core.handle(cmd, tham_số)`) và **giữ nguyên cụm tham số nhiều từ**. Thêm lệnh mới vào `COMMAND_INFO` là CLI/bot/web/notify có ngay — không bao giờ lệch nữa. Riêng `fap help` (và `fap` trống) vẫn in **trang HELP của CLI**, không phải `/help` của bot.
+> ✅ **EN — Every bot command now RUNS from the CLI.** `fap today` / `fap tomorrow` used to print the HELP page because they had no CLI branch. The CLI now has a **generic fallback**: any command in `bot_core.COMMAND_INFO` without a dedicated CLI branch is executed through the bot core (`fapc/app/cli.py` → `_core_cmd()` → `bot_core.handle(cmd, arg)`), **keeping multi-word arguments intact**. Add a command to `COMMAND_INFO` and CLI/bot/web/notify all get it — no more drift. `fap help` (and bare `fap`) still prints the **CLI HELP page**, not the bot's `/help`.
 
 ---
 
@@ -30,9 +33,11 @@
 |---|---|---|---|
 | `fap status` *(alias: `fap dashboard`)* | tổng quan 1 màn hình: lịch hôm nay + GPA tạm tính + điểm danh + cảnh báo cấm thi · one-screen overview: today's classes + provisional GPA + attendance + ban warning | *(không · none)* | stdout |
 | `fap all` | **MỌI mục trong 1 lần**: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi · everything at once | *(không · none)* | stdout |
+| `fap today` · `fap tomorrow` | lịch **HÔM NAY** / **NGÀY MAI** (giờ VN), cùng bản tóm tắt mà bot/notify gửi · today's / tomorrow's schedule (VN time), same digest the bot pushes | *(không · none)* | stdout |
 | `fap weekly` | **tổng kết tuần** trong 1 tin: lịch tuần + điểm danh + nguy cơ cấm thi + điểm (gửi kênh đã cấu hình) · weekly recap in one message → channels | *(không · none)* | tin nhắn kênh + stdout |
-| `fap week [next\|prev\|N]` | lịch cả tuần T2–CN (lọc từ dữ liệu kỳ) · whole-week schedule (Mon–Sun) | `next`/`sau` = tuần sau, `prev`/`trước` = tuần trước, hoặc số tuần lệch `N` · or integer offset `N` (mặc định · default = tuần này · this week) | stdout |
+| `fap week [next\|prev\|N]` | lịch cả tuần T2–CN (lọc từ dữ liệu kỳ), tiêu đề kèm **`· Tuần N/M`** khi tra được mốc kỳ · whole-week schedule (Mon–Sun), header carries `· Week N/M` when term bounds resolve | `next`/`sau` = tuần sau, `prev`/`trước` = tuần trước, hoặc số tuần lệch `N` · or integer offset `N` (mặc định · default = tuần này · this week) | stdout |
 | `fap week-exact [week year]` | TKB lấy **thẳng từ server** (`GetActivityStudentByWeek`) — chuẩn cho tuần nghỉ lễ/đặc biệt; tự dò số tuần FAP qua `GetWeekByDate` · weekly straight from server | `[week year]` tuỳ chọn; thiếu = tự dò tuần hiện tại · optional, else auto-detect current week | stdout |
+| `fap semester [pattern\|weeks\|list] [<tên kỳ>]` | **lịch CẢ KỲ** trong 1 màn hình: `pattern` (mặc định) = **mẫu lặp hằng tuần** mỗi môn + buổi lệch mẫu; `weeks` = mỗi tuần 1 dòng (Tuần N · khoảng ngày · môn nào mấy buổi); `list` = liệt kê từng ngày · whole-term schedule: repeating weekly pattern (default) / one line per week / day-by-day list | `pattern`\|`weeks`\|`list` và/hoặc **tên kỳ khác** (vd `Fall2026`) — gõ thứ tự nào cũng được · view word and/or another term name, in either order | stdout |
 
 ### Dữ liệu · Data
 
@@ -41,7 +46,7 @@
 | `fap extract` | kéo toàn bộ endpoint chỉ-đọc về đĩa, kèm chi tiết điểm danh từng môn · pull every read-only endpoint to disk, plus per-subject attendance | *(không · none)* | `output/api/<endpoint>.json`, `output/api/courseAttendance__<mã>.json` |
 | `fap ics` *(alias: `fap run`)* | xuất thời khóa biểu ra file `.ics` để import Calendar · export the timetable to an `.ics` file for Calendar import | *(không · none)* | `output/lichhoc.ics` + tóm tắt stdout |
 | `fap grades` | bảng điểm tổng kết môn + **tên môn** + GPA tạm tính (**theo tín chỉ** nếu đã `fap subjects`) · subject summary + names + provisional GPA (credit-weighted when the catalog is cached) | *(không · none)* | stdout |
-| `fap grades-detail` | điểm thành phần từng môn + dòng **"cần X/10 ở phần còn lại để qua"**. Hợp nhất `GetStudentMark` với **`GetCourseOfSemester`** → môn bị bỏ sót / thiếu `courseID` vẫn lấy được điểm thành phần · component grades + pass-projection; merges in `GetCourseOfSemester` so subjects missing from `GetStudentMark` still resolve | *(không · none)* | stdout |
+| `fap grades-detail [MÔN] [--raw]` | điểm thành phần từng môn + dòng **"cần X/10 ở phần còn lại để qua"**. Hợp nhất `GetStudentMark` với **`GetCourseOfSemester`** → môn bị bỏ sót / thiếu `courseID` vẫn lấy được điểm thành phần. Kèm **mã hoặc tên môn** = chỉ kéo **1 môn** (kỳ 6 môn: **8 → 3 request**) · component grades + pass-projection; pass a subject code/name to fetch just that one | `[MÔN]` = mã (`IAP301`, `iap`) hoặc **một phần tên môn**; `--raw` = in nguyên response `GetMarkByCourse` (chẩn đoán) | stdout |
 | `fap subjects` | tải & cache **danh mục môn** (`GetSubjets`) → từ đó **TÊN môn + tín chỉ** hiện ở grades/điểm danh/lịch/bot/web · cache the subject catalog → names + credits everywhere | *(không · none)* | `output/subjects_catalog.json` + stdout |
 | `fap courses` | **lớp đang học** trong kỳ: môn / lớp / **giảng viên** / phòng (`GetCourseOfSemester`; fallback gộp từ `GetActivityStudent` nếu lỗi) · my classes this term (subject/class/lecturer/room) | *(không · none)* | stdout |
 | `fap attendance` | bảng điểm danh (có mặt / tổng / %) · attendance table (present / total / %) | *(không · none)* | stdout |
@@ -60,7 +65,7 @@
 | `fap notifications` | thông báo cá nhân của trường (`GetNotificationByRoll`), mới nhất trước · personal school notifications, newest first | *(không · none)* | stdout |
 | `fap profile` | hồ sơ sinh viên (`GetStudentById`): tên/MSSV/email/ngày sinh/ngành/lớp… (chỉ hiện field có giá trị) · student profile | *(không · none)* | stdout |
 | `fap applications` | đơn từ + trạng thái xử lý + phản hồi (`GetApplication`), mới nhất trước, **decode tiếng Việt** · applications & processing status | *(không · none)* | stdout |
-| `fap web [port]` | **dashboard web cục bộ** (Python stdlib, 0 dep) — bấm nút xem lịch/điểm/điểm danh; CHỈ localhost · local web dashboard (stdlib), localhost-only | `[port]` mặc định `8000` · default `8000` | trình duyệt · browser; tiến trình nền |
+| `fap web [port]` | **dashboard web cục bộ** (Python stdlib, 0 dep) — bấm nút xem lịch/điểm/điểm danh; nút **sinh từ `COMMAND_INFO`** (thêm lệnh là có nút ngay) + ô **tham số** trên đầu trang (gõ `IAP491` / `weeks` / `8` rồi Enter để chạy lại lệnh đang xem); CHỈ localhost · local web dashboard (stdlib), buttons derived from `COMMAND_INFO` + an arg box, localhost-only | `[port]` mặc định `8000` · default `8000` | trình duyệt · browser; tiến trình nền |
 
 ### Đẩy · Push
 
@@ -68,7 +73,7 @@
 |---|---|---|---|
 | `fap calendar-auth` | xác thực Google Calendar 1 lần (mở trình duyệt) · authorize Google Calendar once (opens browser) | *(không · none)* — cần `credentials.json` ở gốc repo · needs `credentials.json` at repo root | `output/gcal_token.json` |
 | `fap calendar-sync` | đẩy/cập nhật lịch lên Google Calendar (không tạo trùng) · push/update the timetable to Google Calendar (no duplicates) | *(không · none)* | sự kiện trên Calendar · events on calendar; tóm tắt stdout |
-| `fap notify [<view>]` | gửi kết quả lên Telegram/Discord · push a view to Telegram/Discord | `test` (mặc định) · `today`/`tomorrow`/`weekly` · `attendance`/`banrisk` · `grades`/`grades-detail`/`status`/`whatif [điểm]`/`exams`/`gpa`/`notifications`/`all` (dùng chung lõi bot) | tin nhắn kênh · channel message; stdout |
+| `fap notify [<lệnh> [tham số]]` | gửi kết quả lên Telegram/Discord · push a view to Telegram/Discord | `test` (mặc định) hoặc **bất kỳ lệnh bot nào** — danh sách allowlist **sinh từ `COMMAND_INFO`** nên không bao giờ sót lệnh mới (`today`/`tomorrow`/`weekly`/`semester`/`attendance`/`banrisk`/`grades`/`grades-detail [môn]`/`status`/`whatif [điểm]`/`exams`/`gpa`/`notifications`/`all`…). Xem danh sách: `fap notify help`. Tham số **nhiều từ được giữ nguyên** · any bot command + its argument; multi-word args preserved | tin nhắn kênh · channel message; stdout |
 | `fap watch-attendance [loop [phút]] [--absent-only]` | dò & báo khi **VỪA được điểm danh** (near real-time) · ping when attendance is just recorded | `loop [phút]` = chạy nền dò mỗi N phút (mặc định 15, tối thiểu 5); `--absent-only` = chỉ báo vắng/muộn · resident loop, one-shot, or absent-only | tin nhắn kênh + stdout; mốc lưu `output/attendance_state.json` |
 | `fap watch-grades [loop [phút]]` | dò & báo khi có **ĐIỂM MỚI** (thành phần hoặc tổng kết) · ping on new component/final marks | `loop [phút]` = chạy nền (mặc định 30, tối thiểu 10) · resident loop or one-shot | tin nhắn kênh + stdout; mốc lưu `output/grade_state.json` |
 | `fap notify notifications` | đẩy **thông báo trường MỚI** (dedupe theo `id`, lần đầu chỉ ghi mốc) · push only NEW school notifications | *(không · none)* | tin nhắn kênh; mốc lưu `output/seen_notifications.json` |
@@ -81,6 +86,9 @@
 | `fap discord-bot` | bot Discord (prefix `!`) trả lời lệnh · interactive Discord bot | *(không · none)* — cần `pip install -e ".[bot]"` + `DISCORD_BOT_TOKEN` | tiến trình nền · resident process |
 
 > Bot **chỉ trả lời chủ tài khoản** (Telegram: `TELEGRAM_CHAT`; Discord: `DISCORD_ALLOWED_USER_ID`). Mỗi lệnh gọi API FAP live. Chi tiết: [13-notify.md §8](13-notify.md). · Bots answer **only the account owner**; each command hits the live FAP API. See [13-notify.md §8](13-notify.md).
+
+> 🎛️ **VI —** Cả hai bot có **bảng NÚT BẤM**: gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) để chạy lệnh bằng một chạm, khỏi gõ. Nút sinh từ chính `COMMAND_INFO`. Chi tiết + giới hạn số nút: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
+> 🎛️ **EN —** Both bots ship a **BUTTON panel**: send `/menu` (Telegram) or `!menu` / `/menu` (Discord) to run a command with one tap. The buttons are generated from `COMMAND_INFO`. Details + button caps: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
 
 ### Khác · Misc
 
@@ -135,16 +143,33 @@ fap whoami                                  # kiểm tra token đã lưu · chec
 fap grades
 ```
 
-### `fap grades-detail`
+### `fap grades-detail [MÔN]`
 **VI —** Trước hết gọi `GetStudentMark` để lấy `courseID` từng môn, rồi gọi `GetMarkByCourse` (tham số `CourseId`) cho điểm thành phần.
 **EN —** First calls `GetStudentMark` to get each subject's `courseID`, then calls `GetMarkByCourse` (param `CourseId`) for the component grades.
 
 > ✅ **VI — ĐÃ KIỂM CHỨNG (live):** `GetMarkByCourse` dùng checksum `cs12(rollNumber, campusCode)` (mặc định) → `code=200`; các biến thể khác (CourseId / login) → `code=201`. Đúng như `fap grades-detail` đang làm.
 > ✅ **EN — VERIFIED (live):** `GetMarkByCourse` uses checksum `cs12(rollNumber, campusCode)` (default) → `code=200`; other variants (CourseId / login) → `code=201`. Matches what `fap grades-detail` already does.
 
+**VI — Lọc 1 môn (khuyên dùng).** Không tham số, lệnh gọi `GetMarkByCourse` cho **MỌI** môn trong kỳ: kỳ 6 môn = **8 request**. Kèm mã/tên môn thì chỉ còn **3 request** — nhanh hơn hẳn và nhẹ cho server trường.
+**EN — Filter to one subject (recommended).** With no argument the command calls `GetMarkByCourse` for **every** subject: a 6-subject term = **8 requests**. Naming a subject drops it to **3** — much faster and far gentler on the school's server.
+
+**VI —** Cách khớp (`fapc/core/subjects.py` → `resolve()`), **không phân biệt hoa/thường**, ưu tiên giảm dần:
+1. mã khớp **ĐÚNG** (`IAP301`) → 2. mã **BẮT ĐẦU BẰNG** (`iap`) → 3. mã **CHỨA** → 4. **TÊN môn CHỨA** (`lập trình`, chỉ có tác dụng khi đã chạy `fap subjects` để cache danh mục môn).
+**EN —** Matching (`fapc/core/subjects.py` → `resolve()`) is **case-insensitive**, in this precedence: exact code → code prefix → code substring → **subject-name substring** (name matching only works after `fap subjects` has cached the catalog).
+
+**VI —** Khớp **nhiều môn** → lệnh **liệt kê ứng viên** và bảo bạn gõ rõ hơn (không đoán bừa). **Không khớp môn nào** → liệt kê toàn bộ môn trong kỳ. Kỳ **chưa có điểm** vẫn báo "Chưa có dữ liệu điểm" như cũ (không bị đổi thành "không thấy môn").
+**EN —** An **ambiguous** query **lists the candidates** and asks you to be more specific (it never guesses). **No match** → it lists every subject in the term. An **empty term** still says "No grades yet" (it is not turned into a "no such subject" message).
+
 ```bash
-fap grades-detail
+fap grades-detail                 # cả kỳ · the whole term (8 request cho kỳ 6 môn)
+fap grades-detail IAP301          # đúng 1 môn · exactly one subject (3 request)
+fap grades-detail iap             # khớp theo tiền tố mã · code-prefix match
+fap grades-detail "lập trình"     # khớp theo TÊN môn (cần `fap subjects` trước) · name match
+fap grades-detail --raw IAP301    # in NGUYÊN response GetMarkByCourse · raw diagnostic dump
 ```
+
+> ⚠️ **VI —** `--raw` là **đường chẩn đoán**: nó KHÔNG gọi `GetCourseOfSemester`, nên chỉ tìm được môn trong danh sách của `GetStudentMark`. Môn mà `GetStudentMark` bỏ sót vẫn hiện ở bản thường nhưng **không tra được** ở `--raw`.
+> ⚠️ **EN —** `--raw` is a **diagnostic path**: it does NOT call `GetCourseOfSemester`, so it can only resolve subjects that `GetStudentMark` returned. A subject `GetStudentMark` omits still shows in the normal view but is **not findable** under `--raw`.
 
 ### `fap attendance`
 **VI —** Gọi `GetStudentAttendances` với checksum `cs12(rollNumber, campusCode)` (mặc định). In số buổi có mặt / tổng / phần trăm theo môn.
@@ -204,6 +229,55 @@ fap whatif 8                     # cần gì để đạt GPA 8 · what you need
 > ⚠️ **VI —** Một số endpoint (`GeFeeByRoll`, `GetSemesterMark`, `GetVersion`) có thể trả **404** với tài khoản chưa hoàn tất kỳ nào — đây là do dữ liệu/server, không phải lỗi công cụ.
 > ⚠️ **EN —** Some endpoints (`GeFeeByRoll`, `GetSemesterMark`, `GetVersion`) may return **404** for accounts with no completed semesters — that is server/data-driven, not a tool bug.
 
+### `fap semester` — lịch CẢ KỲ · the whole-term schedule
+
+**VI —** `GetActivityStudent` chỉ nhận tham số `Semester`, nghĩa là **một lời gọi đã trả về lịch CẢ KỲ** — `fap week` xưa nay lấy trọn rồi vứt đi ~90% để lọc 7 ngày. `fap semester` dùng đúng dữ liệu đó nên **không tốn thêm request** so với xem lịch tuần. Ba cách trình bày:
+**EN —** `GetActivityStudent` only takes a `Semester` parameter, so **one call already returns the entire term** — `fap week` has always fetched it all and thrown ~90% away to filter 7 days. `fap semester` reuses exactly that data, so it costs **no extra request** over the weekly view. Three views:
+
+| View | Gõ · Type | Nội dung · What you get |
+|---|---|---|
+| **pattern** *(mặc định · default)* | `fap semester` | vi · **mẫu lặp hằng tuần** mỗi môn (`🔁 SWP391: T2 07:30–09:50 📍AL-R201 ×10`) + danh sách **buổi lệch mẫu** (tối đa 8 buổi, dôi ra ghi `…+N buổi nữa`). Gọn nhất (~700 ký tự) — hợp để gửi chat. en · the repeating weekly slot per subject + off-pattern sessions (capped at 8). |
+| **weeks** | `fap semester weeks` | vi · mỗi tuần **1 dòng**: `📌 Tuần 5 · 05/10–11/10 · 3 buổi: IAP301×1 PRN231×1 SWP391×1`. Số tuần là **số tuần THẬT của kỳ** (tra qua `GetSemester`; không tra được thì đánh số tuần liên tiếp). en · one line per week, numbered by the term's real week ordinal. |
+| **list** | `fap semester list` | vi · liệt kê **từng ngày, từng buổi** cho cả kỳ — dài (kỳ ~60 buổi ≈ 3.7k ký tự), gửi chat sẽ bị **cắt thành nhiều tin**. en · day-by-day, session-by-session; long enough to be split into several chat messages. |
+
+**VI —** Xem **kỳ khác**: thêm tên kỳ (`Fall2026`, `Spring2026`…). View và tên kỳ gõ **thứ tự nào cũng được**. Nếu kỳ đó trường **chưa xếp lịch** (hay gặp khi xem kỳ sau), lệnh báo rõ *"Kỳ này trường chưa xếp lịch"* + gợi ý các kỳ đang/sắp tới — không để màn hình trống.
+**EN —** To view **another term**, add its name (`Fall2026`, `Spring2026`…). The view word and the term name may come in **either order**. If that term has **no published timetable** yet (common when peeking at the next term), the command says so and lists the current/upcoming terms instead of showing a blank screen.
+
+> ℹ️ **VI — Muốn NHÌN dạng lịch (ô vuông theo ngày/giờ)?** Đừng chờ tính năng xuất ảnh — **đã có sẵn và tốt hơn**: [`fap ics`](#fap-ics-alias-fap-run-và-fap-notify-fap-calendar-sync) ghi `output/lichhoc.ics` để import một lần, còn [`fap calendar-sync`](12-google-calendar.md) đẩy thẳng lên Google Calendar và **đồng bộ lại được** (chống trùng theo `iCalUID`). Lịch nằm trong app Calendar của điện thoại thì cuộn được, tìm được, **tự nhắc**, hiện tiếng Việt + emoji chuẩn — thứ mà một tấm ảnh sinh sẵn không làm được.
+> **EN — Want to *see* it as a calendar grid?** It already exists, and it beats a generated picture: `fap ics` writes `output/lichhoc.ics` for a one-off import, and `fap calendar-sync` pushes to Google Calendar and stays re-syncable (deduped by `iCalUID`). In your phone's calendar app it scrolls, searches, **reminds you**, and renders Vietnamese + emoji natively.
+>
+> **VI —** Cân nhắc rồi **bỏ**: render PNG bằng Pillow. Lý do đã kiểm chứng — Pillow **không kèm font nào**, font mặc định của nó vẽ `ế ữ ạ ễ Đ đ ơ ă` ra **đúng một ô vuông `.notdef`** (mask trùng byte với `漢`), và `📍 💻 ━` cũng là `.notdef` trong cả Segoe UI lẫn Arial ⇒ không tái dùng được chuỗi nào từ `fmt`. Thêm nữa `deploy/update.sh` cố định `EXTRAS=[gcal]` nên extra mới **sẽ không bao giờ được cài** trên server.
+> **EN —** Considered and **dropped**: a Pillow PNG renderer. Verified: Pillow ships **zero fonts**, its default renders every Vietnamese diacritic as the identical `.notdef` box, `📍 💻 ━` are `.notdef` in Segoe UI and Arial too, and `deploy/update.sh` pins `EXTRAS=[gcal]` so a new extra would never install on the server.
+
+```bash
+fap semester                     # mẫu lặp hằng tuần + buổi lệch · weekly pattern + off-pattern
+fap semester weeks               # mỗi tuần 1 dòng · one line per week
+fap semester list                # liệt kê từng ngày · day-by-day list
+fap semester Fall2026            # kỳ khác · another term
+fap semester Fall2026 weeks      # kỳ khác + view (thứ tự tuỳ ý · either order)
+fap notify semester              # đẩy lên Telegram/Discord · push to chat
+```
+
+**VI —** Ví dụ bản `pattern` (dữ liệu minh hoạ) · **EN —** Sample `pattern` output (illustrative data):
+
+```
+📚 Lịch cả kỳ Fall2026  ·  31 buổi
+━━━━━━━━━━━━━━━━
+🗓 07/09/2026 – 21/11/2026 · 11 tuần · 3 môn
+
+🔁 IAP301: T6 09:10–11:30 📍AL-R305 ×10
+🔁 PRN231: T4 12:30–14:50 📍BE-213 ×10
+🔁 SWP391: T2 07:30–09:50 📍AL-R201 ×10
+
+⚠️ Lệch mẫu (1 buổi):
+   • 21/11 T7 07:30 SWP391 📍AL-R110
+
+ℹ️ Mẫu suy từ lịch cả kỳ — KHÔNG phản ánh buổi huỷ / nghỉ lễ. Nghi ngờ tuần nào: fap week-exact
+```
+
+> ⚠️ **VI — KHÔNG phải nguồn chuẩn cho nghỉ lễ / buổi huỷ.** Mẫu lặp được **suy ra** từ `GetActivityStudent` (lịch xếp của cả kỳ), nên nó **không phản ánh** buổi bị huỷ, dời, hay tuần nghỉ lễ. Dòng ghi chú này được in **ngay trong kết quả**. Nghi ngờ một tuần cụ thể → dùng **`fap week-exact [week year]`** (`GetActivityStudentByWeek`) — đó mới là bản server trả cho đúng tuần đó.
+> ⚠️ **EN — NOT authoritative for holidays / cancellations.** The pattern is **inferred** from `GetActivityStudent` (the term's *planned* timetable), so it does **not** reflect cancelled or moved sessions, nor holiday weeks. That caveat is printed **inside the output itself**. For a disputed week, use **`fap week-exact [week year]`** (`GetActivityStudentByWeek`) — that is the server's answer for that exact week.
+
 > ⚠️ **VI —** `output/` chứa ĐIỂM / HỌC BẠ / TÀI CHÍNH / HỒ SƠ cá nhân — đã `.gitignore`, **KHÔNG** chia sẻ hay đẩy lên repo công khai.
 > ⚠️ **EN —** `output/` holds grades / transcript / finance / personal profile — it is `.gitignore`d; do **NOT** share it or push it to a public repo.
 
@@ -217,7 +291,7 @@ fap whatif 8                     # cần gì để đạt GPA 8 · what you need
 | Khóa · Key | Ý nghĩa · Meaning | Lệnh ảnh hưởng · Affects |
 |---|---|---|
 | `FAP_LANG` | ngôn ngữ log/thông báo, `vi` (mặc định) hoặc `en` · log/message language, `vi` (default) or `en` | mọi lệnh in chữ · all printing commands |
-| `FAP_SEMESTER` | ép học kỳ, vd `Spring2026` / `Summer2026` / `Fall2026`; để trống = tự dò qua `GetSemester` theo ngày · force the semester; empty = auto-detect via `GetSemester` by date | `grades`, `grades-detail`, `attendance`, `banrisk`, `ics`, `notify`, `calendar-sync`, `extract`, `status`, `week`, `whatif` |
+| `FAP_SEMESTER` | ép học kỳ, vd `Spring2026` / `Summer2026` / `Fall2026`; để trống = tự dò qua `GetSemester` theo ngày · force the semester; empty = auto-detect via `GetSemester` by date | `grades`, `grades-detail`, `attendance`, `banrisk`, `ics`, `notify`, `calendar-sync`, `extract`, `status`, `today`, `tomorrow`, `week`, `semester`, `whatif` |
 | `TELEGRAM_TOKEN` | token bot Telegram · Telegram bot token | `notify` |
 | `TELEGRAM_CHAT` | chat id Telegram · Telegram chat id | `notify` |
 | `DISCORD_WEBHOOK_URL` | webhook Discord · Discord webhook | `notify` |
@@ -225,6 +299,9 @@ fap whatif 8                     # cần gì để đạt GPA 8 · what you need
 
 > **VI —** Múi giờ `Asia/Ho_Chi_Minh` được gắn cứng trong mã, **không** phải khóa `.env`.
 > **EN —** The `Asia/Ho_Chi_Minh` time zone is hard-coded, **not** an `.env` key.
+
+> 🎓 **VI — Đổi kỳ cho MỘT lần chạy.** Chỉ **`fap semester <tên kỳ>`** nhận tên kỳ ngay trên dòng lệnh (vd `fap semester Fall2026 weeks`). Gõ **đúng cách viết của server** (`Fall2026`, `Spring2026`, `Summer2026`) — FAP **phân biệt hoa/thường** ở tham số `Semester`; gõ sai thì trả 0 buổi và lệnh sẽ **liệt kê các kỳ hợp lệ** cho bạn chép lại. Các lệnh còn lại (`week`, `grades`, `attendance`…) **không có cờ `--sem`**: muốn đổi kỳ thì đặt biến môi trường cho một lần chạy, vd `FAP_SEMESTER=Fall2026 fap week` (PowerShell: `$env:FAP_SEMESTER="Fall2026"; fap week`). `FAP_SEMESTER` luôn **ưu tiên cao nhất**.
+> 🎓 **EN — Overriding the term for ONE run.** Only **`fap semester <term>`** takes a term name on the command line (e.g. `fap semester Fall2026 weeks`). Spell it **the way the server does** (`Fall2026`, `Spring2026`, `Summer2026`) — FAP's `Semester` parameter is **case-sensitive**; a wrong spelling returns 0 sessions and the command then **lists the valid term names** to copy from. Every other command (`week`, `grades`, `attendance`…) has **no `--sem` flag**: override via the env var for a single run, e.g. `FAP_SEMESTER=Fall2026 fap week` (PowerShell: `$env:FAP_SEMESTER="Fall2026"; fap week`). `FAP_SEMESTER` always **wins**.
 
 ---
 

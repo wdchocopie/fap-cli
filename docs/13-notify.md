@@ -16,20 +16,27 @@
 | `fap notify today` | vi · gửi lịch **HÔM NAY** (theo giờ VN). en · push **TODAY's** schedule (VN time). |
 | `fap notify tomorrow` | vi · gửi lịch **NGÀY MAI**. en · push **TOMORROW's** schedule. |
 | `fap notify weekly` | vi · gửi lịch **CẢ TUẦN** (T2–CN). en · push the **WHOLE WEEK** (Mon–Sun). |
+| `fap notify semester [pattern\|weeks\|list] [<kỳ>]` | vi · gửi lịch **CẢ KỲ**: mẫu lặp hằng tuần (mặc định) / mỗi tuần 1 dòng / liệt kê từng ngày. en · push the **WHOLE TERM**: weekly pattern (default) / one line per week / day-by-day list. |
 | `fap notify attendance` | vi · gửi bảng **điểm danh**. en · push the **attendance** table. |
 | `fap notify banrisk` | vi · gửi **cảnh báo cấm thi** (môn < 80%). en · push **exam-ban risk** (subjects < 80%). |
 | `fap notify grades` · `status` · `whatif [điểm]` | vi · điểm / tổng quan / mô phỏng GPA. en · grades / overview / GPA what-if. |
+| `fap notify grades-detail [MÔN]` | vi · điểm thành phần; kèm **mã hoặc tên môn** = chỉ 1 môn (kỳ 6 môn: **8 → 3 request**). en · component marks; naming a subject fetches only that one. |
 | `fap notify exams` | vi · gửi **lịch thi** (hẹn lịch để **nhắc trước ngày thi**). en · push the **exam schedule** (schedule it for exam reminders). |
 
 **VI —** Mọi lệnh (trừ `test`) dùng **chung lõi với bot** (`bot_core`) rồi đẩy kết quả lên kênh đã cấu hình. Không đối số → mặc định `test`. Bản không cài đặt: `python -m fapc notify <lệnh>`.
 **EN —** Every command (except `test`) shares the **bot core** (`bot_core`) and pushes the result to your configured channels. No argument → defaults to `test`. Non-install: `python -m fapc notify <cmd>`.
 
+> ✅ **VI —** Bảng trên chỉ là những lệnh hay dùng: `notify` nhận **MỌI lệnh của bot** vì allowlist được **sinh từ `COMMAND_INFO`** (thêm lệnh mới là `notify` gửi được ngay, không phải sửa file). Xem danh sách đầy đủ: **`fap notify help`**. Tham số **nhiều từ được giữ nguyên** (`fap notify semester Fall2026 weeks` không còn bị cụt mất chữ `weeks`).
+> ✅ **EN —** The table lists the common ones: `notify` accepts **every bot command**, because its allowlist is **derived from `COMMAND_INFO`** (a new command is pushable immediately — no edit needed here). Full list: **`fap notify help`**. Multi-word arguments are **kept intact** (`fap notify semester Fall2026 weeks` no longer loses `weeks`).
+
 ```bash
 fap notify test         # ping thử · sanity ping
 fap notify today        # lịch hôm nay · today's classes
 fap notify weekly       # lịch cả tuần · the whole week
+fap notify semester     # lịch cả kỳ (mẫu lặp) · the whole term (weekly pattern)
 fap notify banrisk      # cảnh báo cấm thi · exam-ban risk
 fap notify attendance   # bảng điểm danh · attendance table
+fap notify grades-detail IAP491   # điểm thành phần 1 môn · one subject's components
 ```
 
 > **VI —** `today`/`tomorrow` cần token FAP còn hạn (chạy `fap login` rồi `fap refresh`). `test` thì không cần token — chỉ thử kênh chat.
@@ -181,8 +188,20 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
 
 ## 8. Bot tương tác · Interactive bots
 
-**VI —** Khác với `notify` (đẩy 1 chiều), bot là **tiến trình chạy nền** trả lời lệnh bạn gõ trong chat: `/today`, `/tomorrow`, `/week`, `/grades`, `/attendance`, `/banrisk`, `/whatif [điểm]`, `/status`, `/help`.
-**EN —** Unlike `notify` (one-way push), a bot is a **long-running process** that answers commands you type in chat: `/today`, `/tomorrow`, `/week`, `/grades`, `/attendance`, `/banrisk`, `/whatif [mark]`, `/status`, `/help`.
+**VI —** Khác với `notify` (đẩy 1 chiều), bot là **tiến trình chạy nền** trả lời lệnh bạn gõ trong chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [môn]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [điểm]`, `/status`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
+**EN —** Unlike `notify` (one-way push), a bot is a **long-running process** that answers commands you type in chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [subject]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [mark]`, `/status`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
+
+> ✅ **VI —** Danh sách trên là **23/23 lệnh** — đúng bằng `COMMAND_INFO`. Trước đây `/help` và các nút web chép tay nên **sót 6 lệnh** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): chúng chạy được nhưng **không ai thấy**. Nay `/help` + nút web đều **sinh từ `COMMAND_INFO`** (`bot_core.command_groups()`), lệnh chưa xếp nhóm tự rơi vào nhóm **"Lệnh khác"** thay vì biến mất ⇒ **không thể sót nữa**. Bản chuẩn luôn là `/help`.
+> ✅ **EN —** That is **23 of 23 commands** — exactly `COMMAND_INFO`. `/help` and the web buttons used to be hand-written lists that **missed 6 commands** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): they worked, but nobody could see them. Both are now **generated from `COMMAND_INFO`** (`bot_core.command_groups()`), and an ungrouped command falls into a trailing **"More"** group instead of disappearing ⇒ **drift is now impossible**. `/help` is always the source of truth.
+
+> 🎓 **VI —** `/semester` gửi lịch **CẢ KỲ** (mặc định = **mẫu lặp hằng tuần** mỗi môn + buổi lệch mẫu; `/semester weeks` = mỗi tuần 1 dòng; `/semester list` = liệt kê từng ngày, tin này **dài** nên sẽ bị chia thành nhiều mẩu). ⚠️ Mẫu đó **suy ra** từ lịch xếp cả kỳ nên **KHÔNG phản ánh buổi huỷ / nghỉ lễ** — ghi chú này in **ngay trong tin**. Nghi ngờ một tuần cụ thể thì dùng **`fap week-exact`** ở CLI (`GetActivityStudentByWeek`, bản server trả cho đúng tuần đó); `week-exact` **không** phải lệnh bot.
+> 🎓 **EN —** `/semester` pushes the **whole term** (default = each subject's **repeating weekly slot** + off-pattern sessions; `/semester weeks` = one line per week; `/semester list` = day-by-day, a **long** reply that gets split into several messages). ⚠️ The pattern is **inferred** from the planned term timetable, so it does **NOT reflect cancellations or holidays** — that caveat is printed **inside the message**. For a disputed week use **`fap week-exact`** on the CLI (`GetActivityStudentByWeek`, the server's answer for that exact week); `week-exact` is **not** a bot command.
+
+> 🧮 **VI —** `/grades-detail` kèm **mã hoặc tên môn** (`/grades-detail IAP301`, `/grades-detail iap`) chỉ kéo **1 môn**: kỳ 6 môn từ **8 request xuống 3** — trả lời nhanh hơn nhiều. Khớp nhiều môn → bot **liệt kê ứng viên** để bạn gõ rõ hơn.
+> 🧮 **EN —** `/grades-detail` with a **code or name** (`/grades-detail IAP301`, `/grades-detail iap`) fetches **one subject only**: a 6-subject term drops from **8 requests to 3** — a much faster reply. An ambiguous query makes the bot **list the candidates** so you can be more specific.
+
+> ⚠️ **VI —** Lệnh **gõ tay** trong chat (Telegram, và Discord tiền tố `!`) chỉ lấy **từ đầu tiên** làm tham số: `/grades-detail IAP301` ✅, `/semester weeks` ✅, `/semester Fall2026` ✅ — nhưng `/semester Fall2026 weeks` sẽ **mất chữ "weeks"**. Cần tham số nhiều từ thì dùng **slash command của Discord** (`/semester` rồi điền ô `arg`), **ô tham số** trên `fap web`, hoặc CLI/`fap notify` (cả hai giữ nguyên cả cụm).
+> ⚠️ **EN —** **Typed** chat commands (Telegram, and Discord's `!` prefix) take only the **first word** as the argument: `/grades-detail IAP301` ✅, `/semester weeks` ✅, `/semester Fall2026` ✅ — but `/semester Fall2026 weeks` **loses "weeks"**. For multi-word arguments use **Discord's slash command** (`/semester` then fill the `arg` field), the **arg box** in `fap web`, or the CLI / `fap notify` (both keep the whole string).
 
 ```bash
 fap telegram-bot     # bot Telegram (không cần cài thêm · no extra deps)
@@ -198,8 +217,8 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 > ⚠️ **VI —** **Đừng chạy CÙNG một `TELEGRAM_TOKEN` ở hai nơi** (vd VPS *và* PC): Telegram trả **409 Conflict**, bot lặp vô hạn và **ngừng trả lời**; nhắc lịch cũng **trùng 100%**. Xem [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines).
 > ⚠️ **EN —** **Never run the same `TELEGRAM_TOKEN` in two places** (e.g. VPS *and* PC): Telegram returns **409 Conflict**, the poller spins forever and the bot **stops answering**; reminders also **always double**.
 
-> 📋 **VI —** Bot **tự đăng ký danh sách lệnh gợi ý** lúc khởi động — khỏi nhớ lệnh. Telegram hiện nút **Menu ☰** cạnh ô nhập + tự gợi ý khi gõ `/`. Discord có **slash command** (`/today`, `/grades`, `/whatif`…) hiện ngay khi gõ `/`. Danh sách đầy đủ vẫn là `/help`. Nguồn lệnh: `COMMAND_INFO` trong `fapc/app/bot_core.py` (thêm 1 dòng là cả 2 nền tảng có ngay).
-> 📋 **EN —** The bots **auto-register a suggested command list** on startup — no need to memorize. Telegram shows a **Menu ☰** button + autocompletes as you type `/`. Discord exposes **slash commands** (`/today`, `/grades`, `/whatif`…) the moment you type `/`. Full list is still `/help`. Source of truth: `COMMAND_INFO` in `fapc/app/bot_core.py` (add one line → both platforms get it).
+> 📋 **VI —** Bot **tự đăng ký danh sách lệnh gợi ý** lúc khởi động — khỏi nhớ lệnh. Telegram hiện nút **Menu ☰** cạnh ô nhập + tự gợi ý khi gõ `/`. Discord có **slash command** (`/today`, `/grades`, `/whatif`…) hiện ngay khi gõ `/`. Muốn **chạm là chạy** thì gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) — xem [§8.3](#83-nút-bấm--menu--buttons--menu). Danh sách đầy đủ vẫn là `/help`. Nguồn lệnh: `COMMAND_INFO` trong `fapc/app/bot_core.py` (thêm 1 dòng là cả 2 nền tảng có ngay).
+> 📋 **EN —** The bots **auto-register a suggested command list** on startup — no need to memorize. Telegram shows a **Menu ☰** button + autocompletes as you type `/`. Discord exposes **slash commands** (`/today`, `/grades`, `/whatif`…) the moment you type `/`. For **tap-to-run**, send `/menu` (Telegram) or `!menu` / `/menu` (Discord) — see [§8.3](#83-nút-bấm--menu--buttons--menu). Full list is still `/help`. Source of truth: `COMMAND_INFO` in `fapc/app/bot_core.py` (add one line → both platforms get it).
 
 > ⏰ **VI —** **Nhắc trước mỗi tiết:** khi đang chạy, bot **tự đẩy lời nhắc `FAP_REMIND_MINUTES` phút trước giờ vào lớp** (mặc định 30', mỗi tiết đúng 1 lần, theo giờ VN). Telegram nhắc vào chat `TELEGRAM_CHAT`; Discord **DM** cho `DISCORD_ALLOWED_USER_ID`. Đặt `FAP_REMIND_MINUTES=15` để đổi, `0` để tắt. Bot phải **đang chạy** mới nhắc (trên VPS dùng `fap-bot.service` để chạy 24/7). Vòng nhắc cũng **tự `refresh` token ~50'** nên bot không chết token khi chạy dài.
 > ⏰ **EN —** **Per-class reminders:** while running, the bot **auto-pushes a reminder `FAP_REMIND_MINUTES` minutes before each class** (default 30, once per session, VN time). Telegram pings `TELEGRAM_CHAT`; Discord **DMs** `DISCORD_ALLOWED_USER_ID`. Set `FAP_REMIND_MINUTES=15` to change, `0` to disable. The bot must be **running** to remind (on a VPS use `fap-bot.service` for 24/7). The reminder loop also **auto-`refresh`es the token ~50m** so a long-running bot won't die on token expiry.
@@ -223,7 +242,34 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 4. Get **your user id** (enable Developer Mode → right-click your avatar → Copy User ID) → `DISCORD_ALLOWED_USER_ID`.
 5. `pip install -e ".[bot]"`, then `fap discord-bot`. Type `!`-prefixed commands (`!today`, `!grades`, `!whatif 8`) **or** **slash** `/today` (type `/` to see suggestions; Discord may take up to ~1h to show new slash commands the first time).
 
-### 8.3. `.env` cho bot · for the bot
+### 8.3. Nút bấm & menu · Buttons & menu
+
+**VI —** Không phải nhớ lệnh nữa: cả hai bot đăng được một **bảng NÚT BẤM** — chạm một cái là chạy lệnh.
+**EN —** No more memorising commands: both bots can post a **BUTTON panel** — one tap runs the command.
+
+| | Telegram | Discord |
+|---|---|---|
+| Gọi bảng nút · Summon it | `/menu` — `/start` và `/help` cũng kèm nút · `/start` and `/help` carry it too | `!menu` **hoặc** slash `/menu` |
+| Kiểu nút · Widget | `inline_keyboard` — **12 nút**, **3 nút/hàng** | `discord.ui.View` — tối đa **25 nút** (5×5) |
+| Nhãn nút · Label | `/today`, `/grades`… | `today`, `grades`… |
+| Nguồn · Source | `bot_core.menu_commands()` → **`COMMAND_INFO`** | `bot_core.menu_commands()` → **`COMMAND_INFO`** |
+
+**VI —** Điểm quan trọng: **không có danh sách chép tay lần hai**. Thêm một dòng vào `COMMAND_INFO` là lệnh đó xuất hiện ở CLI, `/help`, menu gợi ý, slash command, nút web **và** bảng nút — cùng lúc.
+**EN —** The key property: there is **no second hand-written list**. Add one line to `COMMAND_INFO` and the command shows up in the CLI, `/help`, the suggestion menu, the slash commands, the web buttons **and** the button panel — all at once.
+
+> 🔒 **VI —** Nút **kiểm quyền y hệt lệnh gõ tay**. Telegram: chạm nút từ chat lạ bị bỏ qua **im lặng** (chỉ ack cho hết quay vòng, không trả lời). Discord: người ngoài bấm nhận lời từ chối **riêng tư** (ephemeral) và lệnh **không** được chạy. **Không có nút `/update`** trên bảng — `update` không nằm trong `COMMAND_INFO`, nên nó vẫn phải gõ tay và vẫn cần `FAP_ALLOW_UPDATE=1`.
+> 🔒 **EN —** Buttons enforce **the same owner check as typed commands**. Telegram: a tap from a foreign chat is dropped **silently** (it only acks so the spinner stops). Discord: a stranger gets an **ephemeral** refusal and the command **never runs**. There is **no `/update` button** — `update` is not in `COMMAND_INFO`, so it stays a typed, `FAP_ALLOW_UPDATE=1`-gated command.
+
+> 📱 **VI —** Chi tiết kỹ thuật đáng biết: Telegram gắn bàn phím vào **mẩu CUỐI** khi tin bị chia nhiều mẩu (gắn mẩu đầu thì bàn phím bị đẩy trôi lên khỏi màn hình), và **luôn trả lời `answerCallbackQuery` trước** khi chạy lệnh — nếu không, nút quay vòng ~30 giây trong lúc chờ FAP. Discord **giữ nút sống sau khi bot khởi động lại** (`add_view` lúc `on_ready`), nên bảng `!menu` cũ vẫn bấm được sau `/update`.
+> 📱 **EN —** Worth knowing: Telegram attaches the keyboard to the **LAST** chunk of a split message (on the first chunk it would scroll away), and **always answers `answerCallbackQuery` first** — otherwise the button spins for ~30s while FAP replies. Discord **keeps buttons alive across restarts** (`add_view` on `on_ready`), so an old `!menu` panel still works after `/update`.
+
+> 🎨 **VI —** Discord còn gói câu trả lời vào **embed** (dòng tiêu đề thành *title*, phần còn lại thành *description*) cho dễ đọc. Tin quá dài (tiêu đề > 250 hoặc thân > 4000 ký tự) **tự lùi về plain-text chia mẩu ≤1900** — **không bao giờ cắt cụt chữ**; embed gửi hỏng cũng thử lại bằng plain-text.
+> 🎨 **EN —** Discord also wraps replies in an **embed** (header line → *title*, the rest → *description*). Anything too big (title > 250 or body > 4000 chars) **falls back to chunked plain text ≤1900** — text is **never truncated** — and a failed embed send is retried as plain text.
+
+> ℹ️ **VI —** Bảng nút chỉ hiện **12 lệnh đầu** (Telegram) / **25** (Discord) theo thứ tự `COMMAND_INFO`. Lệnh dôi ra **vẫn chạy được** — gõ tay hoặc dùng menu gợi ý `/`.
+> ℹ️ **EN —** The panel shows the **first 12** (Telegram) / **25** (Discord) commands in `COMMAND_INFO` order. Anything beyond the cap **still works** — type it, or use the `/` suggestion menu.
+
+### 8.4. `.env` cho bot · for the bot
 ```dotenv
 # Telegram bot: dùng lại TOKEN + CHAT ở §2 (CHAT bắt buộc) · reuses §2 (CHAT required)
 # Discord bot:

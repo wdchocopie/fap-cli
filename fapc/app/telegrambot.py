@@ -20,6 +20,9 @@ _TIMEOUT = 30   # long-poll: Telegram giữ kết nối tới 30s nếu chưa c�
 # (fmt.chunks) rồi gửi lần lượt; KHÔNG cắt cụt bằng [:N] làm mất chữ (vd /grades-detail 5325 ký tự).
 _LIMIT = 4000
 _GAP   = 0.4    # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩu rất nhỏ: 2–3)
+_CB_MAX = 64    # callback_data của Telegram tối đa 64 BYTE (utf-8) — dài hơn là API từ chối cả tin
+_MENU_MAX  = 12 # số nút trên bảng menu — nhiều hơn thì bàn phím dài lê thê, che hết màn hình
+_MENU_COLS = 3  # Telegram cho tối đa 8 nút/hàng; 3 nút/hàng vừa mắt trên điện thoại
 
 def _update_allowed():
     """/update chạy `git pull` + restart trên CHECKOUT DÙNG CHUNG → phải bật rõ ràng ở máy chủ.
@@ -45,6 +48,8 @@ def _register_menu():
     """Đăng ký danh sách lệnh GỢI Ý — Telegram hiện nút "Menu" ☰ + tự gợi ý khi gõ '/'.
     Không sống-còn: lỗi mạng thì bot vẫn chạy bình thường (chỉ thiếu menu gợi ý)."""
     cmds = [{"command": n, "description": d[:256]} for n, d in menu_commands()]
+    cmds.append({"command": "menu",                         # lệnh thường-trú (không có ở web/notify)
+                 "description": t("Bảng nút bấm nhanh", "Quick button panel")[:256]})
     cmds.append({"command": "update",                       # lệnh thường-trú (không có ở web/notify)
                  "description": t("Cập nhật code + khởi động lại", "Update code + restart")[:256]})
     try:
@@ -61,14 +66,43 @@ def _partial(done, total):
                 f"  ⚠️ only {done}/{total} chunks sent — the rest did NOT arrive."))
     return False                                     # gửi dở KHÔNG bao giờ tính là thành công
 
-def _send(chat_id, text):
-    """Gửi trả lời, cắt thành NHIỀU tin ≤ _LIMIT. True chỉ khi MỌI mẩu đã tới nơi."""
+def _cb_data(name):
+    """callback_data tối đa 64 BYTE utf-8 (không phải ký tự) — cắt theo BYTE cho chắc.
+    Tên lệnh dài nhất hiện nay là 'exam_countdown' (14) nên thực tế không bao giờ chạm trần."""
+    raw = str(name).encode("utf-8")[:_CB_MAX]
+    return raw.decode("utf-8", "ignore")
+
+def _keyboard(buttons):
+    """[[(nhãn, data), ...], ...] -> reply_markup của Telegram. Rỗng/None -> None (gửi như cũ)."""
+    rows = [[{"text": str(label), "callback_data": _cb_data(data)} for label, data in row]
+            for row in (buttons or []) if row]
+    return {"inline_keyboard": rows} if rows else None
+
+def _menu_buttons():
+    """Bàn phím nút bấm, DẪN XUẤT từ bot_core.menu_commands() -> không thể lệch COMMAND_INFO.
+    Nhãn = tên lệnh có dấu '/' cho dễ nhận; callback_data = chính tên lệnh (handle() tự chuẩn hoá
+    '_' -> '-'). Cắt còn _MENU_MAX nút, xếp _MENU_COLS nút/hàng."""
+    cells = [("/" + name.replace("_", "-"), name) for name, _ in menu_commands()[:_MENU_MAX]]
+    return [cells[i:i + _MENU_COLS] for i in range(0, len(cells), _MENU_COLS)]
+
+def _menu_text():
+    return handle("help") + "\n\n" + t("👇 Chạm nút bên dưới để chạy lệnh (khỏi gõ tay).",
+                                       "👇 Tap a button below to run a command (no typing).")
+
+def _send(chat_id, text, buttons=None):
+    """Gửi trả lời, cắt thành NHIỀU tin ≤ _LIMIT. True chỉ khi MỌI mẩu đã tới nơi.
+    buttons: [[(nhãn, data), ...], ...] -> gắn inline_keyboard vào mẩu CUỐI (nút phải nằm dưới
+    ĐOẠN CUỐI người đọc nhìn thấy; gắn vào mẩu đầu thì bàn phím bị các mẩu sau đẩy trôi lên)."""
     parts = fmt.chunks(text, _LIMIT)
+    markup = _keyboard(buttons)
     for i, part in enumerate(parts):
         if i:
             time.sleep(_GAP)
+        body = {"chat_id": chat_id, "text": part}
+        if markup and i == len(parts) - 1:
+            body["reply_markup"] = markup
         try:
-            r = requests.post(_api("sendMessage"), json={"chat_id": chat_id, "text": part}, timeout=20)
+            r = requests.post(_api("sendMessage"), json=body, timeout=20)
         except requests.RequestException as e:
             print("  gửi lỗi mạng · network error:", e)
             return _partial(i, len(parts))
@@ -76,6 +110,45 @@ def _send(chat_id, text):
             print(f"  gửi lỗi · send error: HTTP {r.status_code} {str(r.text)[:140]}")
             return _partial(i, len(parts))
     return True
+
+def _answer_callback(cb_id, text=None):
+    """BẮT BUỘC sau mỗi lần bấm nút: không gọi thì Telegram để nút quay vòng vòng ~30s trên máy
+    người bấm. Gọi NGAY (trước khi chạy lệnh) vì lệnh có thể mất vài giây chờ mạng FAP."""
+    if not cb_id:
+        return
+    body = {"callback_query_id": cb_id}
+    if text:
+        body["text"] = str(text)[:200]
+    try:
+        requests.post(_api("answerCallbackQuery"), json=body, timeout=15)
+    except requests.RequestException as e:
+        print("  trả lời nút lỗi · answerCallbackQuery error:", e)
+
+def _dispatch(chat_id, cmd, arg=None):
+    """Chạy MỘT lệnh rồi gửi trả lời — dùng chung cho tin GÕ TAY và cho NÚT BẤM.
+    Người gọi đã kiểm quyền (chỉ chat chủ) trước khi vào đây."""
+    key = (cmd or "").strip().lstrip("/!").lower().replace("_", "-")
+    if key == "update":                         # cập nhật khi đang chạy (chỉ chủ chat)
+        if not _update_allowed():               # checkout dùng chung -> phải bật FAP_ALLOW_UPDATE ở máy chủ
+            _send(chat_id, _update_off_msg())
+            return
+        _send(chat_id, t("⏳ Đang cập nhật (git pull + selftest)…", "⏳ Updating (git pull + selftest)…"))
+        summary, do_restart = perform_update()
+        _send(chat_id, summary)
+        if do_restart:
+            restart()                           # thay tiến trình → quay lại với mã mới
+        return
+    if key in ("", "menu", "start", "help"):     # trang trợ giúp = luôn kèm bàn phím nút bấm
+        _send(chat_id, _menu_text(), _menu_buttons())
+        return
+    try:
+        reply = handle(cmd, arg)
+    except SystemExit as e:
+        reply = str(e)
+    except Exception as e:                       # noqa: BLE001 — bot không được chết vì 1 lệnh
+        reply = f"Lỗi · error: {e}"
+    print(f"  > {key[:40]}  ->  {len(reply)} ký tự")
+    _send(chat_id, reply)
 
 def run():
     if not config.TELEGRAM_TOKEN:
@@ -85,6 +158,8 @@ def run():
         raise SystemExit("Thiếu TELEGRAM_CHAT trong .env — bắt buộc, để bot CHỈ trả lời chat của bạn "
                          "(không thì người lạ cũng truy vấn được dữ liệu của bạn). Xem docs/13-notify.md.")
     print(f"🤖 Bot Telegram đang chạy (chỉ chat {allow}). Ctrl+C để dừng.")
+    print(t("🔘 Gõ /menu trong chat để hiện bảng NÚT BẤM (khỏi phải gõ lệnh).",
+            "🔘 Send /menu in the chat for the tap-to-run BUTTON panel."))
     _register_menu()
     reminder = ClassReminder()
     print(f"⏰ Nhắc trước mỗi tiết {reminder.lead}' (vào chat {allow})." if reminder.enabled()
@@ -125,6 +200,17 @@ def run():
             print("  Telegram:", str(r)[:200]); time.sleep(5); continue
         for upd in r.get("result", []):
             offset = upd["update_id"] + 1
+            cb = upd.get("callback_query")
+            if cb:                                 # NGƯỜI DÙNG BẤM NÚT (inline_keyboard)
+                cb_chat = str(((cb.get("message") or {}).get("chat") or {}).get("id"))
+                data = (cb.get("data") or "").strip()
+                # Trả lời nút TRƯỚC (bắt buộc, kể cả khi từ chối) rồi mới chạy lệnh cho đỡ quay vòng.
+                _answer_callback(cb.get("id"))
+                if cb_chat != allow or not data:
+                    continue                       # im lặng y như tin nhắn ngoài allowlist
+                print(f"  🔘 nút · button: {data[:40]}")
+                _dispatch(cb_chat, data)
+                continue
             msg = upd.get("message") or upd.get("edited_message")
             if not msg:
                 continue
@@ -134,26 +220,11 @@ def run():
                 continue                       # im lặng với chat ngoài allowlist (không xác nhận bot sống)
             if not text:
                 continue
-            parts = text.split()
-            cmd, arg = parts[0], (parts[1] if len(parts) > 1 else None)
-            if cmd.lstrip("/!").strip().lower() == "update":    # cập nhật khi đang chạy (chỉ chủ chat)
-                if not _update_allowed():           # checkout dùng chung -> phải bật FAP_ALLOW_UPDATE ở máy chủ
-                    _send(chat_id, _update_off_msg())
-                    continue
-                _send(chat_id, t("⏳ Đang cập nhật (git pull + selftest)…", "⏳ Updating (git pull + selftest)…"))
-                summary, do_restart = perform_update()
-                _send(chat_id, summary)
-                if do_restart:
-                    restart()                               # thay tiến trình → quay lại với mã mới
-                continue
-            try:
-                reply = handle(cmd, arg)
-            except SystemExit as e:
-                reply = str(e)
-            except Exception as e:                       # noqa: BLE001 — bot không được chết vì 1 lệnh
-                reply = f"Lỗi · error: {e}"
-            print(f"  > {text[:40]}  ->  {len(reply)} ký tự")
-            _send(chat_id, reply)
+            # split(None, 1): giữ NGUYÊN phần còn lại làm tham số. split() thường sẽ cắt mất chữ ở
+            # tham số nhiều từ ('/news học bổng' -> 'học'), trong khi CLI/notify/slash đều giữ đủ.
+            parts = text.split(None, 1)
+            cmd, arg = parts[0], (parts[1].strip() or None if len(parts) > 1 else None)
+            _dispatch(chat_id, cmd, arg)
 
 def main():
     try:

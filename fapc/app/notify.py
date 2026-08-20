@@ -8,10 +8,13 @@ Cấu hình qua .env: TELEGRAM_TOKEN, TELEGRAM_CHAT, DISCORD_WEBHOOK_URL (xem .e
 Chạy (từ gốc repo):
     fap notify test                    # gửi tin thử tới các kênh đã cấu hình
     fap notify today|tomorrow|weekly   # lịch học -> kênh
+    fap notify semester [weeks]        # lịch cả kỳ (mẫu lặp / từng tuần) -> kênh
     fap notify attendance|banrisk      # điểm danh / cảnh báo cấm thi -> kênh
     fap notify grades|status|whatif    # điểm / tổng quan / mô phỏng GPA -> kênh
+    fap notify grades-detail IAP491    # tham số NHIỀU TỪ được giữ nguyên (split(None, 1))
 
-Mọi lệnh (trừ `test`) dùng chung lõi `bot_core.handle()` rồi đẩy kết quả lên kênh đã cấu hình.
+Mọi lệnh (trừ `test`) dùng chung lõi `bot_core.handle()` rồi đẩy kết quả lên kênh đã cấu hình;
+allowlist = `bot_core.COMMANDS` nên lệnh mới tự dùng được, không phải sửa file này.
 """
 import os, sys, time, json, datetime
 import requests
@@ -204,15 +207,18 @@ def run(cmd="test"):
     # Mọi lệnh khác đi chung lõi bot_core.handle() rồi đẩy lên kênh.
     # Import trễ để tránh import vòng (bot_core import _day_digest/_week_digest từ notify).
     from .bot_core import handle, COMMANDS
-    parts = str(cmd).split()
+    # split(None, 1): TÁCH ĐÚNG 1 LẦN -> tham số nhiều từ còn nguyên vẹn
+    # (`notify news học bổng` trước đây mất chữ "bổng").
+    parts = str(cmd).split(None, 1)
     name = parts[0] if parts else "today"            # 'weekly' giờ là lệnh thật (recap), KHÔNG còn alias 'week'
+    arg = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     if name == "notifications":                 # đẩy dedupe (chỉ cái MỚI), khác các view tĩnh
         return push_new_notifications()
     if name == "help" or name not in COMMANDS:
-        print(t("Lệnh notify không rõ. Dùng: test | today | tomorrow | weekly | attendance | banrisk | grades | grades-detail | status | whatif [điểm] | exams | gpa | notifications | all",
-                "Unknown notify command. Use: test | today | tomorrow | weekly | attendance | banrisk | grades | grades-detail | status | whatif [mark] | exams | gpa | notifications | all"))
+        # Danh sách SINH TỪ COMMANDS (COMMAND_INFO) -> không thể lệch khi thêm lệnh mới.
+        avail = " | ".join(["test"] + [c for c in COMMANDS if c != "help"])
+        print(t(f"Lệnh notify không rõ. Dùng: {avail}", f"Unknown notify command. Use: {avail}"))
         return
-    arg = parts[1] if len(parts) > 1 else None
     msg = handle(name, arg)
     print(msg)
     sent = push(msg)

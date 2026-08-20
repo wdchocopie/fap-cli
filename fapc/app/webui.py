@@ -5,23 +5,23 @@
     fap web            # mở http://127.0.0.1:8000
     fap web 8765       # đổi cổng
 
-Trang 1 file: bấm nút -> GET /q?c=<lệnh> -> bot_core.handle() (tái dùng đúng lõi như bot/CLI).
+Trang 1 file: bấm nút -> GET /q?c=<lệnh>[&a=<tham số>] -> bot_core.handle() (tái dùng đúng lõi như bot/CLI).
+Nút bấm SINH TỪ bot_core.COMMAND_INFO — thêm lệnh mới là dashboard có nút ngay.
 CHỈ bind 127.0.0.1 — KHÔNG phơi dữ liệu ra mạng. Cần token còn hạn (fap login/refresh).
 Tự bật cache 2' (FAP_CACHE_MIN) để bấm nhiều lần không gọi lại API — nhẹ máy yếu / lịch sự với server.
 """
 import os, json, http.server, urllib.parse, webbrowser
-from .bot_core import handle, COMMANDS
+from .bot_core import handle, COMMANDS, command_groups
 from ..core.api import TOKEN_JSON
 from ..i18n import t
 
-# Nhóm nút (chỉ lệnh có trong COMMANDS) — gọn gàng theo chủ đề.
-_GROUPS = [
-    ("Tổng quan", [("status", "📋", "Tổng quan"), ("all", "📚", "Tất cả")]),
-    ("Lịch", [("today", "📅", "Hôm nay"), ("tomorrow", "⏭️", "Ngày mai"), ("week", "📆", "Tuần"), ("exams", "📝", "Lịch thi")]),
-    ("Điểm", [("grades", "📊", "Điểm"), ("grades-detail", "🧮", "Điểm TP"), ("gpa", "📈", "GPA"),
-              ("whatif", "🎯", "What-if"), ("attendance", "🟢", "Điểm danh"), ("banrisk", "⚠️", "Cấm thi")]),
-    ("Khác", [("notifications", "🔔", "Thông báo"), ("applications", "📄", "Đơn từ"), ("profile", "👤", "Hồ sơ")]),
-]
+ARG_MAX = 64          # kẹp độ dài tham số ?a= — chỉ là mã môn / điểm / tên view, không bao giờ dài hơn
+
+def _groups():
+    """Nút bấm SINH TỪ bot_core.COMMAND_INFO (qua command_groups) — thêm lệnh mới là có nút ngay,
+    không còn danh sách chép tay để lệch. Shape cho JS: [[tiêu đề, [[lệnh, emoji, nhãn], …]], …]."""
+    return [[title, [[name, emoji, label] for name, emoji, label in items]]
+            for title, items in command_groups()]
 
 _PAGE = """<!doctype html><html lang=vi><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
@@ -36,12 +36,15 @@ _PAGE = """<!doctype html><html lang=vi><head><meta charset=utf-8>
  header{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}
  header h1{font-size:1.1rem;margin:0;font-weight:650} header .who{color:var(--muted);font-size:.85rem}
  header .sp{flex:1} .toggle{color:var(--muted);font-size:.82rem;display:flex;align-items:center;gap:.35rem;cursor:pointer}
+ #arg{background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:.35rem .6rem;
+   font-size:.85rem;width:14rem;max-width:45vw}
  main{display:flex;gap:1rem;max-width:1000px;margin:1rem auto;padding:0 1rem;align-items:flex-start}
  nav{flex:0 0 210px;display:flex;flex-direction:column;gap:.9rem}
  .grp h2{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:.1rem .2rem .35rem}
  .grp{display:flex;flex-direction:column;gap:.3rem}
  button{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;padding:.5rem .7rem;border:0;
-   border-radius:9px;background:var(--btn);color:var(--fg);cursor:pointer;font-size:.93rem;transition:.12s}
+   border-radius:9px;background:var(--btn);color:var(--fg);cursor:pointer;font-size:.9rem;transition:.12s;
+   white-space:normal;line-height:1.25}
  button:hover{background:var(--btnh)} button.active{background:var(--accent);color:#fff}
  button .e{font-size:1.05rem;width:1.3rem;text-align:center}
  section{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
@@ -57,6 +60,8 @@ _PAGE = """<!doctype html><html lang=vi><head><meta charset=utf-8>
 </style></head><body>
 <header>
  <h1>📚 fap-cli</h1><span class=who id=who></span><span class=sp></span>
+ <input id=arg maxlength=64 placeholder="tham số · arg (IAP491 · weeks · 8)"
+   title="Tham số cho lệnh có nhận: grades-detail mã môn · semester pattern|weeks|list · whatif điểm">
  <label class=toggle><input type=checkbox id=auto> tự làm mới 60s</label>
 </header>
 <main>
@@ -68,17 +73,24 @@ _PAGE = """<!doctype html><html lang=vi><head><meta charset=utf-8>
  const GROUPS=__GROUPS__;
  const nav=document.getElementById('nav'),out=document.getElementById('out'),hd=document.getElementById('hd'),
    title=document.getElementById('title');
- let cur='status',timer=null,labels={};
+ let cur='status',timer=null,labels={},loadedFor=null;   // loadedFor: lệnh mà ô tham số đang thuộc về
  GROUPS.forEach(([g,items])=>{const d=document.createElement('div');d.className='grp';
    d.innerHTML='<h2>'+g+'</h2>';items.forEach(([c,e,l])=>{labels[c]=e+' '+l;
      const b=document.createElement('button');b.dataset.c=c;
      b.innerHTML='<span class=e>'+e+'</span>'+l;b.onclick=()=>load(c);d.appendChild(b)});nav.appendChild(d)});
  function mark(c){document.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.c===c))}
- async function load(c){cur=c;mark(c);title.textContent=labels[c]||c;hd.classList.add('loading');
-   try{const r=await fetch('/q?c='+encodeURIComponent(c));out.textContent=await r.text()}
+ const argbox=document.getElementById('arg');
+ async function load(c,keepArg){cur=c;mark(c);title.textContent=labels[c]||c;hd.classList.add('loading');
+   // ĐỔI lệnh -> XOÁ ô tham số. Ô này dùng chung cho mọi nút; giữ nguyên sẽ khiến tham số gõ cho
+   // lệnh trước (vd 'IAP301') lặng lẽ áp sang lệnh vừa bấm (vd 'whatif') -> chạy sai mà không báo.
+   if(!keepArg&&c!==loadedFor){argbox.value=''} loadedFor=c;
+   const a=(argbox.value||'').trim();                       // ?a= — lệnh không nhận tham số sẽ bỏ qua
+   try{const r=await fetch('/q?c='+encodeURIComponent(c)+(a?'&a='+encodeURIComponent(a):''));
+     out.textContent=await r.text()}
    catch(e){out.textContent='Lỗi kết nối: '+e}finally{hd.classList.remove('loading')}}
+ argbox.onkeydown=e=>{if(e.key==='Enter')load(cur,true)};   // Enter = chạy lại lệnh HIỆN TẠI, GIỮ tham số
  document.getElementById('auto').onchange=e=>{clearInterval(timer);
-   if(e.target.checked)timer=setInterval(()=>load(cur),60000)};
+   if(e.target.checked)timer=setInterval(()=>load(cur,true),60000)};   // tự làm mới: giữ tham số
  fetch('/me').then(r=>r.json()).then(m=>{if(m&&m.roll)document.getElementById('who').textContent=
    '· '+(m.name||'')+' ('+m.roll+(m.campus?' · '+m.campus:'')+')'}).catch(()=>{});
  load('status');
@@ -86,7 +98,7 @@ _PAGE = """<!doctype html><html lang=vi><head><meta charset=utf-8>
 
 
 def _page():
-    return _PAGE.replace("__GROUPS__", json.dumps(_GROUPS, ensure_ascii=False))
+    return _PAGE.replace("__GROUPS__", json.dumps(_groups(), ensure_ascii=False))
 
 def _me():
     try:
@@ -118,11 +130,15 @@ class _H(http.server.BaseHTTPRequestHandler):
         if u.path == "/me":
             return self._send(json.dumps(_me(), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/q":
-            c = urllib.parse.parse_qs(u.query).get("c", ["status"])[0]
+            q = urllib.parse.parse_qs(u.query)
+            c = q.get("c", ["status"])[0]
             if c not in COMMANDS:
                 c = "help"
+            # ?a= tham số (mã môn / view / điểm). Kẹp như `c`: gom khoảng trắng (bỏ xuống dòng, tab)
+            # rồi cắt ARG_MAX ký tự — không để query lạ bơm chuỗi dài vào lõi.
+            a = " ".join((q.get("a", [""])[0] or "").split())[:ARG_MAX] or None
             try:
-                txt = handle(c)
+                txt = handle(c, a)
             except SystemExit as e:                      # token hết hạn... -> hiện thông điệp, không 500
                 txt = str(e)
             except Exception as e:                       # noqa: BLE001

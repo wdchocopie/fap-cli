@@ -7,7 +7,7 @@ gọi live theo từng lệnh. Tái dùng các hàm fetch + digest sẵn có; đ
 """
 import datetime
 from ..core.api import creds, current_semester, _vn_now
-from ..core.schedule import fetch_sessions
+from ..core.schedule import fetch_sessions, VIEW_WORDS
 from .notify import _day_digest, _week_digest
 from ..core.grades import fetch_marks, _gpa, term_gpa, detail_text
 from ..core.courses import courses_text
@@ -27,8 +27,9 @@ COMMAND_INFO = [
     ("tomorrow",      "Lịch học ngày mai",         "Tomorrow's schedule"),
     ("week",          "Lịch học cả tuần",          "This week's schedule"),
     ("weekly",        "Tổng kết tuần (lịch+điểm danh+điểm)", "Weekly recap (schedule+attendance+grades)"),
+    ("semester",      "Lịch cả kỳ (mẫu lặp/tuần/kỳ)", "Whole-term schedule (pattern/weeks/list)"),
     ("grades",        "Điểm + GPA tạm tính",       "Grades + provisional GPA"),
-    ("grades-detail", "Điểm thành phần từng môn",  "Per-subject component marks"),
+    ("grades-detail", "Điểm thành phần (lọc 1 môn)", "Component marks (filter one subject)"),
     ("courses",       "Lớp đang học (GV/phòng)",   "My classes (lecturer/room)"),
     ("attendance",    "Tỉ lệ điểm danh",           "Attendance percentage"),
     ("banrisk",       "Cảnh báo nguy cơ cấm thi",  "Exam-ban risk (<80%)"),
@@ -54,34 +55,57 @@ def menu_commands():
     Telegram chỉ cho phép [a-z0-9_] trong tên lệnh -> đổi '-' thành '_' (handle() chuẩn hoá lại)."""
     return [(name.replace("-", "_"), t(vi, en)) for name, vi, en in COMMAND_INFO]
 
+# ---------- trình bày danh sách lệnh (help + nút web) — DẪN XUẤT từ COMMAND_INFO ----------
+# CHỈ để SẮP XẾP cho dễ đọc: emoji + thứ tự nhóm. KHÔNG phải nguồn lệnh —
+# lệnh mới chưa xếp nhóm vẫn tự hiện ở nhóm cuối, nên help/web KHÔNG BAO GIỜ sót lệnh nữa.
+_EMOJI = {
+    "today": "📅", "tomorrow": "⏭️", "week": "📆", "weekly": "🗓️", "semester": "🎓", "courses": "🏫",
+    "grades": "📊", "grades-detail": "🧮", "gpa": "📈", "gpa-trend": "📉", "credits": "🎖️",
+    "whatif": "🎯", "conduct": "🏅", "attendance": "🟢", "banrisk": "⚠️",
+    "exams": "📝", "exam-countdown": "⏳", "status": "📋", "all": "📚",
+    "notifications": "🔔", "profile": "👤", "applications": "📄", "help": "❓",
+}
+_ORDER = [
+    (("Lịch", "Schedule"),        ["today", "tomorrow", "week", "weekly", "semester", "courses"]),
+    (("Điểm", "Grades"),          ["grades", "grades-detail", "gpa", "gpa-trend", "credits", "whatif", "conduct"]),
+    (("Chuyên cần & thi", "Attendance & exams"), ["attendance", "banrisk", "exams", "exam-countdown"]),
+    (("Tổng quan", "Overview"),   ["status", "all"]),
+    (("Khác", "Other"),           ["notifications", "profile", "applications", "help"]),
+]
+
+def arg_hint(name):
+    """Gợi ý tham số hiện sau tên lệnh trong /help (rỗng nếu lệnh không nhận tham số)."""
+    return {
+        "whatif":        t(" [điểm]", " [mark]"),
+        "grades-detail": t(" [mã môn]", " [subject]"),
+        "semester":      " [pattern|weeks|list|" + t("kỳ", "term") + "]",
+    }.get(name, "")
+
+def command_groups():
+    """[(tiêu đề nhóm, [(tên, emoji, mô tả đã dịch)])] — SINH TỪ COMMAND_INFO.
+    Dùng chung cho help_text() và nút bấm webui => 2 nơi này không thể lệch với COMMAND_INFO.
+    Lệnh chưa có trong _ORDER được gom vào nhóm cuối thay vì biến mất."""
+    desc = {name: t(vi, en) for name, vi, en in COMMAND_INFO}
+    groups, placed = [], set()
+    for (vi, en), names in _ORDER:
+        items = [(n, _EMOJI.get(n, "•"), desc[n]) for n in names if n in desc]
+        placed.update(n for n, _, _ in items)
+        if items:
+            groups.append((t(vi, en), items))
+    rest = [(n, _EMOJI.get(n, "•"), desc[n]) for n, _, _ in COMMAND_INFO if n not in placed]
+    if rest:
+        groups.append((t("Lệnh khác", "More"), rest))
+    return groups
+
 def help_text():
-    return fmt.header("🤖", "FAP bot") + "\n" + t(
-        "📅 /today · /tomorrow · /week — lịch học\n"
-        "📊 /grades — điểm + GPA tạm tính\n"
-        "🟢 /attendance — điểm danh\n"
-        "⚠️ /banrisk — nguy cơ cấm thi\n"
-        "🎯 /whatif [điểm] — mô phỏng GPA\n"
-        "📝 /exams — lịch thi\n"
-        "🧮 /grades-detail — điểm thành phần\n"
-        "📈 /gpa — GPA tích lũy (tín chỉ)\n"
-        "🔔 /notifications — thông báo · 📄 /applications — đơn từ\n"
-        "👤 /profile — hồ sơ\n"
-        "📋 /status — tổng quan · 📚 /all — tất cả\n"
-        "🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)\n"
-        "❓ /help — trợ giúp",
-        "📅 /today · /tomorrow · /week — schedule\n"
-        "📊 /grades — grades + provisional GPA\n"
-        "🟢 /attendance — attendance\n"
-        "⚠️ /banrisk — exam-ban risk\n"
-        "🎯 /whatif [mark] — GPA what-if\n"
-        "📝 /exams — exam schedule\n"
-        "🧮 /grades-detail — component marks\n"
-        "📈 /gpa — cumulative GPA (credit)\n"
-        "🔔 /notifications — notifications · 📄 /applications — applications\n"
-        "👤 /profile — student profile\n"
-        "📋 /status — overview · 📚 /all — everything\n"
-        "🔄 /update — update the bot + restart (owner only)\n"
-        "❓ /help — help")
+    lines = [fmt.header("🤖", "FAP bot")]
+    for title, items in command_groups():
+        lines.append("\n" + title)
+        for name, emoji, d in items:
+            lines.append(f"{emoji} /{name}{arg_hint(name)} — {d}")
+    lines.append("\n" + t("🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)",
+                          "🔄 /update — update the bot + restart (owner only)"))
+    return "\n".join(lines)
 
 def _grades_text(token, campus, roll, sem, rows=None):
     if rows is None:
@@ -195,6 +219,23 @@ def all_text(token, campus, roll, sem):
     ]
     return ("\n\n" + fmt.RULE + "\n\n").join(parts)
 
+def semester_arg(arg, sem):
+    """THUẦN: tham số của /semester -> (view, kỳ).
+    Rỗng -> (None = 'pattern' mặc định, kỳ hiện tại) — mặc định phải là cái HỮU ÍCH vì nút web
+    và menu bot chỉ gọi được bản không tham số. Từ khoá view đổi kiểu xem; token còn lại coi là
+    TÊN KỲ ('FALL2025'). Cho phép cả hai thứ tự: 'FALL2025 weeks' = 'weeks FALL2025'.
+
+    Dùng CHUNG bảng `VIEW_WORDS` của core/schedule (gồm cả bí danh tiếng Việt 'tuần'/'ngày'/'mẫu').
+    Trước đây ở đây có một bộ RIÊNG chỉ 3 từ tiếng Anh, nên gõ 'tuần' bị hiểu là TÊN KỲ."""
+    view, target = None, sem
+    for tok in str(arg or "").split():
+        low = tok.lower()
+        if low in VIEW_WORDS:
+            view = VIEW_WORDS[low]          # chuẩn hoá luôn: 'tuần' -> 'weeks'
+        else:
+            target = tok
+    return view, target
+
 def handle(cmd, arg=None):
     """cmd: chuỗi lệnh (có/không dấu /!); arg: tham số (vd điểm cho whatif). Trả text.
     Bắt SystemExit (token hết hạn / chưa đăng nhập) -> trả LỜI thay vì làm sập bot/web."""
@@ -214,9 +255,14 @@ def handle(cmd, arg=None):
                 return _week_digest(sessions, today)
             day = today + datetime.timedelta(days=1) if cmd == "tomorrow" else today
             return _day_digest(sessions, day)
+        if cmd == "semester":
+            # Import TRỄ: dashboard kéo theo nhiều module, chỉ cần khi thật sự xem lịch cả kỳ.
+            from .dashboard import semester_text
+            view, target = semester_arg(arg, sem)
+            return semester_text(token, campus, roll, target, view=view)
         if cmd == "weekly":        return weekly_text(token, campus, roll, sem)
         if cmd == "grades":        return _grades_text(token, campus, roll, sem)
-        if cmd == "grades-detail": return detail_text(token, campus, roll, sem)
+        if cmd == "grades-detail": return detail_text(token, campus, roll, sem, only=arg)
         if cmd == "courses":       return courses_text(token, campus, roll, sem)
         if cmd == "attendance":    return _att_text(token, campus, roll, sem)
         if cmd == "banrisk":       return _banrisk_text(token, campus, roll, sem)

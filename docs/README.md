@@ -17,7 +17,7 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | Tài liệu · Doc | Nội dung · About |
 |---|---|
 | [12-google-calendar](12-google-calendar.md) | Đồng bộ lên Google Calendar + cấu hình Google Cloud · Sync to Google Calendar + Cloud setup |
-| [13-notify](13-notify.md) | Gửi lịch lên Telegram & Discord · Push schedule to Telegram & Discord |
+| [13-notify](13-notify.md) | Gửi lịch lên Telegram & Discord + **bot tương tác & bảng nút bấm** (§8) · Push to Telegram & Discord + interactive bots & button panel (§8) |
 | [14-deploy](14-deploy.md) | Tự động hóa định kỳ (Task Scheduler / cron / systemd / Docker) + **1 session dùng cho 2 máy** (§9) · Scheduling + one login across two machines |
 
 ## ⚙️ Tham chiếu · Reference

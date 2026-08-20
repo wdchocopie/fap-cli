@@ -132,9 +132,20 @@ def fetch_components(token, campus, roll, cid, subj=None):
         return None
     return _normalize_components(data)
 
-def detail_text(token, campus, roll, sem, rows=None):
+def _no_subject_text(query, cands, codes, sem):
+    """THUẦN: chuỗi song ngữ khi `only=` không ra đúng 1 môn. Mơ hồ (ứng viên ÍT hơn cả kỳ) → bảo gõ rõ
+    hơn; không khớp → liệt kê môn trong kỳ. LUÔN có chữ (đừng bao giờ im lặng)."""
+    lst = ", ".join(subjects.label(c) for c in cands) or "—"
+    if cands and len(cands) < len(codes):
+        return t(f"🧮 “{query}” khớp nhiều môn — ghi rõ hơn:\n{lst}",
+                 f"🧮 “{query}” matches several subjects — be more specific:\n{lst}")
+    return t(f"🧮 Không thấy môn “{query}” trong kỳ {sem}.\nMôn trong kỳ: {lst}",
+             f"🧮 No subject “{query}” in {sem}.\nSubjects this term: {lst}")
+
+def detail_text(token, campus, roll, sem, rows=None, only=None):
     """Điểm thành phần từng môn — TRẢ chuỗi (dùng cho `fap all` / web). Generic, không bịa cột.
-    rows: truyền sẵn GetStudentMark để khỏi gọi lại (vd từ all_text)."""
+    rows: truyền sẵn GetStudentMark để khỏi gọi lại (vd từ all_text).
+    only: mã/tên môn (vd 'IAP301', 'iap') → CHỈ lấy thành phần của 1 môn đó. Kỳ 6 môn: 8 request → 3."""
     from .whatif import predict_course, predict_line       # import trễ: tránh vòng grades↔whatif
     from .courses import fetch_courses, course_id_map       # vá courseID/môn GetStudentMark bỏ sót
     if rows is None:
@@ -147,6 +158,11 @@ def detail_text(token, campus, roll, sem, rows=None):
     codes = list(by_code) + [c for c in cmap if c not in by_code]   # union: môn có điểm trước, môn bù sau
     if not codes:
         return t("🧮 Chưa có dữ liệu điểm.", "🧮 No grades yet.")
+    if only:                                    # lọc SAU guard trên: kỳ rỗng vẫn báo "chưa có điểm"
+        code, cands = subjects.resolve(only, codes, subjects.load())
+        if not code:
+            return _no_subject_text(only, cands, codes, sem)
+        codes = [code]                          # 1 môn → 1 GetMarkByCourse thay vì N
     out = [fmt.header("🧮", t(f"Điểm thành phần · {sem}", f"Component marks · {sem}"),
                       t(f"{len(codes)} môn", f"{len(codes)} subjects"))]
     for code in codes:
@@ -167,10 +183,24 @@ def detail_text(token, campus, roll, sem, rows=None):
             out.append(t("   (chưa có điểm thành phần)", "   (no component marks yet)"))
     return "\n".join(l for l in out if l != "")             # bỏ dòng predict rỗng
 
-def _detail_raw(token, campus, roll, sem):
-    """In NGUYÊN response GetMarkByCourse từng môn — để soi vì sao 'chưa có' (rỗng thật vs sai shape)."""
+def _detail_raw(token, campus, roll, sem, only=None):
+    """In NGUYÊN response GetMarkByCourse từng môn — để soi vì sao 'chưa có' (rỗng thật vs sai shape).
+
+    only: lọc 1 môn. ⚠️ Đường này KHÔNG gọi `fetch_courses` (cố tình: raw = soi đúng cái GetStudentMark
+    trả về), nên chỉ resolve được trong danh sách môn của GetStudentMark — môn mà GetStudentMark bỏ sót
+    sẽ KHÔNG tra ra ở đây dù `detail_text` vẫn thấy. Chấp nhận: đây là đường chẩn đoán."""
     import json
-    for r in fetch_marks(token, campus, roll, sem):
+    rows = fetch_marks(token, campus, roll, sem)
+    if only:
+        codes = [str(r.get("subjectCode") or "") for r in rows if r.get("subjectCode")]
+        code, cands = subjects.resolve(only, codes, subjects.load())
+        if not code:
+            print(_no_subject_text(only, cands, codes, sem))
+            return
+        # .strip() CẢ HAI VẾ: resolve() trả mã đã strip, còn subjectCode từ server có thể dính khoảng
+        # trắng thừa — so nguyên văn sẽ không khớp và lệnh --raw in ra RỖNG (im lặng, khó hiểu).
+        rows = [r for r in rows if str(r.get("subjectCode") or "").strip() == code]
+    for r in rows:
         cid = r.get("courseID")
         http, data = call("GetMarkByCourse", _mark_params(campus, token, cid, roll, r.get("subjectCode")), roll, campus)
         d = data.get("data") if isinstance(data, dict) else data
@@ -178,11 +208,12 @@ def _detail_raw(token, campus, roll, sem):
         print(f"\n# {r.get('subjectCode')}  courseID={cid}  HTTP {http}  data={shape}")
         print(json.dumps(data, ensure_ascii=False, indent=2)[:1200])
 
-def detail(raw=False):
-    """Điểm thành phần từng môn (GetMarkByCourse theo courseID). raw=True -> in JSON gốc để chẩn đoán."""
+def detail(raw=False, only=None):
+    """Điểm thành phần từng môn (GetMarkByCourse theo courseID). raw=True -> in JSON gốc để chẩn đoán.
+    only='IAP301' -> chỉ 1 môn (mã/tiền tố/tên đều được, không phân biệt hoa/thường)."""
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
     if raw:
-        _detail_raw(token, campus, roll, sem)
+        _detail_raw(token, campus, roll, sem, only)
     else:
-        print(detail_text(token, campus, roll, sem))
+        print(detail_text(token, campus, roll, sem, only=only))

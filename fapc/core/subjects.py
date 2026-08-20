@@ -101,6 +101,45 @@ def credit_of(code, idx=None):
     info = (idx if idx is not None else load()).get(code)
     return float(info.get("credits") or 0.0) if info else 0.0
 
+def resolve(query, codes, idx=None):
+    """THUẦN (không mạng, không đọc đĩa): 'iap' + danh sách mã môn → (mã CHUẨN | None, ứng viên).
+
+    Ưu tiên giảm dần: mã khớp ĐÚNG > mã BẮT ĐẦU BẰNG > mã CHỨA > TÊN môn CHỨA. Không phân biệt hoa/thường.
+    Trả về mã **CHUẨN** (đúng hoa/thường như server gửi) vì chính mã này được gửi NGƯỢC lên server
+    (`grades._mark_params` → `SubjectCode`): mã thật có hoa-thường lẫn lộn ('FRS401c') nên KHÔNG được
+    trả lại nguyên chuỗi người dùng gõ.
+
+    - Đúng 1 ứng viên ở một tầng ưu tiên → `(mã, [mã])`.
+    - Nhiều ứng viên ở tầng đó → `(None, ứng_viên)` để caller liệt kê cho người dùng chọn lại.
+    - Không khớp gì (hoặc `query` rỗng) → `(None, tất_cả_mã)` để caller liệt kê môn trong kỳ.
+
+    `idx`: index danh mục môn (`{mã: {"en","vi",...}}`) cho tầng khớp TÊN. `None` → dùng memo đã nạp
+    sẵn trong tiến trình; KHÔNG tự `load()` (đọc file) để hàm này thuần & test offline được.
+    """
+    seen, uniq = set(), []
+    for c in (codes or []):                     # khử trùng lặp, GIỮ thứ tự (caller hợp nhất 2 nguồn mã)
+        c = str(c).strip()
+        if c and c.lower() not in seen:
+            seen.add(c.lower()); uniq.append(c)
+    q = str(query or "").strip().lower()
+    if not q or not uniq:
+        return None, uniq
+    idx = idx if idx is not None else (_INDEX or {})
+
+    def _names(code):
+        info = idx.get(code) or {}
+        return [n for n in (str(info.get("vi") or ""), str(info.get("en") or "")) if n]
+
+    for cands in ([c for c in uniq if c.lower() == q],
+                  [c for c in uniq if c.lower().startswith(q)],
+                  [c for c in uniq if q in c.lower()],
+                  [c for c in uniq if any(q in n.lower() for n in _names(c))]):
+        if len(cands) == 1:
+            return cands[0], [cands[0]]
+        if cands:
+            return None, cands                  # mơ hồ — caller liệt kê ứng viên
+    return None, uniq                           # không khớp — caller liệt kê cả kỳ
+
 # ---------- lệnh `fap subjects` ----------
 def report(refresh_now=True):
     from .api import creds

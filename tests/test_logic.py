@@ -1180,6 +1180,163 @@ def test_gcal_owner_scoped_uid_and_ownership():
     assert _is_mine(old, "he170001", True)                    # profile mặc định nhận lịch cũ
     assert not _is_mine(old, "he170001", False)               # profile có tên thì KHÔNG
 
+# ---- feat20: lọc 1 môn · lịch cả kỳ ----
+def test_subjects_resolve_precedence():
+    """`grades-detail iap` phải ra ĐÚNG 1 môn: ưu tiên mã khớp đúng > bắt đầu bằng > chứa > TÊN môn.
+    Mã trả về phải là mã CHUẨN của server ('FRS401c', KHÔNG phải chữ người dùng gõ) vì nó được GỬI
+    NGƯỢC lên FAP ở grades._mark_params. Mơ hồ -> (None, ứng viên) để caller bảo người dùng gõ rõ hơn.
+    Resolution must be case-insensitive but return the server's exact casing; ambiguity must not guess."""
+    import fapc.core.subjects as S
+    codes = ["IAP301", "FRS401c", "FRS402", "MAE101"]
+    idx = {"MAE101": {"vi": "Toán rời rạc", "en": "Mathematics for Engineering"},
+           "IAP301": {"vi": "", "en": "Information Assurance"}}
+    prev = S._INDEX                                   # KHÔNG dùng load() (đọc file) — test phải thuần
+    try:
+        S.set_index({})
+        assert S.resolve("IAP301", codes) == ("IAP301", ["IAP301"])          # khớp đúng
+        assert S.resolve("frs401c", codes) == ("FRS401c", ["FRS401c"])       # thường hoá -> mã CHUẨN
+        assert S.resolve("mae", codes)[0] == "MAE101"                        # bắt đầu bằng, duy nhất
+        assert S.resolve("301", codes)[0] == "IAP301"                        # chứa (không phải tiền tố)
+        code, cands = S.resolve("frs", codes)                                # mơ hồ: 2 ứng viên
+        assert code is None and cands == ["FRS401c", "FRS402"]
+        assert S.resolve("frs402", codes) == ("FRS402", ["FRS402"])          # khớp đúng THẮNG tầng tiền tố
+        assert S.resolve("rời rạc", codes, idx)[0] == "MAE101"               # khớp TÊN tiếng Việt
+        assert S.resolve("assurance", codes, idx)[0] == "IAP301"             # tên rỗng vi -> dùng en
+        assert S.resolve("zzz", codes) == (None, codes)                      # không khớp -> liệt kê cả kỳ
+        assert S.resolve("", codes) == (None, codes)                         # rỗng -> liệt kê cả kỳ
+        assert S.resolve("iap", []) == (None, [])                            # không có môn nào -> không nổ
+        # detail_text hợp nhất 2 nguồn mã bằng phép `not in` PHÂN BIỆT hoa-thường -> có thể lọt mã trùng;
+        # trùng lặp mà không khử sẽ biến 1 môn thành "mơ hồ 2 ứng viên".
+        assert S.resolve("IAP301", ["IAP301", "iap301"]) == ("IAP301", ["IAP301"])
+    finally:
+        S._INDEX = prev
+
+def test_grades_detail_only_filter():
+    """`grades-detail IAP301` chỉ tải điểm thành phần CỦA 1 MÔN (kỳ 6 môn: 8 request -> 3).
+    Môn không tra ra phải LIỆT KÊ môn trong kỳ (đừng im lặng), và kỳ RỖNG vẫn báo 'chưa có dữ liệu điểm'
+    — tức bộ lọc phải nằm SAU guard kỳ rỗng, không phải trước.
+    Filtering must cut requests, name the alternatives when it fails, and never mask an empty term."""
+    import fapc.core.grades as G, fapc.core.courses as C, fapc.core.subjects as S
+    saved = (G.fetch_marks, C.fetch_courses, G.call, S._INDEX)
+    try:
+        S.set_index({})
+        G.fetch_marks = lambda *a, **k: [{"subjectCode": "IAP301", "courseID": "2"},
+                                         {"subjectCode": "EXE101", "courseID": "3"}]
+        C.fetch_courses = lambda *a, **k: [{"subjectCode": "FRS401c", "courseId": "9"},
+                                           {"subjectCode": "FRS402", "courseId": "10"}]
+        hits = []
+        def _call(*a, **k):
+            hits.append(1)                               # đếm GetMarkByCourse thật sự phát ra
+            return 200, {"data": [{"item": "Assignment", "value": "8.0", "weight": "100%"}]}
+        G.call = _call
+        full = G.detail_text("t", "FPTU", "HE1", "Summer2026")
+        assert len(hits) == 4                                                # nền: cả kỳ = 4 lượt gọi
+        assert ("4 môn" in full or "4 subjects" in full)
+        hits[:] = []
+        one = G.detail_text("t", "FPTU", "HE1", "Summer2026", only="iap")
+        assert "IAP301" in one and "EXE101" not in one and "FRS401c" not in one
+        assert len(hits) == 1                                                # 4 môn -> 1 lượt gọi
+        assert "1 môn" in one or "1 subject" in one
+        hits[:] = []
+        amb = G.detail_text("t", "FPTU", "HE1", "Summer2026", only="frs")    # mơ hồ -> liệt kê ứng viên
+        assert "FRS401c" in amb and "FRS402" in amb and "IAP301" not in amb
+        unk = G.detail_text("t", "FPTU", "HE1", "Summer2026", only="zzz999")  # lạ -> liệt kê CẢ kỳ
+        assert "IAP301" in unk and "EXE101" in unk and "FRS401c" in unk and "zzz999" in unk
+        assert hits == []                                                    # cả 2 ca: KHÔNG gọi mạng
+        G.fetch_marks = lambda *a, **k: []
+        C.fetch_courses = lambda *a, **k: []
+        empty = G.detail_text("t", "FPTU", "HE1", "Summer2026", only="IAP301")
+        assert "Chưa có dữ liệu điểm" in empty or "No grades yet" in empty    # KHÔNG phải 'không thấy môn'
+    finally:
+        G.fetch_marks, C.fetch_courses, G.call, S._INDEX = saved
+
+def test_week_index():
+    """Header 'Tuần 5/15': đếm theo tuần LỊCH (mốc thứ 2) nên ngày cùng tuần với ngày khai giảng vẫn là
+    tuần 1. Ngoài kỳ -> (None, tổng) để header im lặng bỏ mảnh tuần; thiếu mốc -> (None, None):
+    tuyệt đối KHÔNG được in 'Tuần None'. Out-of-term and unknown bounds must both stay renderable."""
+    from fapc.core.schedule import week_index
+    start, end = datetime.date(2026, 5, 11), datetime.date(2026, 8, 30)   # T2 -> CN, đúng 16 tuần
+    assert week_index(start, end, datetime.date(2026, 5, 11)) == (1, 16)  # ngày đầu kỳ
+    assert week_index(start, end, datetime.date(2026, 5, 10)) == (None, 16)  # CN TRƯỚC kỳ -> ngoài khoảng
+    assert week_index(start, end, datetime.date(2026, 6, 15)) == (6, 16)  # giữa kỳ
+    assert week_index(start, end, datetime.date(2026, 8, 30)) == (16, 16)  # ngày cuối kỳ
+    assert week_index(start, end, datetime.date(2026, 9, 1)) == (None, 16)  # sau kỳ -> vẫn biết tổng
+    assert week_index(start, end, datetime.datetime(2026, 6, 15, 7, 30)) == (6, 16)  # datetime cũng nhận
+    # kỳ bắt đầu GIỮA tuần: ngày thứ 2 trước đó vẫn thuộc tuần 1
+    assert week_index(datetime.date(2026, 5, 13), end, datetime.date(2026, 5, 11))[0] == 1
+    assert week_index(None, end, datetime.date(2026, 6, 15)) == (None, None)   # chưa tra được mốc kỳ
+    assert week_index(start, None, datetime.date(2026, 6, 15)) == (None, None)
+    assert week_index(end, start, datetime.date(2026, 6, 15)) == (None, None)  # mốc lộn ngược -> không đoán
+
+def test_weekly_pattern():
+    """Lịch cả kỳ = vài chục buổi; view mặc định gom thành 'mẫu lặp hằng tuần' + buổi LỆCH mẫu.
+    Bộ (thứ, giờ, phòng) lặp >= min_repeat là mẫu; buổi học bù/đổi phòng phải rơi ra 'exceptions'
+    chứ không được âm thầm gộp vào mẫu (người dùng sẽ đi nhầm phòng).
+    A one-off makeup class must never be absorbed into the repeating pattern."""
+    from fapc.core.schedule import weekly_pattern
+    mon = datetime.date(2026, 5, 11)
+    def _iso(d): return d.strftime("%Y-%m-%d")
+    base = []
+    for w in range(10):                                     # 10 tuần: T2 sáng + T4 chiều
+        d = mon + datetime.timedelta(weeks=w)
+        base.append(_sess(_iso(d), "(07:30 - 09:00)", "IAP301"))
+        base.append(_sess(_iso(d + datetime.timedelta(days=2)), "(13:00 - 15:00)", "IAP301"))
+    pat = weekly_pattern(base)
+    assert sorted(r["count"] for r in pat["IAP301"]["repeats"]) == [10, 10]
+    assert pat["IAP301"]["exceptions"] == []               # đều đặn -> không có buổi lệch
+    assert [r["weekday"] for r in pat["IAP301"]["repeats"]] == [0, 2]   # đã sắp theo thứ (T2, T4)
+    # 1 buổi dời sang T5 -> mẫu T4 còn 9 buổi, buổi dời thành exception (KHÔNG mất buổi nào)
+    moved = base[:-1] + [_sess(_iso(mon + datetime.timedelta(weeks=9, days=3)), "(13:00 - 15:00)", "IAP301")]
+    pat2 = weekly_pattern(moved)
+    assert sorted(r["count"] for r in pat2["IAP301"]["repeats"]) == [9, 10]
+    assert len(pat2["IAP301"]["exceptions"]) == 1
+    assert pat2["IAP301"]["exceptions"][0]["date"] == _iso(mon + datetime.timedelta(weeks=9, days=3))
+    # đổi PHÒNG cùng giờ = bộ khác -> lệch mẫu (đừng nói người ta cứ đến phòng cũ)
+    other_room = base[:-1] + [_sess(_iso(mon + datetime.timedelta(weeks=9, days=2)), "(13:00 - 15:00)",
+                                    "IAP301", room="BE-999")]
+    assert len(weekly_pattern(other_room)["IAP301"]["exceptions"]) == 1
+    # môn dưới ngưỡng lặp (2 buổi) -> TẤT CẢ là exception, không có mẫu giả
+    few = [_sess(_iso(mon), "(07:30 - 09:00)", "EXE101"),
+           _sess(_iso(mon + datetime.timedelta(weeks=1)), "(07:30 - 09:00)", "EXE101")]
+    p3 = weekly_pattern(few)
+    assert p3["EXE101"]["repeats"] == [] and len(p3["EXE101"]["exceptions"]) == 2
+    assert weekly_pattern([]) == {} and weekly_pattern([BAD]) == {}   # rỗng / buổi hỏng -> không nổ
+
+def test_semester_text_pattern_and_empty():
+    """`/semester` mặc định = mẫu lặp + ghi chú TRUNG THỰC (nguồn cả-kỳ KHÔNG biết buổi huỷ/nghỉ lễ).
+    Kỳ SAU thường chưa xếp lịch -> phải báo rõ + gợi ý kỳ xem được, TUYỆT ĐỐI không trả chuỗi rỗng
+    (bot gửi tin rỗng = Telegram lỗi 400). A not-yet-published term must still produce a real message."""
+    import fapc.app.dashboard as D
+    mon = datetime.date(2026, 5, 11)
+    sess = [_sess((mon + datetime.timedelta(weeks=w)).strftime("%Y-%m-%d"), "(07:30 - 09:00)", "IAP301")
+            for w in range(6)]
+    sems = [{"semesterName": "Summer2026", "startDate": "2026-05-11T00:00:00", "endDate": "2026-08-30T00:00:00"},
+            {"semesterName": "Fall2026", "startDate": "2026-09-07T00:00:00", "endDate": "2026-12-27T00:00:00"}]
+    saved = (D.fetch_sessions, D.fetch_semesters)
+    try:
+        D.fetch_sessions = lambda *a, **k: sess
+        D.fetch_semesters = lambda *a, **k: sems
+        txt = D.semester_text("t", "FPTU", "HE1", "Summer2026")           # view mặc định = pattern
+        assert "🔁" in txt and "IAP301" in txt and "×6" in txt            # mẫu lặp, không liệt kê 6 dòng
+        assert "Summer2026" in txt and "week-exact" in txt                # ghi chú trung thực bắt buộc
+        assert "📌" not in txt                                            # pattern KHÔNG in từng ngày
+        wks = D.semester_text("t", "FPTU", "HE1", "Summer2026", view="weeks")
+        assert wks.count("📌") == 6 and ("Tuần 1 " in wks or "Week 1 " in wks)   # số tuần THẬT của kỳ
+        lst = D.semester_text("t", "FPTU", "HE1", "Summer2026", view="list")
+        assert lst.count("🕐") == 6 and len(lst) > len(txt)               # liệt kê từng buổi (dài hơn)
+        D.fetch_sessions = lambda *a, **k: []                             # kỳ chưa xếp lịch
+        empty = D.semester_text("t", "FPTU", "HE1", "Spring2027")
+        assert empty.strip() and "Spring2027" in empty and "🚧" in empty
+        assert "0 buổi" in empty or "0 sessions" in empty
+    finally:
+        D.fetch_sessions, D.fetch_semesters = saved
+    # gợi ý kỳ khác: cố định 'hôm nay' để test KHÔNG phụ thuộc đồng hồ máy
+    sems3 = sems + [{"semesterName": "Spring2027", "startDate": "2027-01-04T00:00:00",
+                     "endDate": "2027-04-25T00:00:00"}]
+    sug = D.semester_view_text([], "Spring2027", sems=sems3, today=datetime.date(2026, 8, 20))
+    line = [l for l in sug.split("\n") if l.lstrip().startswith("📅")]
+    assert line and "Fall2026" in line[0] and "Spring2027" not in line[0]   # đừng gợi ý lại chính kỳ vừa hỏi
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

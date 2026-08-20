@@ -11,6 +11,7 @@ Chạy (từ gốc repo):   python tests/integration_offline.py
 (KHÔNG chạy chung pytest với test_logic.py — file này mock global, nên để chạy độc lập.)
 """
 import os, sys, io, contextlib, tempfile, importlib
+from urllib.parse import parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["FAP_SEMESTER"] = "Summer2026"; os.environ["FAP_LANG"] = "vi"
 
@@ -42,6 +43,10 @@ SUCCESS = {
     "GetScheduleExam": [{"subjectCode": "IAP301", "examDate": "06/25/2026", "examTime": "07:30", "examRoom": "BE-101"}],
     "GetNotificationByRoll": [{"id": 1, "title": "A", "entryDate": "2026-06-20T00:00:00"}, {"id": 2, "title": "B", "entryDate": "2026-06-21T00:00:00"}],
     "getCourseAttendance": [{"scheduleID": 1, "date": "2026-06-23T00:00:00", "slot": 1, "roomNo": "B", "attendanceStatus": "Present"}],
+    "GetSemester": [{"semesterName": "Summer2026", "termID": "1", "campusID": "1",
+                     "startDate": "2026-05-11T00:00:00", "endDate": "2026-08-30T00:00:00"},
+                    {"semesterName": "Fall2026", "termID": "2", "campusID": "1",
+                     "startDate": "2026-09-07T00:00:00", "endDate": "2026-12-27T00:00:00"}],
     "GetBalance": "50000", "GeFeeByRoll": [{"amount": "1000000"}], "GetTop10News": [{"title": "T"}]}
 MODE = {"v": "success"}
 class _R:
@@ -52,6 +57,12 @@ def fake_get(url, **k):
     if MODE["v"] == "expired": return type("R", (), {"status_code": 200, "json": lambda s: {"message": "Token invalid", "code": "201", "data": None}})()
     if MODE["v"] == "netdown": raise api.requests.RequestException("simulated down")
     if MODE["v"] == "empty":   return _R([] if ep != "GetBalance" else "")
+    if ep == "GetActivityStudent":
+        # Server trả RỖNG khi hỏi kỳ trường CHƯA xếp lịch (hay gặp khi xem kỳ sau) -> mock phải tôn
+        # trọng tham số Semester, nếu không đường "kỳ chưa có lịch" của /semester không bao giờ chạy.
+        q = parse_qs(url.split("?", 1)[1]) if "?" in url else {}
+        if (q.get("Semester") or [""])[0] not in ("", os.environ["FAP_SEMESTER"]):
+            return _R([])
     return _R(SUCCESS.get(ep, []))
 api.requests.get = fake_get; api._CACHE.clear()
 try: api.creds()
@@ -72,8 +83,15 @@ for m in ["config","i18n","fmt","cli","core.api","core.auth","core.schedule","co
     except BaseException as e: check(f"import {m}", False, str(e))
 # [B] success
 MODE["v"] = "success"
+# Lệnh CÓ tham số: chạy cả arg HỢP LỆ lẫn arg KHÔNG tra ra — cả hai đều phải TRẢ LỜI, không raise
+# (bot gửi thẳng chữ người dùng gõ vào đây, nên đường "gõ sai" cũng là đường chính thức).
+ARGS = {"whatif":        [None, "8", "khong-phai-so"],
+        "grades-detail": [None, "IAP301", "iap", "zzz999"],
+        "semester":      [None, "weeks", "list", "Fall1999", "Fall2026 weeks"]}
 for c in COMMANDS:
-    if c != "help": no_raise(f"handle/{c}", lambda c=c: handle(c, "8" if c == "whatif" else None))
+    if c == "help": continue
+    for a in ARGS.get(c, [None]):
+        no_raise(f"handle/{c}" + (f" [{a}]" if a else ""), lambda c=c, a=a: handle(c, a))
 for lbl, fn in [("grades.report", g.report), ("grades.detail", g.detail), ("grades.detail.raw", lambda: g.detail(raw=True)), ("att.report", at.report), ("banrisk", at.banrisk), ("transcript", tr.report), ("gpa", tr.gpa_report), ("whatif", lambda: wi.run("8")), ("status", db.status), ("week", lambda: db.week(None)), ("exams", ex.exams), ("news", ex.news), ("fees", ex.fees), ("notifications", ex.notifications), ("exams_ics", ex.exams_ics)]:
     no_raise("ok:" + lbl, fn)
 # [C] token hết hạn
@@ -83,6 +101,28 @@ for lbl, fn in [("grades", g.report), ("att", at.report), ("gpa", tr.gpa_report)
 MODE["v"] = "success"; api._CACHE.clear()
 check("grades-detail merges GetCourseOfSemester subject (P7)", "FRS401c" in _cap(lambda: handle("grades-detail")))
 check("courses roster renders (P8)", "IAP301" in _cap(lambda: handle("courses")))
+# feat20: lọc 1 môn qua bot/web (arg đi trọn đường handle -> detail_text -> subjects.resolve)
+one = _cap(lambda: handle("grades-detail", "iap"))
+check("grades-detail lọc đúng 1 môn", "IAP301" in one and "FRS401c" not in one and "EXE101" not in one, one[:120])
+unk = _cap(lambda: handle("grades-detail", "zzz999"))
+check("grades-detail môn lạ -> liệt kê môn trong kỳ", "IAP301" in unk and "FRS401c" in unk and "zzz999" in unk, unk[:120])
+# feat20: lịch cả kỳ — có chữ, có ghi chú trung thực, không rò 'None' vào header tuần
+sem_txt = _cap(lambda: handle("semester"))
+check("semester render + ghi chú week-exact", "IAP301" in sem_txt and "week-exact" in sem_txt, sem_txt[:120])
+# Gợi ý "kỳ xem được" lọc theo NGÀY HIỆN TẠI -> ghim đồng hồ, nếu không test tự đỏ khi Summer2026
+# kết thúc (31/08/2026) dù code không đổi gì. Ghim rồi trả lại ngay.
+_saved_now = sched._vn_now
+sched._vn_now = lambda: __import__("datetime").datetime(2026, 8, 20)
+try:
+    _sem_empty = _cap(lambda: handle("semester", "Fall2030"))   # kỳ trường chưa xếp lịch -> KHÔNG được rỗng
+finally:
+    sched._vn_now = _saved_now
+check("semester kỳ trống -> báo rõ + gợi ý kỳ xem được",
+      "🚧" in _sem_empty and "Fall2030" in _sem_empty and "Summer2026" in _sem_empty, _sem_empty[:150])
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()): db.week(None)
+_wk = _buf.getvalue()
+check("week header không rò 'None'", "None" not in _wk and _wk.strip() != "", _wk[:120])
 MODE["v"] = "expired"; api._CACHE.clear()
 check("handle expired->msg refresh", "refresh" in _cap(lambda: handle("grades")).lower())
 check("handle all expired->no crash", "refresh" in _cap(lambda: handle("all")).lower())

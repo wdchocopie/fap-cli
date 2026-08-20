@@ -23,14 +23,17 @@ HELP = """fap <command>   ·   fap-cli
   Tổng quan / Overview:
     status | dashboard     hôm nay + điểm + điểm danh · today + grades + attendance
     all                    MỌI thứ trong 1 lần · everything at once
+    today | tomorrow       lịch hôm nay | lịch ngày mai · today's | tomorrow's schedule
     weekly                 tổng kết tuần: lịch + điểm danh + điểm (gửi kênh) · weekly recap → channels
     week [next|prev|N]     lịch tuần (lọc từ kỳ) · weekly schedule
     week-exact [week year] lịch tuần lấy thẳng server (chuẩn tuần nghỉ lễ) · weekly straight from server
+    semester [pattern|weeks|list|<kỳ>]   lịch CẢ KỲ: mẫu lặp hằng tuần (mặc định) | từng tuần | liệt kê kỳ · whole-term view
 
   Dữ liệu / Data:
     extract                kéo toàn bộ -> output/ · pull everything
     ics                    xuất output/lichhoc.ics · export .ics
-    grades | grades-detail điểm | điểm thành phần (+ "cần gì để qua") · grades | component grades (+ pass-projection)
+    grades | grades-detail [môn]   điểm | điểm thành phần (+ "cần gì để qua"); kèm mã/tên môn = chỉ môn đó (nhẹ hơn nhiều)
+                           · grades | component grades (+ pass-projection); pass a subject to fetch just that one
     subjects               tải/cache danh mục môn → hiện TÊN + tín chỉ ở mọi nơi · cache subject names + credits
     courses                lớp đang học: môn/lớp/giảng viên/phòng · my classes this term
     attendance | banrisk   điểm danh | nguy cơ cấm thi · attendance | exam-ban risk
@@ -51,7 +54,7 @@ HELP = """fap <command>   ·   fap-cli
     calendar-auth          xác thực Google Calendar 1 lần · authorize Google Calendar
     calendar-sync [--prune [--yes]]   đồng bộ (upsert: đổi phòng/giờ tự sửa) + tùy chọn dọn buổi đã hủy · sync (+optional prune)
     calendar-prune [--yes] [--force]  xóa event lịch-học MỒ CÔI (chỉ event fap-cli tạo; dry-run mặc định) · prune orphan class events
-    notify [test|today|tomorrow|weekly|attendance|banrisk|grades|grades-detail|status|whatif|exams|gpa|notifications|all]   gửi lên kênh · push
+    notify [test|<bất kỳ lệnh bot nào> [tham số]]   gửi kết quả lên kênh (danh sách đầy đủ: fap notify help) · push any bot command
     watch-attendance [loop [phút]] [--absent-only]   báo khi VỪA điểm danh; --absent-only = chỉ báo vắng/muộn
     watch-grades [loop [phút]]   báo khi có ĐIỂM MỚI (thành phần/tổng kết) · ping on new marks
 
@@ -143,6 +146,18 @@ def doctor():
     print("kênh notify :", ", ".join(filter(None, [
         "Telegram" if config.TELEGRAM_TOKEN else "", "Discord" if config.DISCORD_WEBHOOK_URL else ""])) or "—")
 
+def _core_cmd(cmd):
+    """True nếu `cmd` là lệnh lõi (bot_core.COMMAND_INFO) chưa có nhánh CLI riêng.
+    - 'help' bị loại: `fap help` phải in TRANG HELP của CLI, không phải /help của bot.
+    - Import trễ + nuốt ImportError: lệnh gõ sai vẫn in HELP dù thiếu `requests`."""
+    if cmd == "help":
+        return False
+    try:
+        from .bot_core import COMMANDS
+    except ImportError:
+        return False
+    return cmd in COMMANDS
+
 def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "help"
@@ -161,7 +176,10 @@ def main():
     elif cmd == "notify":         from .notify import run; run(" ".join(rest) if rest else "test")
     elif cmd == "watch-attendance": from .attendwatch import run; run(rest)
     elif cmd == "grades":         from ..core.grades import report; report()
-    elif cmd == "grades-detail":  from ..core.grades import detail; detail(raw="--raw" in rest)
+    elif cmd == "grades-detail":
+        from ..core.grades import detail
+        # `fap grades-detail IAP491` -> chỉ kéo 1 môn (8 request -> 3). Giữ NGUYÊN cụm nhiều từ (tên môn).
+        detail(raw="--raw" in rest, only=" ".join(a for a in rest if not a.startswith("--")) or None)
     elif cmd == "subjects":       from ..core.subjects import report; report()
     elif cmd == "courses":        from ..core.courses import report; report()
     elif cmd == "weekly":         from .notify import run; run("weekly")
@@ -196,6 +214,11 @@ def main():
     elif cmd == "update":         sys.exit(update())
     elif cmd == "doctor":         doctor()
     elif cmd == "selftest":       sys.exit(selftest())
+    # Mọi lệnh CÒN LẠI của bot_core.COMMAND_INFO (today, tomorrow, semester, …) chạy qua lõi chung.
+    # Nhờ nhánh này, lệnh mới thêm vào COMMAND_INFO là gọi được từ CLI ngay — không bao giờ lệch nữa.
+    elif _core_cmd(cmd):
+        from .bot_core import handle
+        print(handle(cmd, " ".join(rest) or None))     # giữ NGUYÊN cụm nhiều từ (vd tên môn có dấu cách)
     else: print(HELP)
 
 if __name__ == "__main__":
