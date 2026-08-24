@@ -12,6 +12,8 @@ import requests
 from .. import config, fmt
 from .bot_core import handle, menu_commands
 from .reminders import ClassReminder
+from . import botlogin
+from ..core.auth import looks_like_redirect
 from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min, owner_checkout
 from ..i18n import t
 
@@ -23,6 +25,10 @@ _GAP   = 0.4    # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩ
 _CB_MAX = 64    # callback_data của Telegram tối đa 64 BYTE (utf-8) — dài hơn là API từ chối cả tin
 _MENU_MAX  = 12 # số nút trên bảng menu — nhiều hơn thì bàn phím dài lê thê, che hết màn hình
 _MENU_COLS = 3  # Telegram cho tối đa 8 nút/hàng; 3 nút/hàng vừa mắt trên điện thoại
+
+# MỘT phiên đăng nhập cho cả tiến trình: đăng nhập là việc hiếm và phải tuần tự (2 phiên song song
+# sẽ ghi đè .pkce_state.json của nhau). Xem fapc/app/botlogin.py.
+_LOGIN = botlogin.LoginSession()
 
 def _update_allowed():
     """/update chạy `git pull` + restart trên CHECKOUT DÙNG CHUNG → phải bật rõ ràng ở máy chủ.
@@ -50,6 +56,8 @@ def _register_menu():
     cmds = [{"command": n, "description": d[:256]} for n, d in menu_commands()]
     cmds.append({"command": "menu",                         # lệnh thường-trú (không có ở web/notify)
                  "description": t("Bảng nút bấm nhanh", "Quick button panel")[:256]})
+    cmds.append({"command": "login",                         # đăng nhập FAP ngay trong chat
+                 "description": t("Đăng nhập lại FAP (token hết hạn)", "Re-login to FAP (token expired)")[:256]})
     cmds.append({"command": "update",                       # lệnh thường-trú (không có ở web/notify)
                  "description": t("Cập nhật code + khởi động lại", "Update code + restart")[:256]})
     try:
@@ -124,6 +132,39 @@ def _answer_callback(cb_id, text=None):
     except requests.RequestException as e:
         print("  trả lời nút lỗi · answerCallbackQuery error:", e)
 
+def _delete_message(chat_id, message_id):
+    """Xoá 1 tin trong chat. Dùng cho tin chứa URL redirect (có MÃ UỶ QUYỀN dùng-một-lần):
+    mã đã đổi xong thì không có lý do gì để nó nằm lại lịch sử chat. Lỗi thì bỏ qua — bot có thể
+    thiếu quyền xoá tin của người dùng trong group; khi đó phải NÓI cho người dùng tự xoá."""
+    if not message_id:
+        return False
+    try:
+        r = requests.post(_api("deleteMessage"),
+                          json={"chat_id": chat_id, "message_id": message_id}, timeout=15)
+        return bool(r.ok)
+    except requests.RequestException:
+        return False
+
+def _login_start(chat_id, arg):
+    """/login [CAMPUS] — mở phiên đăng nhập FAP ngay trong chat (không cần SSH vào máy chủ)."""
+    campus = (arg or "").strip() or botlogin.default_campus()
+    ok, text, mode = _LOGIN.start(campus)
+    _send(chat_id, text)
+    if ok and mode == "device":
+        # device_poll CHẶN tới ~10 phút -> chạy thread nền, KHÔNG được giữ vòng getUpdates
+        # (giữ thì bot đứng hình và, quan trọng hơn, NHẮC TIẾT cũng ngừng chạy).
+        botlogin.finish_device(_LOGIN, lambda msg: _send(chat_id, msg))
+
+def _login_paste(chat_id, text, message_id):
+    """Người dùng dán URL redirect (đường PKCE). Xoá tin NGAY rồi mới đổi mã."""
+    deleted = _delete_message(chat_id, message_id)
+    ok, msg = botlogin.finish_paste(_LOGIN, text)
+    if not deleted:
+        msg += "\n" + t("⚠️ Bot không xoá được tin chứa link — bạn TỰ XOÁ giúp (nó có mã đăng nhập).",
+                        "⚠️ The bot could not delete your link message — please delete it yourself "
+                        "(it carries a sign-in code).")
+    _send(chat_id, msg)
+
 def _dispatch(chat_id, cmd, arg=None):
     """Chạy MỘT lệnh rồi gửi trả lời — dùng chung cho tin GÕ TAY và cho NÚT BẤM.
     Người gọi đã kiểm quyền (chỉ chat chủ) trước khi vào đây."""
@@ -137,6 +178,9 @@ def _dispatch(chat_id, cmd, arg=None):
         _send(chat_id, summary)
         if do_restart:
             restart()                           # thay tiến trình → quay lại với mã mới
+        return
+    if key == "login":                           # đăng nhập FAP ngay trong chat (khỏi SSH vào máy chủ)
+        _login_start(chat_id, arg)
         return
     if key in ("", "menu", "start", "help"):     # trang trợ giúp = luôn kèm bàn phím nút bấm
         _send(chat_id, _menu_text(), _menu_buttons())
@@ -219,6 +263,13 @@ def run():
             if chat_id != allow:
                 continue                       # im lặng với chat ngoài allowlist (không xác nhận bot sống)
             if not text:
+                continue
+            # XOÁ TRƯỚC, XÉT SAU. Bất kỳ tin nào TRÔNG GIỐNG URL redirect đều đi lối này, KHÔNG cần
+            # đang có phiên: nếu gài thêm điều kiện "đang chờ dán" thì khi phiên đã hết hạn (hoặc bot
+            # vừa restart vì auto-update) tin chứa MÃ UỶ QUYỀN sẽ rơi xuống _dispatch — không được xoá,
+            # lại còn bị "Lệnh không rõ: <cả URL>" ném ngược vào chat ⇒ mã nằm lại lịch sử chat 2 lần.
+            if looks_like_redirect(text):
+                _login_paste(chat_id, text, msg.get("message_id"))
                 continue
             # split(None, 1): giữ NGUYÊN phần còn lại làm tham số. split() thường sẽ cắt mất chữ ở
             # tham số nhiều từ ('/news học bổng' -> 'học'), trong khi CLI/notify/slash đều giữ đủ.

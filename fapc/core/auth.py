@@ -108,13 +108,13 @@ def fap_login_feid(campus, access_token):
             break
     return out
 
-def _do_fap(campus, access_token):
+def _do_fap(campus, access_token, log=print):
     http, body = fap_login_feid(campus, access_token)
     code = body.get("code") if isinstance(body, dict) else None
     msg = body.get("message") if isinstance(body, dict) else str(body)[:90]
-    print(f"  AuthenticationByFeId -> HTTP {http} code={code} msg={msg}")
+    log(f"  AuthenticationByFeId -> HTTP {http} code={code} msg={msg}")
     if http != 200:
-        print("  ✗ Server FAP không trả 200 — access_token có thể hết hạn (chạy 'refresh') hoặc sai scope."); return None
+        log("  ✗ Server FAP không trả 200 — access_token có thể hết hạn (chạy 'refresh') hoặc sai scope."); return None
     raw = body.get("data") if isinstance(body, dict) and "data" in body else body
     if isinstance(raw, list) and raw:
         raw = raw[0]
@@ -126,8 +126,8 @@ def _do_fap(campus, access_token):
             if raw.get(k): tok = raw[k]; break
     if not tok:
         # KHÔNG in body thô (có thể chứa token/PII). Chỉ in code+message; lưu file đã CHE bớt.
-        print(f"  ✗ Không bóc được token FAP (HTTP {http} code={code} msg={msg}).")
-        print("    (đã lưu output/feid_login_raw.json — file này có thể chứa dữ liệu thật, ĐỪNG chia sẻ.)")
+        log(f"  ✗ Không bóc được token FAP (HTTP {http} code={code} msg={msg}).")
+        log("    (đã lưu output/feid_login_raw.json — file này có thể chứa dữ liệu thật, ĐỪNG chia sẻ.)")
         _save(os.path.join(OUT, "feid_login_raw.json"), _redact(body))   # CHỈ ghi khi lỗi, đã che
         return None
     rd = raw if isinstance(raw, dict) else {}
@@ -136,16 +136,17 @@ def _do_fap(campus, access_token):
            "email": rd.get("email"), "fullname": rd.get("studentName") or rd.get("fullname"),
            "obtained_at": int(time.time())}
     _save(TOKEN_JSON, fap)
-    print(f"  ✓ Token FAP -> output/token.json  (roll={fap['rollnumber']} campus={fap['campus']})")
+    log(f"  ✓ Token FAP -> output/token.json  (roll={fap['rollnumber']} campus={fap['campus']})")
     return fap
 
-def _finalize(tok, campus):
+def _finalize(tok, campus, log=print):
     tok["obtained_at"] = int(time.time())
     _save(OAUTH_JSON, tok)
-    print("  ✓ OAuth token (refresh_token =", bool(tok.get("refresh_token")),
-          ", access hết hạn sau", tok.get("expires_in", "?"), "s )")
-    print("• Đổi sang token FAP...")
-    return _do_fap(campus, tok["access_token"])
+    # MỘT đối số: `log` có thể là lines.append (đăng nhập từ chat), không phải print đa-đối-số.
+    log(f"  ✓ OAuth token (refresh_token = {bool(tok.get('refresh_token'))}"
+        f", access hết hạn sau {tok.get('expires_in', '?')} s )")
+    log("• Đổi sang token FAP...")
+    return _do_fap(campus, tok["access_token"], log)
 
 # ---------- Device flow ----------
 def device_start():
@@ -200,7 +201,7 @@ def _extract_code(redirected):
         raise SystemExit(f"FE Identity từ chối: {p['error'][0]} — {p.get('error_description',[''])[0]}")
     return (p.get("code") or [None])[0]
 
-def exchange_code(redirected):
+def exchange_code(redirected, log=print):
     if not os.path.exists(PKCE_STATE):
         raise SystemExit("Chưa có phiên đăng nhập. Chạy 'login' trước.")
     st = json.load(open(PKCE_STATE, encoding="utf-8"))
@@ -212,12 +213,172 @@ def exchange_code(redirected):
     if http != 200 or not isinstance(j, dict) or "access_token" not in j:
         raise SystemExit(f"Đổi code lỗi {http}: {str(j)[:300]}\n"
                          "(code chỉ sống ~vài chục giây & dùng 1 lần — chạy lại 'login'.)")
-    return _finalize(j, st["campus"])
+    return _finalize(j, st["campus"], log)
 
 def _truthy(v):
     """'1'/'true'/'yes'/'on' (không phân biệt hoa thường) -> True. Dùng cho cờ ENV, KHÔNG dùng bool()
     vì bool('0') == True — chuỗi '0' trong .env phải hiểu là TẮT."""
     return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ---------- Đăng nhập KHÔNG BÀN PHÍM (cho bot Telegram) ----------
+# Vì sao tách riêng: cmd_login() dùng input() + webbrowser -> vô dụng trên VPS và trong bot.
+# Ba hàm dưới đây THUẦN-GIAO-TIẾP: nhận vào/trả ra dữ liệu, KHÔNG in, KHÔNG hỏi, KHÔNG mở browser.
+#
+# BẢO MẬT — mật khẩu KHÔNG BAO GIỜ đi qua bot: đây là OAuth, người dùng đăng nhập trên trang
+# Google/FE Identity. Bot chỉ chạm tới (a) link mời đăng nhập, (b) — chỉ ở đường PKCE — MÃ UỶ QUYỀN
+# dùng-một-lần sống vài chục giây. Token thật thì ghi thẳng xuống đĩa, không hiện ra chat.
+
+def current_roll():
+    """rollNumber trong token.json hiện tại ('' nếu chưa đăng nhập bao giờ)."""
+    try:
+        with open(TOKEN_JSON, encoding="utf-8") as f:
+            return str(json.load(f).get("rollnumber") or "")
+    except (OSError, ValueError):
+        return ""
+
+_ABSENT = object()      # "file KHÔNG tồn tại" — KHÁC "có file nhưng đọc hỏng" (đừng xoá nhầm bản tốt)
+
+def _snapshot(path):
+    """Nội dung file (bytes) | _ABSENT nếu chưa có | None nếu CÓ mà đọc hỏng."""
+    if not os.path.exists(path):
+        return _ABSENT
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+def _restore(path, blob):
+    """Trả file về đúng bản đã chụp. Trả True nếu CHẮC CHẮN khôi phục xong.
+    Ghi NGUYÊN TỬ (tmp + os.replace) như _save: worker thread khôi phục trong khi luồng chính có thể
+    đang đọc token.json — ghi đè tại chỗ sẽ để lộ file cụt.
+    blob is None = lúc chụp đã đọc hỏng ⇒ KHÔNG đụng vào (thà giữ nguyên còn hơn xoá nhầm)."""
+    if blob is None:
+        return False
+    if blob is _ABSENT:
+        try:
+            os.remove(path); return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+    tmp = f"{path}.{os.getpid()}.restore"
+    try:
+        paths.ensure_dir(path)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(blob)
+        os.replace(tmp, path)
+        try: os.chmod(path, 0o600)
+        except OSError: pass
+        return True
+    except OSError:
+        try: os.remove(tmp)
+        except OSError: pass
+        return False
+
+def login_start(campus):
+    """Mở một phiên đăng nhập. KHÔNG in, KHÔNG mở browser. Trả dict để caller tự hiển thị:
+        {"mode":"device", "url":…, "user_code":…, "device_code":…, "interval":…, "expires_in":…, "campus":…}
+        {"mode":"pkce",   "url":…, "campus":…}      # caller phải xin người dùng DÁN URL redirect
+    Ưu tiên device flow (mã uỷ quyền KHÔNG đi qua chat); FE Identity từ chối thì mới rơi về PKCE."""
+    # Máy CHỈ-ĐỌC (FAP_TOKEN_READONLY) không được tạo/xoay token: nó đang DÙNG CHUNG token của máy
+    # chủ (docs/18-roadmap.md §3). Đăng nhập ở đây sẽ mint refresh_token mới và VÔ HIỆU HOÁ bản của
+    # máy chủ — đúng thứ mà cờ này sinh ra để ngăn. refresh_tokens() đã chặn; login cũng phải chặn.
+    if token_readonly():
+        raise PermissionError(
+            t("Máy này đặt FAP_TOKEN_READONLY=1 (chỉ đọc, dùng token của máy chủ) nên KHÔNG được "
+              "đăng nhập ở đây — làm vậy sẽ vô hiệu hoá token của máy chủ. Hãy /login trên máy chủ.",
+              "This host has FAP_TOKEN_READONLY=1 (read-only, shares the owner host's token), so it "
+              "must NOT sign in here — that would invalidate the owner host's token. /login there."))
+    campus = str(campus or "").strip()
+    if not campus:
+        raise ValueError("missing campus")
+    ok, dev = device_start()
+    if ok and isinstance(dev, dict) and dev.get("device_code"):
+        return {"mode": "device", "campus": campus,
+                "url": dev.get("verification_uri_complete") or dev.get("verification_uri"),
+                "user_code": dev.get("user_code") or "",
+                "device_code": dev["device_code"],
+                "interval": dev.get("interval", 5), "expires_in": dev.get("expires_in", 600)}
+    v, c = _pkce(); state = secrets.token_urlsafe(16)
+    _save(PKCE_STATE, {"verifier": v, "state": state, "campus": campus})
+    url = AUTHORIZE_EP + "?" + urllib.parse.urlencode({
+        "client_id": CLIENT_ID, "redirect_uri": REDIRECT_URI, "response_type": "code",
+        "scope": SCOPE, "code_challenge": c, "code_challenge_method": "S256", "state": state})
+    return {"mode": "pkce", "campus": campus, "url": url}
+
+def _finish(fn, expect_roll):
+    """Chạy `fn()` (đường device hoặc PKCE) rồi CHỐT CHẶN ĐỔI TÀI KHOẢN. Trả (ok, thông_điệp).
+
+    Vì sao phải hoàn tác CẢ HAI file: `_finalize` ghi access/refresh_token vào oauth_tokens.json
+    TRƯỚC khi `_do_fap` ghi token.json. Chỉ trả lại token.json là chốt chặn VÔ NGHĨA — refresh_token
+    của tài khoản lạ còn nằm đó, và lần `refresh_tokens()` kế tiếp (không hề có kiểm tra tài khoản)
+    sẽ lặng lẽ dựng lại token của người lạ, đẩy điểm/lịch của họ vào chat của chủ máy.
+
+    Roll RỖNG cũng bị coi là KHÁC: FAP có thể trả `data` là chuỗi trần (xem _do_fap) ⇒ không có
+    rollnumber. Không định danh được thì phải TỪ CHỐI, không được tin.
+
+    KHÔNG dùng redirect_stdout: hàm này chạy ở THREAD NỀN, mà redirect_stdout đổi sys.stdout TOÀN
+    TIẾN TRÌNH — sẽ nuốt log của vòng lặp bot suốt ~10 phút chờ duyệt. Thay bằng log=callback."""
+    lines = []
+    before_tok, before_oauth = _snapshot(TOKEN_JSON), _snapshot(OAUTH_JSON)
+    try:
+        fap = fn(lines.append)
+    except SystemExit as e:
+        return False, str(e)
+    except Exception as e:                                  # noqa: BLE001 — lỗi nào cũng phải thành CHỮ
+        return False, f"{type(e).__name__}: {e}"
+
+    def _rollback():
+        ok1 = _restore(TOKEN_JSON, before_tok)
+        ok2 = _restore(OAUTH_JSON, before_oauth)
+        if ok1 and ok2:
+            return t("Đã hoàn tác, token cũ giữ nguyên.", "Rolled back; the previous token is untouched.")
+        return t("🚨 HOÀN TÁC KHÔNG THÀNH CÔNG — token của tài khoản lạ CÓ THỂ vẫn còn trên máy. "
+                 "Hãy đăng nhập lại ngay bằng đúng tài khoản, hoặc xoá output/token.json + "
+                 "output/oauth_tokens.json rồi `fap login`.",
+                 "🚨 ROLLBACK FAILED — the other account's token may still be on disk. Sign in again "
+                 "with the correct account, or delete output/token.json + output/oauth_tokens.json "
+                 "and run `fap login`.")
+
+    if not fap:
+        tail = [l for l in lines if l][-3:]
+        msg = t("Đăng nhập không lấy được token FAP.", "Login did not obtain a FAP token.")
+        _rollback()                                          # nửa đường: oauth_tokens.json đã bị ghi
+        return False, (msg + "\n" + "\n".join(tail)) if tail else msg
+    roll = str(fap.get("rollnumber") or "")
+    if expect_roll and roll != expect_roll:
+        who = roll or t("(không rõ)", "(unknown)")
+        return False, t(f"⛔ Tài khoản KHÁC: vừa đăng nhập bằng {who} nhưng nơi này thuộc về "
+                        f"{expect_roll}. ", f"⛔ Different account: signed in as {who} but this "
+                        f"profile belongs to {expect_roll}. ") + _rollback()
+    return True, t(f"✅ Đăng nhập xong · {roll or '?'} · {fap.get('campus') or '?'}",
+                   f"✅ Signed in · {roll or '?'} · {fap.get('campus') or '?'}")
+
+def login_finish_device(session, expect_roll=""):
+    """Chờ người dùng bấm duyệt trên trang FE Identity (CHẶN tới vài phút -> caller nên chạy ở thread riêng)."""
+    return _finish(lambda log: _finalize(device_poll(session["device_code"], session.get("interval", 5),
+                                                     session.get("expires_in", 600)),
+                                         session["campus"], log), expect_roll)
+
+def login_finish_code(pasted, expect_roll=""):
+    """Đường PKCE: đổi URL redirect người dùng dán thành token."""
+    return _finish(lambda log: exchange_code(pasted, log), expect_roll)
+
+def looks_like_redirect(text):
+    """THUẦN: tin này có vẻ là URL redirect của luồng đăng nhập không? (bot dùng để XOÁ NGAY tin đó).
+
+    Nhận rộng TAY: chỉ cần thấy scheme redirect là đủ, hoặc là một URL có 'code='/'error='. Thà xoá
+    nhầm một tin vô hại còn hơn để lọt một tin có MÃ UỶ QUYỀN nằm lại lịch sử chat. Bản 'error=' cũng
+    phải nhận, vì FE Identity trả lỗi về đúng URL đó và người dùng vẫn dán vào chat."""
+    s = str(text or "")
+    if not s:
+        return False
+    if REDIRECT_URI.split(":")[0] in s:                # 'io.identityserver.demo' — chắc chắn là redirect
+        return True
+    return ("http" in s) and ("code=" in s or "error=" in s)
 
 
 def token_readonly():

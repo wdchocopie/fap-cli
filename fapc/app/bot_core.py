@@ -103,8 +103,12 @@ def help_text():
         lines.append("\n" + title)
         for name, emoji, d in items:
             lines.append(f"{emoji} /{name}{arg_hint(name)} — {d}")
-    lines.append("\n" + t("🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)",
-                          "🔄 /update — update the bot + restart (owner only)"))
+    # Lệnh THƯỜNG TRÚ (chỉ có trong bot, không có ở CLI/web/notify) — liệt kê tay ở đây là ĐÚNG,
+    # vì chúng cố ý KHÔNG nằm trong COMMAND_INFO (handle() trả chuỗi, còn hai lệnh này thì không).
+    lines.append("\n" + t("🔐 /login [MÃ CAMPUS] — đăng nhập lại FAP ngay trong chat (token hết hạn)",
+                          "🔐 /login [CAMPUS] — sign in to FAP right here (when the token expires)"))
+    lines.append(t("🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)",
+                   "🔄 /update — update the bot + restart (owner only)"))
     return "\n".join(lines)
 
 def _grades_text(token, campus, roll, sem, rows=None):

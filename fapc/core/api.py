@@ -58,7 +58,8 @@ def creds():
             c.execute("SELECT value FROM catalystLocalStorage WHERE key=?", (k,)); r = c.fetchone(); return r[0] if r else None
         token, campus, roll = g("authenkey"), g("campus"), g("rollnumber"); con.close()
     if not token:
-        raise SystemExit("Chưa có token. Đăng nhập trước:  fap login")
+        raise SystemExit("Chưa có token. Đăng nhập trước:  fap login  (hoặc gõ /login trong chat bot).\n"
+                         "No token yet. Sign in first:  fap login  (or send /login to the bot).")
     if not campus or not roll:
         raise SystemExit("Thiếu campus/rollNumber trong token.json — đăng nhập lại: fap login")
     return token, campus, roll
@@ -180,7 +181,9 @@ def as_list(resp):
     d = unwrap(resp)
     return d if isinstance(d, list) else []
 
-_EXPIRED_MSG = "⚠️ Token FAP có thể đã hết hạn — chạy:  fap refresh  (rồi thử lại)."
+# Nhắc CẢ HAI đường: người dùng chat không chạy được lệnh shell, người dùng CLI không có bot.
+_EXPIRED_MSG = ("⚠️ Token FAP có thể đã hết hạn — chạy:  fap refresh  (hoặc gõ /login trong chat bot), rồi thử lại.\n"
+                "⚠️ The FAP token may have expired — run:  fap refresh  (or send /login to the bot), then retry.")
 
 def check_auth(http, data):
     """Raise thông điệp RÕ khi phản hồi báo lỗi XÁC THỰC, thay vì để fetch_* trả [] im lặng

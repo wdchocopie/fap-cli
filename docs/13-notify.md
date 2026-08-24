@@ -269,7 +269,31 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 > ℹ️ **VI —** Bảng nút chỉ hiện **12 lệnh đầu** (Telegram) / **25** (Discord) theo thứ tự `COMMAND_INFO`. Lệnh dôi ra **vẫn chạy được** — gõ tay hoặc dùng menu gợi ý `/`.
 > ℹ️ **EN —** The panel shows the **first 12** (Telegram) / **25** (Discord) commands in `COMMAND_INFO` order. Anything beyond the cap **still works** — type it, or use the `/` suggestion menu.
 
-### 8.4. `.env` cho bot · for the bot
+### 8.4. `/login` — đăng nhập FAP ngay trong chat · sign in from the chat
+
+**VI —** Token FAP hết hạn mà bạn đang ở ngoài? Gõ `/login` **trong Telegram** — không cần SSH vào máy chủ. Lần đầu (chưa có token) thì thêm mã campus: `/login APHL`; các lần sau bot tự lấy campus từ token cũ. Gõ thiếu campus, bot **in luôn danh sách campus** cho bạn chọn.
+**EN —** FAP token expired while you're away? Send `/login` **in Telegram** — no SSH needed. On a first-ever login add the campus code (`/login APHL`); afterwards the bot reuses the campus from the old token. Omit it and the bot prints the campus list for you.
+
+> 🔒 **VI — Mật khẩu KHÔNG BAO GIỜ đi qua bot.** Đây là OAuth (FE Identity / Google): bạn đăng nhập trên **trang của Google**, bot không thấy và không lưu mật khẩu.
+> 🔒 **EN — Your password never touches the bot.** This is OAuth: you sign in on **Google's own page**; the bot never sees or stores a password.
+
+| Đường · Path | Chat chứa gì · What lands in the chat |
+|---|---|
+| **Device flow** *(ưu tiên · preferred)* | vi · **chỉ một link**. Mã uỷ quyền không hề đi qua Telegram. Bạn duyệt trên điện thoại, bot tự báo `✅ Đăng nhập xong`. en · a link only; the authorization code never enters the chat. |
+| **PKCE** *(dự phòng khi FE Identity từ chối device flow)* | vi · bạn phải **dán URL redirect**. URL đó chứa **mã dùng-một-lần** → bot **xoá tin của bạn ngay khi nhận** (trước cả khi đổi mã); xoá không được thì bot **báo để bạn tự xoá**. en · you paste the redirect URL; the bot deletes that message the moment it arrives, and says so if it cannot. |
+
+**VI —** Chốt an toàn kèm theo:
+- **Đăng nhập ra tài khoản KHÁC → từ chối + hoàn tác** cả `token.json` lẫn `oauth_tokens.json`. Chỉ trả lại `token.json` là vô nghĩa: `refresh_token` của người lạ còn nằm đó thì lần refresh sau sẽ dựng lại token của họ. Không đọc được `rollNumber` cũng bị coi là **khác** — không định danh được thì không tin.
+- Máy đặt `FAP_TOKEN_READONLY=1` (xem [14-deploy §9](14-deploy.md)) **bị cấm** `/login`: đăng nhập ở đó sẽ vô hiệu hoá token của máy chủ.
+- Token **không bao giờ** được in ra chat — chỉ báo `rollNumber` + campus.
+- Chỉ chủ chat (`TELEGRAM_CHAT`) gọi được, y như mọi lệnh khác.
+
+**EN —** Guards: a sign-in that yields a **different account** (or no readable roll number) is refused and **both** token files are rolled back; a host with `FAP_TOKEN_READONLY=1` may not `/login`; tokens are never printed to chat; owner-chat only.
+
+> ⚠️ **VI —** Hiện chỉ có trên **Telegram** (Discord chưa hỗ trợ — dùng `fap login` trên máy chủ).
+> ⚠️ **EN —** Telegram only for now (on Discord use `fap login` on the host).
+
+### 8.5. `.env` cho bot · for the bot
 ```dotenv
 # Telegram bot: dùng lại TOKEN + CHAT ở §2 (CHAT bắt buộc) · reuses §2 (CHAT required)
 # Discord bot:

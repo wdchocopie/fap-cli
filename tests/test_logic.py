@@ -117,6 +117,10 @@ def test_status_and_week_render_offline():
                                      {"subjectCode": "B", "averageMark": "0.0"}]
     D.fetch_att = lambda *a, **k: [{"subjectCode": "A", "attendance": "100"},
                                    {"subjectCode": "B", "attendance": "60"}]
+    # week() nay tra mốc kỳ qua GetSemester (để in 'Tuần N/M') -> PHẢI stub, nếu không bộ test
+    # "offline" bắn request thật tới api.fpt.edu.vn (và bot chạy selftest mỗi lần /update!).
+    D.fetch_semesters = lambda *a, **k: [{"semesterName": "Summer2026",
+                                          "startDate": "2026-05-04", "endDate": "2026-08-30"}]
     D._ident = lambda: ("Nguyen Van A", "a@fpt.edu.vn")
     D._vn_now = lambda: datetime.datetime(2026, 6, 15, 8, 0)     # cố định -> hôm nay = T2 15/06
     out = _cap(D.status)
@@ -873,6 +877,116 @@ def test_whoami_offline_jwt():
     assert token_freshness({"exp": 2000}, now=1000) == ("valid", 1000)
     assert token_freshness({"exp": 1000}, now=2000) == ("expired", 1000)
     assert token_freshness({}) == ("unknown", 0)
+
+def _login_sandbox():
+    """Trỏ auth.TOKEN_JSON/PKCE_STATE vào thư mục tạm — test đăng nhập TUYỆT ĐỐI không đụng token thật."""
+    import tempfile, os as _os, fapc.core.auth as A
+    d = tempfile.mkdtemp()
+    saved = (A.TOKEN_JSON, A.PKCE_STATE, A.OAUTH_JSON,
+             A.device_start, A.device_poll, A._finalize, A.exchange_code)
+    A.TOKEN_JSON = _os.path.join(d, "token.json")
+    A.OAUTH_JSON = _os.path.join(d, "oauth.json")
+    A.PKCE_STATE = _os.path.join(d, "pkce.json")
+    # CẤM MẠNG: bộ test này là OFFLINE. Chặn sẵn cả 2 cửa ra để một nhánh quên stub sẽ NỔ ngay
+    # thay vì lặng lẽ bắn request thật tới feid.fpt.edu.vn (bot chạy `selftest` mỗi lần /update!).
+    A.device_start = lambda: (False, "offline-test")
+    A.device_poll = lambda *a, **k: (_ for _ in ()).throw(AssertionError("test gọi mạng!"))
+    A.exchange_code = lambda *a, **k: (_ for _ in ()).throw(AssertionError("test gọi mạng!"))
+    return A, saved
+
+def _login_restore(A, saved):
+    (A.TOKEN_JSON, A.PKCE_STATE, A.OAUTH_JSON,
+     A.device_start, A.device_poll, A._finalize, A.exchange_code) = saved
+
+def test_login_start_device_keeps_code_out_of_chat():
+    """Đăng nhập từ chat: đường DEVICE chỉ gửi LINK — mã uỷ quyền không bao giờ nằm trong tin nhắn."""
+    import fapc.app.botlogin as BL
+    A, saved = _login_sandbox()
+    try:
+        A.device_start = lambda: (True, {"device_code": "DC", "user_code": "ABCD-1234", "interval": 1,
+                                         "expires_in": 60,
+                                         "verification_uri_complete": "https://feid.fpt.edu.vn/device?u=ABCD-1234"})
+        ok, text, mode = BL.LoginSession().start("APHL")
+        assert ok and mode == "device"
+        assert "code=" not in text and "access_token" not in text   # không rò mã/token vào chat
+        assert "ABCD-1234" in text                                  # nhưng vẫn đưa mã xác nhận cho người dùng
+    finally:
+        _login_restore(A, saved)
+
+def test_login_refuses_different_account():
+    """CHỐT CHẶN: đăng nhập ra roll KHÁC -> từ chối + HOÀN TÁC **CẢ HAI** file token.
+
+    Stub phải GHI FILE y như đường thật (_finalize ghi oauth_tokens.json TRƯỚC, _do_fap ghi token.json
+    sau). Nếu stub chỉ trả dict thì test vẫn xanh dù đã xoá sạch phần hoàn tác — vô nghĩa.
+    Hoàn tác oauth_tokens.json là BẮT BUỘC: refresh_token của người lạ còn ở đó thì lần refresh sau
+    sẽ dựng lại token của họ, và refresh_tokens() không hề kiểm tra tài khoản."""
+    import json as _json
+    A, saved = _login_sandbox()
+    try:
+        with open(A.TOKEN_JSON, "w", encoding="utf-8") as f:
+            _json.dump({"rollnumber": "HE191048", "campus": "APHL"}, f)
+        with open(A.OAUTH_JSON, "w", encoding="utf-8") as f:
+            _json.dump({"refresh_token": "MINE"}, f)
+
+        def _fin_foreign(tok, campus, log=print):
+            A._save(A.OAUTH_JSON, {"refresh_token": "THEIRS"})      # y như _finalize thật
+            A._save(A.TOKEN_JSON, {"rollnumber": "HE999999", "campus": "APHL"})
+            return {"rollnumber": "HE999999", "campus": "APHL"}
+        A.device_poll = lambda *a, **k: {"access_token": "x"}
+        A._finalize = _fin_foreign
+        ok, msg = A.login_finish_device({"device_code": "DC", "campus": "APHL"}, A.current_roll())
+        assert ok is False and "HE999999" in msg and "HE191048" in msg
+        with open(A.TOKEN_JSON, encoding="utf-8") as f:
+            assert _json.load(f)["rollnumber"] == "HE191048"        # token CŨ còn nguyên
+        with open(A.OAUTH_JSON, encoding="utf-8") as f:
+            assert _json.load(f)["refresh_token"] == "MINE"         # refresh_token lạ ĐÃ bị gỡ
+
+        # roll RỖNG (FAP trả data dạng chuỗi trần) cũng phải bị coi là KHÁC — không định danh được thì cấm
+        A._finalize = lambda tok, campus, log=print: {"rollnumber": None, "campus": "APHL"}
+        assert A.login_finish_device({"device_code": "DC", "campus": "APHL"}, "HE191048")[0] is False
+
+        A._finalize = lambda tok, campus, log=print: {"rollnumber": "HE191048", "campus": "APHL"}
+        ok2, msg2 = A.login_finish_device({"device_code": "DC", "campus": "APHL"}, A.current_roll())
+        assert ok2 is True and "HE191048" in msg2                   # đúng tài khoản -> cho qua
+    finally:
+        _login_restore(A, saved)
+
+def test_login_pkce_paste_detection_and_ttl():
+    """Đường PKCE (dự phòng): nhận diện URL redirect để XOÁ tin ngay, và hết hạn chờ thì từ chối."""
+    import fapc.app.botlogin as BL
+    A, saved = _login_sandbox()
+    try:
+        # Nhận diện phải RỘNG TAY: thà xoá nhầm tin vô hại còn hơn để lọt mã uỷ quyền vào lịch sử chat.
+        assert A.looks_like_redirect("io.identityserver.demo:/oauthredirect?code=Z9&state=q") is True
+        assert A.looks_like_redirect("https://x/cb?error=access_denied") is True   # nhánh LỖI cũng phải nhận
+        assert A.looks_like_redirect("/today") is False
+        assert A.looks_like_redirect("") is False
+        s = BL.LoginSession()                                       # device_start đã bị ép fail -> PKCE
+        ok, text, mode = s.start("APHL")
+        assert ok and mode == "pkce" and s.waiting_paste()
+        assert not s.waiting_paste(now=s.started + BL.PASTE_TTL + 1)  # quá hạn -> không nhận dán nữa
+        A.exchange_code = lambda pasted, log=print: {"rollnumber": "HE191048", "campus": "APHL"}
+        ok2, msg2 = BL.finish_paste(s, "io.identityserver.demo:/oauthredirect?code=Z9")
+        assert ok2 is True and "HE191048" in msg2                   # dán hợp lệ -> đổi được token
+        assert BL.finish_paste(s, "x")[0] is False                  # phiên đã đóng -> từ chối, không nổ
+    finally:
+        _login_restore(A, saved)
+
+def test_login_missing_campus_and_busy():
+    """Thiếu campus -> hướng dẫn rõ; đang có phiên chạy dở -> không mở phiên thứ hai (tránh đè .pkce_state)."""
+    import fapc.app.botlogin as BL
+    A, saved = _login_sandbox()
+    try:
+        ok, text, mode = BL.LoginSession().start("")
+        assert ok is False and mode is None and ("campus" in text.lower())
+        A.device_start = lambda: (True, {"device_code": "DC", "interval": 1, "expires_in": 60,
+                                         "verification_uri_complete": "https://x/y"})
+        s = BL.LoginSession()
+        assert s.start("APHL")[0] is True and s.busy is True        # device: giữ cờ bận khi đang chờ duyệt
+        ok2, text2, _ = s.start("APHL")
+        assert ok2 is False and ("dở" in text2 or "progress" in text2.lower())
+    finally:
+        _login_restore(A, saved)
 
 def test_news_search():
     """news <từ khoá> → SearchNews(keysearch); không từ khoá → GetTop10News. Decode entity."""
