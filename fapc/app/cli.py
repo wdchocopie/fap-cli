@@ -51,9 +51,12 @@ HELP = """fap <command>   ·   fap-cli
     web [port]             dashboard web cục bộ (stdlib, 0 dep) · local web dashboard
 
   Đẩy / Push:
-    calendar-auth          xác thực Google Calendar 1 lần · authorize Google Calendar
-    calendar-sync [--prune [--yes]]   đồng bộ (upsert: đổi phòng/giờ tự sửa) + tùy chọn dọn buổi đã hủy · sync (+optional prune)
-    calendar-prune [--yes] [--force]  xóa event lịch-học MỒ CÔI (chỉ event fap-cli tạo; dry-run mặc định) · prune orphan class events
+    calendar-auth [nhãn]   xác thực Google (dán URL redirect, chạy được không màn hình) · authorize Google (paste redirect URL, headless)
+    calendar-sync [nhãn] [--prune [--yes]]   đồng bộ (upsert: đổi phòng/giờ tự sửa) + tùy chọn dọn buổi đã hủy · sync (+optional prune)
+    calendar-prune [nhãn] [--yes] [--force]  xóa event lịch-học MỒ CÔI (chỉ event fap-cli tạo; dry-run mặc định) · prune orphan class events
+    calendar-list          liệt kê đích Google Calendar (nhiều tài khoản) · list Google Calendar destinations
+    calendar-add <nhãn> <calendar_id>   thêm đích có nhãn (1 FAP → nhiều lịch) · add a labelled destination
+    calendar-remove <nhãn> bỏ một đích có nhãn · remove a labelled destination
     notify [test|<bất kỳ lệnh bot nào> [tham số]]   gửi kết quả lên kênh (danh sách đầy đủ: fap notify help) · push any bot command
     watch-attendance [loop [phút]] [--absent-only]   báo khi VỪA điểm danh; --absent-only = chỉ báo vắng/muộn
     watch-grades [loop [phút]]   báo khi có ĐIỂM MỚI (thành phần/tổng kết) · ping on new marks
@@ -158,6 +161,11 @@ def _core_cmd(cmd):
         return False
     return cmd in COMMANDS
 
+def _pos(rest, i):
+    """Positional thứ i (bỏ các cờ --xxx), '' nếu thiếu. Dùng cho label/calendar_id của lệnh calendar-*."""
+    vals = [a for a in rest if not a.startswith("--")]
+    return vals[i] if i < len(vals) else ""
+
 def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "help"
@@ -170,9 +178,12 @@ def main():
     elif cmd == "whoami":         from ..core.auth import cmd_whoami; cmd_whoami("--full" in rest, "--json" in rest)
     elif cmd == "extract":        from ..core.extract import main as m; m()
     elif cmd in ("ics", "run"):   from ..core.schedule import main as m; m()
-    elif cmd == "calendar-auth":  from .gcal import cmd_auth; cmd_auth()
-    elif cmd == "calendar-sync":  from .gcal import cmd_sync; cmd_sync(prune="--prune" in rest, yes="--yes" in rest, force="--force" in rest)
-    elif cmd == "calendar-prune": from .gcal import cmd_prune; cmd_prune(yes="--yes" in rest, force="--force" in rest)
+    elif cmd == "calendar-auth":  from .gcal import cmd_auth; cmd_auth(_pos(rest, 0))
+    elif cmd == "calendar-sync":  from .gcal import cmd_sync; cmd_sync(prune="--prune" in rest, yes="--yes" in rest, force="--force" in rest, label=_pos(rest, 0))
+    elif cmd == "calendar-prune": from .gcal import cmd_prune; cmd_prune(yes="--yes" in rest, force="--force" in rest, label=_pos(rest, 0))
+    elif cmd == "calendar-add":   from .gcal import cmd_add; cmd_add(_pos(rest, 0), _pos(rest, 1))
+    elif cmd == "calendar-remove": from .gcal import cmd_remove; cmd_remove(_pos(rest, 0))
+    elif cmd in ("calendar-list", "calendars"): from .gcal import cmd_list; cmd_list()
     elif cmd == "notify":         from .notify import run; run(" ".join(rest) if rest else "test")
     elif cmd == "watch-attendance": from .attendwatch import run; run(rest)
     elif cmd == "grades":         from ..core.grades import report; report()

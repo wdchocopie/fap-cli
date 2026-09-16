@@ -16,6 +16,7 @@ y hệt lệnh gõ tay, người ngoài bấm nhận lời từ chối RIÊNG (e
 import asyncio, os, time
 from .. import config, fmt
 from .bot_core import handle, menu_commands
+from . import botgcal
 from .reminders import ClassReminder
 from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min, owner_checkout
 from ..i18n import t
@@ -152,6 +153,49 @@ def run():
         except Exception as e:                            # noqa: BLE001 — 1 lệnh lỗi không làm chết bot
             return f"Lỗi · error: {e}"
 
+    def _calendar_text(name, arg):
+        """BLOCKING (gọi trong run_in_executor): chạy MỘT lệnh calendar-* và trả CHUỖI. Nuốt lỗi thành
+        chữ. Bước đăng nhập KHÔNG in token (gcal.gcal_auth_finish chỉ trả câu xác nhận)."""
+        from . import gcal
+        key = (name or "").lower().replace("_", "-")
+        arg = (arg or "").strip()
+        try:
+            if key == "calendar-auth":
+                url, label = gcal.gcal_auth_url(arg)
+                where = label or t("mặc định", "default")
+                return "\n".join([
+                    t(f"🔗 Cài Google Calendar cho đích '{where}'. Mở link, đăng nhập Google:",
+                      f"🔗 Set up Google Calendar for '{where}'. Open the link and sign in to Google:"),
+                    url,
+                    t("Trình duyệt sẽ báo “không kết nối được 127.0.0.1” — ĐÚNG rồi. Copy URL trên thanh địa "
+                      "chỉ rồi chạy:  /calendar-auth-finish <URL>  (câu trả lời chỉ mình bạn thấy).",
+                      "The browser will say “can't reach 127.0.0.1” — that's fine. Copy the address-bar URL "
+                      "then run:  /calendar-auth-finish <URL>  (the reply is visible only to you)."),
+                ])
+            if key in ("calendar-auth-finish", "calendar-finish"):
+                if not arg:
+                    return t("Dán URL redirect sau lệnh: /calendar-auth-finish <URL>",
+                             "Paste the redirect URL after the command: /calendar-auth-finish <URL>")
+                return gcal.gcal_auth_finish(arg)
+            if key == "calendar-sync":
+                label, prune, yes, force = botgcal.parse_sync_args(arg)
+                return gcal.sync_text(label, prune=prune, yes=yes, force=force)
+            if key == "calendar-prune":
+                label, _p, yes, force = botgcal.parse_sync_args(arg)
+                return gcal.prune_text(label, yes=yes, force=force)
+            if key in ("calendar-list", "calendars", "calendar"):
+                return gcal.destinations_text()
+            if key == "calendar-add":
+                parts = arg.split(None, 1)
+                return gcal.add_destination(parts[0] if parts else "", parts[1] if len(parts) > 1 else "")
+            if key == "calendar-remove":
+                return gcal.remove_destination(arg)
+        except SystemExit as e:
+            return str(e)
+        except Exception as e:                            # noqa: BLE001
+            return f"Lỗi calendar · error: {e}"
+        return None
+
     _view_memo = {}                                       # dựng MỘT LẦN rồi dùng lại (xem _make_view)
 
     def _make_view():
@@ -233,6 +277,31 @@ def run():
                 restart()                                         # thay tiến trình → quay lại với mã mới
         tree.command(name="update",
                      description=t("Cập nhật code + khởi động lại", "Update code + restart")[:100])(_update_cmd)
+
+        # Google Calendar (loopback-paste). auth + auth-finish trả lời RIÊNG (ephemeral): URL chứa mã
+        # dùng-một-lần, không để lộ ra kênh. Không xoá được tin người dùng trong DM nên dùng ephemeral.
+        def _make_cal(cmd_name, ephemeral=False):
+            async def _cal(interaction, arg: str = None):
+                if not _owner(interaction.user.id):
+                    await interaction.response.send_message("⛔ Không có quyền · not allowed.", ephemeral=True)
+                    return
+                await interaction.response.defer(thinking=True, ephemeral=ephemeral)
+                txt = await client.loop.run_in_executor(None, _calendar_text, cmd_name, arg)
+                await _send_rich(lambda *a, **k: interaction.followup.send(*a, ephemeral=ephemeral, **k),
+                                 txt or t("(không có gì)", "(nothing)"))
+            return _cal
+
+        _CAL_SLASH = [
+            ("calendar-auth",        t("Cài Google Calendar (đăng nhập)", "Set up Google Calendar (sign in)"), True),
+            ("calendar-auth-finish", t("Hoàn tất đăng nhập: dán URL redirect", "Finish sign-in: paste redirect URL"), True),
+            ("calendar-sync",        t("Đồng bộ lịch học lên Google", "Sync schedule to Google Calendar"), False),
+            ("calendar-prune",       t("Dọn buổi đã hủy/dời (dry-run; 'yes' để xoá)", "Prune cancelled events (dry-run; 'yes' to delete)"), False),
+            ("calendar-list",        t("Danh sách đích Google Calendar", "List Google Calendar destinations"), False),
+            ("calendar-add",         t("Thêm đích: <nhãn> <calendar_id>", "Add destination: <label> <calendar_id>"), False),
+            ("calendar-remove",      t("Bỏ một đích Google Calendar", "Remove a Google Calendar destination"), False),
+        ]
+        for _cn, _cd, _eph in _CAL_SLASH:
+            tree.command(name=_cn, description=(_cd or _cn)[:100])(_make_cal(_cn, _eph))
     except Exception as e:                                        # noqa: BLE001
         print("  (slash command không khả dụng, chỉ dùng prefix '!':", e, ")")
         tree = None
@@ -323,6 +392,27 @@ def run():
             await _send_rich(message.channel.send, summary)
             if do_restart:
                 restart()                                       # thay tiến trình → quay lại với mã mới
+            return
+        ck = cmd.strip().lower().replace("_", "-")
+        if ck == "calendar" or ck.startswith("calendar-") or ck == "calendars":
+            # calendar-auth-finish: URL có mã dùng-một-lần → THỬ xoá tin người dùng (được trong kênh
+            # guild có quyền Manage Messages; KHÔNG được trong DM) rồi báo nếu không xoá được.
+            if ck in ("calendar-auth-finish", "calendar-finish"):
+                deleted = True
+                try:
+                    await message.delete()
+                except Exception:                               # noqa: BLE001 — DM/không đủ quyền
+                    deleted = False
+                txt = await client.loop.run_in_executor(None, _calendar_text, ck, arg)
+                if not deleted:
+                    txt += "\n" + t("⚠️ Không xoá được tin chứa link — bạn tự xoá giúp (có mã đăng nhập). "
+                                    "Lần sau dùng /calendar-auth-finish (ẩn) cho an toàn.",
+                                    "⚠️ Couldn't delete your link message — delete it yourself (it has a sign-in "
+                                    "code). Next time use /calendar-auth-finish (ephemeral) for safety.")
+                await _send_rich(message.channel.send, txt)
+                return
+            txt = await client.loop.run_in_executor(None, _calendar_text, ck, arg)
+            await _send_rich(message.channel.send, txt or t("(không có gì)", "(nothing)"))
             return
         # _run: handle() gọi HTTP ĐỒNG BỘ (tới 25s/lệnh) -> chạy trong thread executor,
         # KHÔNG chặn event loop async (giữ heartbeat gateway, bot không bị "lag"/offline).

@@ -107,6 +107,10 @@ def help_text():
     # vì chúng cố ý KHÔNG nằm trong COMMAND_INFO (handle() trả chuỗi, còn hai lệnh này thì không).
     lines.append("\n" + t("🔐 /login [MÃ CAMPUS] — đăng nhập lại FAP ngay trong chat (token hết hạn)",
                           "🔐 /login [CAMPUS] — sign in to FAP right here (when the token expires)"))
+    lines.append(t("📆 /calendar-auth [nhãn] — cài Google Calendar · /calendar-sync [nhãn] — đồng bộ lịch học",
+                   "📆 /calendar-auth [label] — set up Google Calendar · /calendar-sync [label] — sync schedule"))
+    lines.append(t("     /calendar-list · /calendar-add <nhãn> <id> · /calendar-remove <nhãn> · /calendar-prune [nhãn] [yes]",
+                   "     /calendar-list · /calendar-add <label> <id> · /calendar-remove <label> · /calendar-prune [label] [yes]"))
     lines.append(t("🔄 /update — cập nhật bot + khởi động lại (chỉ chủ bot)",
                    "🔄 /update — update the bot + restart (owner only)"))
     return "\n".join(lines)

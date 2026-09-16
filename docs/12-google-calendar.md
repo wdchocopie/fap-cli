@@ -14,8 +14,11 @@
 |---|---|
 | 1 | **VI —** Lấy `credentials.json` từ Google Cloud Console (phần lớn của doc này) · **EN —** Get `credentials.json` from Google Cloud Console (most of this doc) |
 | 2 | **VI —** Cài thư viện Google: `pip install -e ".[gcal]"` · **EN —** Install Google libs: `pip install -e ".[gcal]"` |
-| 3 | **VI —** Đăng nhập 1 lần: `fap calendar-auth` → `output/gcal_token.json` · **EN —** One-time login: `fap calendar-auth` → `output/gcal_token.json` |
+| 3 | **VI —** Đăng nhập 1 lần: `fap calendar-auth` (DÁN URL redirect — chạy được cả trên máy chủ không màn hình) → `output/gcal_token.json` · **EN —** One-time login: `fap calendar-auth` (paste the redirect URL — works even on a headless server) → `output/gcal_token.json` |
 | 4 | **VI —** Đẩy lịch: `fap calendar-sync` (chạy lại = cập nhật) · **EN —** Push: `fap calendar-sync` (re-run = update) |
+
+> 💬 **VI —** Không muốn SSH vào máy chủ? Làm **tất cả bước 3–4 ngay trong chat** Telegram/Discord: `/calendar-auth`, `/calendar-sync`. Xem [§6](#6-cài--đồng-bộ-ngay-trong-chat--set-up--sync-from-chat). Muốn đẩy **1 lịch FAP sang nhiều tài khoản/lịch Google**? Xem [§7 multi-Google](#7-nhiều-tài-khoảnlịch-google--multi-google).
+> 💬 **EN —** Don't want to SSH into the server? Do **all of steps 3–4 right in the Telegram/Discord chat**: `/calendar-auth`, `/calendar-sync`. See [§6](#6-cài--đồng-bộ-ngay-trong-chat--set-up--sync-from-chat). Want to push **one FAP schedule to several Google accounts/calendars**? See [§7 multi-Google](#7-nhiều-tài-khoảnlịch-google--multi-google).
 
 ---
 
@@ -131,24 +134,32 @@ pip install -e ".[gcal]"
 
 ---
 
-## 3. Đăng nhập Google 1 lần · One-time Google login
+## 3. Đăng nhập Google 1 lần (loopback-paste) · One-time Google login
 
 ```bash
 fap calendar-auth
 ```
 
-**VI —** Lệnh mở trình duyệt → bạn đăng nhập bằng **you@fpt.edu.vn** (đúng email đã thêm vào Test users) và đồng ý quyền **ghi sự kiện**. Vì app đang ở chế độ Testing, Google có thể cảnh báo "app chưa được xác minh" — bấm **"Advanced" → "Go to … (unsafe)"** để tiếp tục (an toàn vì đây là app của chính bạn).
-**EN —** This opens a browser → sign in with **you@fpt.edu.vn** (the email you added to Test users) and approve the **event-write** permission. Because the app is in Testing mode, Google may warn that the "app isn't verified" — click **"Advanced" → "Go to … (unsafe)"** to continue (safe, since it's your own app).
+**VI —** Lệnh **in ra một URL** (không tự mở trình duyệt — nhờ vậy chạy được cả trên **máy chủ không màn hình**). Các bước:
+1. Mở URL đó trên **bất kỳ máy nào có trình duyệt**, đăng nhập bằng **you@fpt.edu.vn** (đúng email đã thêm vào Test users) và đồng ý quyền **ghi sự kiện**. App ở chế độ Testing nên Google có thể cảnh báo "app chưa xác minh" — bấm **"Advanced" → "Go to … (unsafe)"** (an toàn vì là app của bạn).
+2. Sau khi đồng ý, trình duyệt nhảy tới `http://127.0.0.1/?...&code=...` và báo **"không kết nối được 127.0.0.1"** — **ĐÚNG rồi**, không có server nào ở đó. **Copy nguyên URL trên thanh địa chỉ** rồi **dán lại vào lệnh** (chỗ `Dán URL redirect:`).
+
+**EN —** The command **prints a URL** (it does NOT open a browser — so it works on a **headless server** too). Steps:
+1. Open that URL on **any machine with a browser**, sign in as **you@fpt.edu.vn** (the email in Test users) and approve the **event-write** scope. In Testing mode Google may warn "app isn't verified" — click **"Advanced" → "Go to … (unsafe)"** (safe — it's your own app).
+2. After approving, the browser lands on `http://127.0.0.1/?...&code=...` and says **"can't connect to 127.0.0.1"** — that is **EXPECTED** (nothing is listening there). **Copy the whole address-bar URL** and **paste it back into the command** (at the `Paste redirect URL:` prompt).
 
 **VI —** Thành công sẽ in:
 **EN —** On success it prints:
 
 ```text
-✓ Đã xác thực Google -> output/gcal_token.json
+✅ Đã xác thực Google cho đích 'mặc định'.
 ```
 
-**VI —** Token lưu ở `output/gcal_token.json`. Lần sau hết hạn, tool **tự refresh không cần mở trình duyệt** (nhờ refresh token). Bạn chỉ chạy lại `calendar-auth` nếu xóa file token hoặc đổi quyền.
-**EN —** The token is saved at `output/gcal_token.json`. When it later expires, the tool **refreshes silently without a browser** (using the refresh token). You only re-run `calendar-auth` if you delete the token file or change scopes.
+**VI —** Token lưu ở `output/gcal_token.json` (quyền `0600`). Lần sau hết hạn, tool **tự refresh không cần đăng nhập lại** (nhờ refresh token). Bạn chỉ chạy lại `calendar-auth` nếu xóa file token hoặc đổi quyền.
+**EN —** The token is saved at `output/gcal_token.json` (mode `0600`). When it later expires, the tool **refreshes silently** (using the refresh token). You only re-run `calendar-auth` if you delete the token file or change scopes.
+
+> 🖥️ **VI —** Trước đây lệnh này mở trình duyệt cục bộ (`run_local_server`) nên **vô dụng trên VPS**. Bản mới dùng **loopback-paste**: đăng nhập ở máy có màn hình, dán URL về máy chủ. Redirect vẫn là kiểu **"Desktop app"** (loopback `http://127.0.0.1`) — giữ nguyên OAuth client bạn tạo ở [Mục 1](#14-tạo-oauth-client-id-desktop-app--create-the-oauth-client-id).
+> 🖥️ **EN —** This command used to open a local browser (`run_local_server`), which was **useless on a VPS**. It now uses **loopback-paste**: sign in on any machine with a screen, paste the URL back to the server. The redirect is still the **"Desktop app"** loopback (`http://127.0.0.1`) — the same OAuth client from [Section 1](#14-tạo-oauth-client-id-desktop-app--create-the-oauth-client-id).
 
 ---
 
@@ -196,7 +207,52 @@ GCAL_CALENDAR_ID=primary
 
 ---
 
-## 6. Khác gì so với `fap ics`? · How is this different from `fap ics`?
+## 6. Cài & đồng bộ ngay trong chat · Set up & sync from chat
+
+**VI —** Khi bot Telegram/Discord đang chạy, bạn làm **toàn bộ** việc Google Calendar **ngay trong chat** — không cần SSH vào máy chủ:
+**EN —** With the Telegram/Discord bot running, you do **all** the Google-Calendar work **right in the chat** — no SSH into the server:
+
+| Lệnh · Command | Việc · What it does |
+|---|---|
+| `/calendar-auth [nhãn·label]` | **VI —** Đăng nhập Google (loopback-paste): bot gửi 1 link, bạn đăng nhập rồi **dán URL redirect** vào chat; bot **XOÁ tin đó ngay** (URL có mã dùng-một-lần). Trên Discord: `/calendar-auth-finish <URL>` (trả lời **ẩn**). · **EN —** Google sign-in: the bot sends a link; you sign in and **paste the redirect URL**; the bot **deletes that message instantly**. On Discord: `/calendar-auth-finish <URL>` (ephemeral). |
+| `/calendar-sync [nhãn] [prune] [yes]` | **VI —** Đẩy lịch học lên Google (chạy **nền**, không treo bot). `prune` = dọn, `yes` = xoá thật. · **EN —** Push the schedule (runs in the **background**). `prune` = clean up, `yes` = actually delete. |
+| `/calendar-prune [nhãn] [yes]` | **VI —** Chỉ dọn buổi đã hủy/dời (mặc định **dry-run**; `yes` mới xoá). · **EN —** Prune cancelled/moved events (dry-run by default; `yes` deletes). |
+| `/calendar-list` | **VI —** Xem các đích + trạng thái xác thực. · **EN —** List destinations + auth status. |
+| `/calendar-add <nhãn> <calendar_id>` | **VI —** Thêm đích có nhãn (xem §7). · **EN —** Register a labelled destination (see §7). |
+| `/calendar-remove <nhãn>` | **VI —** Bỏ một đích. · **EN —** Remove a destination. |
+
+> 🔒 **VI —** **Token Google không bao giờ hiện trong chat** — bot chỉ trả câu xác nhận. URL redirect (mã dùng-một-lần) được **xoá ngay khi nhận** trên Telegram; các lệnh auth trên Discord trả lời **ẩn (ephemeral)**. Bot chỉ trả lời **chủ bot** (`TELEGRAM_CHAT` / `DISCORD_ALLOWED_USER_ID`) — xem [13-notify](13-notify.md).
+> 🔒 **EN —** **The Google token never appears in chat** — the bot returns only a confirmation. The redirect URL (single-use code) is **deleted on arrival** on Telegram; Discord auth commands reply **ephemerally**. The bot answers **only its owner** (`TELEGRAM_CHAT` / `DISCORD_ALLOWED_USER_ID`).
+
+---
+
+## 7. Nhiều tài khoản/lịch Google (multi-Google) · Multiple Google accounts/calendars
+
+**VI —** Một tài khoản FAP có thể đẩy sang **nhiều lịch / nhiều tài khoản Google** cùng lúc. Mỗi đích có một **NHÃN** (label). Nhãn **rỗng** = đích mặc định như cũ (không đổi gì); nhãn **có tên** = một đích riêng.
+**EN —** One FAP account can push to **several Google calendars / accounts** at once. Each destination has a **label**. The **empty** label is the original default (unchanged); a **named** label is a separate destination.
+
+| | Nhãn rỗng · empty (default) | Nhãn có tên · named, e.g. `work` |
+|---|---|---|
+| Token | `output/gcal_token.json` | `output/gcal/work.json` |
+| `calendar_id` | `GCAL_CALENDAR_ID` (`.env`) | `output/gcal/destinations.json` |
+
+**VI —** Thêm đích thứ hai (ví dụ lịch của một tài khoản Google khác):
+**EN —** Add a second destination (e.g. another Google account's calendar):
+
+```bash
+fap calendar-add work you2@gmail.com   # calendar_id = email (lịch primary) HOẶC …@group.calendar.google.com
+fap calendar-auth work                 # đăng nhập tài khoản Google thứ hai (loopback-paste)
+fap calendar-sync work                 # đẩy lịch học sang đích 'work'
+fap calendar-list                      # xem tất cả đích + trạng thái
+```
+
+> ⚠️ **CHỐT AN TOÀN · SAFETY —**
+> **VI —** Hai đích **KHÔNG được trỏ vào cùng một `calendar_id` cụ thể**. Mọi sự kiện fap-cli mang dấu `fapc_owner=<mã SV>` **giống nhau** cho mọi nhãn của cùng một tài khoản FAP → nếu hai nhãn chung một lịch, prune nhãn này sẽ **xoá sự kiện nhãn kia** (và sinh `iCalUID` trùng). Vì thế nhãn có tên **phải khai một `calendar_id` cụ thể** (email hoặc `…@group.calendar.google.com`), **không nhận `primary`**, và tool **từ chối** khi phát hiện trùng (không phân biệt hoa-thường). `primary` ở **hai tài khoản khác nhau** vẫn hợp lệ (mỗi tài khoản có `primary` riêng). Prune trên một lịch **cụ thể** chỉ xoá sự kiện **đã gắn dấu của chính mã SV này** — không đụng sự kiện cũ chưa gắn dấu (có thể của người khác trên lịch dùng chung).
+> **EN —** Two destinations **must not point at the same concrete `calendar_id`**. Every fap-cli event carries the **same** `fapc_owner=<roll>` across a student's labels → two labels on one calendar would make each label's prune **delete the other's events** (and mint duplicate `iCalUID`s). So a named label **must give a concrete `calendar_id`** (an email or `…@group.calendar.google.com`), **not `primary`**, and the tool **refuses** duplicates (case-insensitively). The same `primary` across **two different accounts** is fine. Prune on a **concrete** calendar only deletes events **tagged for this roll** — it never touches untagged legacy events (possibly someone else's on a shared calendar).
+
+---
+
+## 8. Khác gì so với `fap ics`? · How is this different from `fap ics`?
 
 | | `fap calendar-sync` | `fap ics` |
 |---|---|---|
@@ -210,7 +266,7 @@ GCAL_CALENDAR_ID=primary
 
 ---
 
-## 7. Khắc phục sự cố · Troubleshooting
+## 9. Khắc phục sự cố · Troubleshooting
 
 | Triệu chứng · Symptom | Cách xử lý · Fix |
 |---|---|
@@ -218,16 +274,21 @@ GCAL_CALENDAR_ID=primary
 | `Thiếu thư viện Google` · `Missing Google libs` | **VI —** Chạy `pip install -e ".[gcal]"` · **EN —** Run `pip install -e ".[gcal]"` |
 | `Chưa xác thực Google` · `Not authorized` | **VI —** Chạy `fap calendar-auth` trước · **EN —** Run `fap calendar-auth` first |
 | **VI —** Google chặn "app chưa xác minh" · **EN —** Google blocks "app not verified" | **VI —** Email bạn phải nằm trong **Test users** (Mục 1.3, bước 10); rồi "Advanced → Go to … (unsafe)" · **EN —** Your email must be in **Test users** (1.3, step 10); then "Advanced → Go to … (unsafe)" |
+| **VI —** `calendar-auth` không tự mở trình duyệt · **EN —** `calendar-auth` doesn't open a browser | **VI —** Đúng thiết kế (loopback-paste, chạy headless): copy URL nó in ra, mở ở máy có trình duyệt, rồi **dán URL redirect** lại (Mục 3). · **EN —** By design (loopback-paste, headless): copy the printed URL, open it on any browser, then **paste the redirect URL** back (Section 3). |
+| **VI —** `Đích 'x' chưa đăng ký calendar_id` · **EN —** `Destination 'x' has no calendar_id` | **VI —** Chạy `fap calendar-add x <calendar_id>` trước khi `calendar-auth x`/`calendar-sync x` (§7). · **EN —** Run `fap calendar-add x <calendar_id>` before `calendar-auth x`/`calendar-sync x` (§7). |
+| **VI —** `⛔ Đích … dùng CHUNG lịch …` · **EN —** `⛔ Destination … shares calendar …` | **VI —** Hai nhãn trỏ cùng một `calendar_id` cụ thể — đổi cho khác nhau (§7 chốt an toàn). · **EN —** Two labels share one concrete `calendar_id` — make them distinct (§7 safety). |
 | **VI —** Tiếng Việt/emoji bị lỗi font trên Windows · **EN —** Vietnamese/emoji garbled on Windows | **VI —** Chạy `chcp 65001` hoặc đặt `PYTHONUTF8=1` · **EN —** Run `chcp 65001` or set `PYTHONUTF8=1` |
 
 ---
 
-## 8. Tệp liên quan · Related files
+## 10. Tệp liên quan · Related files
 
 | Đường dẫn · Path | Vai trò · Role |
 |---|---|
 | `credentials.json` *(gốc repo · repo root)* | **VI —** OAuth client "Desktop app" bạn tải về · **EN —** The "Desktop app" OAuth client you downloaded |
-| `output/gcal_token.json` | **VI —** Token Google sau `calendar-auth` (gồm refresh token) · **EN —** Google token after `calendar-auth` (incl. refresh token) |
+| `output/gcal_token.json` | **VI —** Token Google của đích MẶC ĐỊNH sau `calendar-auth` (gồm refresh token, quyền `0600`) · **EN —** Default-destination Google token after `calendar-auth` (incl. refresh token, mode `0600`) |
+| `output/gcal/<nhãn>.json` | **VI —** Token của đích CÓ NHÃN (multi-Google, §7) · **EN —** Token for a labelled destination (multi-Google, §7) |
+| `output/gcal/destinations.json` | **VI —** Sổ đăng ký đích: `{nhãn: {calendar_id}}` · **EN —** Destination registry: `{label: {calendar_id}}` |
 | `output/lichhoc.ics` | **VI —** File lịch từ `fap ics` (cách thủ công) · **EN —** Calendar file from `fap ics` (the manual route) |
 | `.env` | **VI —** Đặt `GCAL_CALENDAR_ID` (và `FAP_SEMESTER`) · **EN —** Where you set `GCAL_CALENDAR_ID` (and `FAP_SEMESTER`) |
 

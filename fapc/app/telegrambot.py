@@ -12,7 +12,8 @@ import requests
 from .. import config, fmt
 from .bot_core import handle, menu_commands
 from .reminders import ClassReminder
-from . import botlogin
+from . import botlogin, botgcal
+from .gcal import looks_like_gredirect, destinations_text, add_destination, remove_destination
 from ..core.auth import looks_like_redirect
 from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min, owner_checkout
 from ..i18n import t
@@ -29,6 +30,8 @@ _MENU_COLS = 3  # Telegram cho tối đa 8 nút/hàng; 3 nút/hàng vừa mắt 
 # MỘT phiên đăng nhập cho cả tiến trình: đăng nhập là việc hiếm và phải tuần tự (2 phiên song song
 # sẽ ghi đè .pkce_state.json của nhau). Xem fapc/app/botlogin.py.
 _LOGIN = botlogin.LoginSession()
+# Tương tự cho xác thực Google Calendar (loopback-paste). Xem fapc/app/botgcal.py.
+_GCAL = botgcal.GcalAuthSession()
 
 def _update_allowed():
     """/update chạy `git pull` + restart trên CHECKOUT DÙNG CHUNG → phải bật rõ ràng ở máy chủ.
@@ -58,6 +61,14 @@ def _register_menu():
                  "description": t("Bảng nút bấm nhanh", "Quick button panel")[:256]})
     cmds.append({"command": "login",                         # đăng nhập FAP ngay trong chat
                  "description": t("Đăng nhập lại FAP (token hết hạn)", "Re-login to FAP (token expired)")[:256]})
+    cmds.append({"command": "calendar_auth",                 # cài Google Calendar ngay trong chat
+                 "description": t("Cài Google Calendar (đăng nhập)", "Set up Google Calendar (sign in)")[:256]})
+    cmds.append({"command": "calendar_sync",
+                 "description": t("Đồng bộ lịch học lên Google", "Sync schedule to Google Calendar")[:256]})
+    cmds.append({"command": "calendar_prune",
+                 "description": t("Dọn buổi đã hủy/dời (dry-run)", "Prune cancelled/moved events (dry-run)")[:256]})
+    cmds.append({"command": "calendar_list",
+                 "description": t("Danh sách đích Google Calendar", "List Google Calendar destinations")[:256]})
     cmds.append({"command": "update",                       # lệnh thường-trú (không có ở web/notify)
                  "description": t("Cập nhật code + khởi động lại", "Update code + restart")[:256]})
     try:
@@ -165,6 +176,39 @@ def _login_paste(chat_id, text, message_id):
                         "(it carries a sign-in code).")
     _send(chat_id, msg)
 
+def _gcal_auth_start(chat_id, arg):
+    """/calendar-auth [NHÃN] — mở phiên xác thực Google (loopback-paste) ngay trong chat."""
+    ok, text = _GCAL.start((arg or "").strip())
+    _send(chat_id, text)
+
+def _gcal_paste(chat_id, text, message_id):
+    """Người dùng dán URL redirect của Google. Xoá tin NGAY (đồng bộ, trước khi đổi mã), rồi đổi mã ở
+    THREAD NỀN: fetch_token GỌI MẠNG tới Google, không được chặn vòng getUpdates (kẻo nghẽn nhắc tiết)."""
+    deleted = _delete_message(chat_id, message_id)
+    warn = "" if deleted else "\n" + t("⚠️ Bot không xoá được tin chứa link — bạn TỰ XOÁ giúp (nó có mã đăng nhập).",
+                                       "⚠️ The bot could not delete your link message — please delete it yourself "
+                                       "(it carries a sign-in code).")
+    botgcal.run_async(lambda m: _send(chat_id, m + warn), botgcal.finish_paste_text, _GCAL, text)
+
+def _gcal_sync(chat_id, arg, prune_default=False):
+    """/calendar-sync|calendar-prune — chạy nền (đẩy/dọn có thể mất vài chục giây, KHÔNG được chặn
+    vòng getUpdates → mất cả nhắc tiết). Prune mặc định DRY-RUN (chỉ liệt kê); thêm 'yes' mới xoá thật."""
+    from . import gcal
+    label, prune, yes, force = botgcal.parse_sync_args(arg)
+    if prune_default:                                   # /calendar-prune: dọn riêng, không đẩy lại
+        _send(chat_id, t("⏳ Đang dọn lịch…", "⏳ Pruning calendar…"))
+        botgcal.run_async(lambda m: _send(chat_id, m), gcal.prune_text, label, yes=yes, force=force)
+    else:                                               # /calendar-sync [prune] [yes]
+        _send(chat_id, t("⏳ Đang đồng bộ lịch…", "⏳ Syncing calendar…"))
+        botgcal.run_async(lambda m: _send(chat_id, m), gcal.sync_text, label, prune=prune, yes=yes, force=force)
+
+def _gcal_add(chat_id, arg):
+    """/calendar-add <NHÃN> <calendar_id> — đăng ký một đích Google có nhãn."""
+    parts = (arg or "").split(None, 1)
+    label = parts[0] if parts else ""
+    cid = parts[1].strip() if len(parts) > 1 else ""
+    _send(chat_id, add_destination(label, cid))
+
 def _dispatch(chat_id, cmd, arg=None):
     """Chạy MỘT lệnh rồi gửi trả lời — dùng chung cho tin GÕ TAY và cho NÚT BẤM.
     Người gọi đã kiểm quyền (chỉ chat chủ) trước khi vào đây."""
@@ -181,6 +225,24 @@ def _dispatch(chat_id, cmd, arg=None):
         return
     if key == "login":                           # đăng nhập FAP ngay trong chat (khỏi SSH vào máy chủ)
         _login_start(chat_id, arg)
+        return
+    if key == "calendar-auth":                   # cài Google Calendar ngay trong chat (loopback-paste)
+        _gcal_auth_start(chat_id, arg)
+        return
+    if key == "calendar-sync":
+        _gcal_sync(chat_id, arg)
+        return
+    if key == "calendar-prune":                  # dọn buổi đã hủy/dời — DRY-RUN trừ khi có 'yes'
+        _gcal_sync(chat_id, arg, prune_default=True)
+        return
+    if key in ("calendar-list", "calendars"):
+        _send(chat_id, destinations_text())
+        return
+    if key == "calendar-add":
+        _gcal_add(chat_id, arg)
+        return
+    if key == "calendar-remove":
+        _send(chat_id, remove_destination((arg or "").strip()))
         return
     if key in ("", "menu", "start", "help"):     # trang trợ giúp = luôn kèm bàn phím nút bấm
         _send(chat_id, _menu_text(), _menu_buttons())
@@ -268,6 +330,11 @@ def run():
             # đang có phiên: nếu gài thêm điều kiện "đang chờ dán" thì khi phiên đã hết hạn (hoặc bot
             # vừa restart vì auto-update) tin chứa MÃ UỶ QUYỀN sẽ rơi xuống _dispatch — không được xoá,
             # lại còn bị "Lệnh không rõ: <cả URL>" ném ngược vào chat ⇒ mã nằm lại lịch sử chat 2 lần.
+            # GOOGLE TRƯỚC FAP: URL loopback Google (http://127.0.0.1/?...&code=…) cũng khớp mẫu FAP
+            # (có 'http'+'code='); tách bằng host 127.0.0.1 để tin Google không bị đẩy nhầm sang /login.
+            if looks_like_gredirect(text):
+                _gcal_paste(chat_id, text, msg.get("message_id"))
+                continue
             if looks_like_redirect(text):
                 _login_paste(chat_id, text, msg.get("message_id"))
                 continue

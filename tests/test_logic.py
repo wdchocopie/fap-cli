@@ -1294,6 +1294,173 @@ def test_gcal_owner_scoped_uid_and_ownership():
     assert _is_mine(old, "he170001", True)                    # profile mặc định nhận lịch cũ
     assert not _is_mine(old, "he170001", False)               # profile có tên thì KHÔNG
 
+# ---- feat: Google Calendar trong chat + nhiều đích (multi-Google) ----
+def test_gcal_norm_label():
+    """Nhãn đích: rỗng -> "" (mặc định); chữ/số/._- hợp lệ; tên nguy hiểm / trùng file sổ đăng ký -> raise."""
+    from fapc.app.gcal import norm_label
+    assert norm_label("") == "" and norm_label("  ") == "" and norm_label(None) == ""
+    assert norm_label("work") == "work" and norm_label("a.b-c_d") == "a.b-c_d"
+    # từ khoá cờ (prune/yes/force + bí danh VN) bị CẤM làm nhãn -> parse_sync_args không mơ hồ
+    for bad in ("..", ".", "destinations", "gcal_token", "a/b", "a b", "wörk", "x\\y",
+                "prune", "yes", "force", "dọn", "có", "ép"):
+        try:
+            norm_label(bad); assert False, f"nhãn {bad!r} phải bị từ chối"
+        except ValueError:
+            pass
+
+def test_gcal_concrete_and_dupe_guard():
+    """CHỐT AN TOÀN multi-Google: hai nhãn KHÔNG được trỏ CÙNG một calendar_id CỤ THỂ (prune xóa chéo).
+    'primary' là tương đối theo tài khoản nên KHÔNG bị coi là trùng (nhiều tài khoản, mỗi cái 1 primary)."""
+    from fapc.app import gcal as G
+    assert not G._is_concrete("primary") and not G._is_concrete("") and not G._is_concrete(None)
+    assert G._is_concrete("me@gmail.com") and G._is_concrete("x@group.calendar.google.com")
+    t = {"": "primary", "work": "primary", "a": "x@g.com", "b": "x@g.com", "c": "y@g.com"}
+    assert G._dupe_of("work", t) == []                        # primary lặp -> KHÔNG trùng (khác tài khoản)
+    assert set(G._dupe_of("a", t)) == {"b"} and set(G._dupe_of("b", t)) == {"a"}   # cùng id cụ thể -> trùng
+    assert G._dupe_of("c", t) == [] and G._dupe_of("", t) == []
+
+def _with_tmp_registry(fn):
+    """Chạy fn() với G.REGISTRY trỏ vào file tạm (KHÔNG đụng output/ thật), rồi dọn sạch."""
+    import tempfile, shutil, os as _os
+    from fapc.app import gcal as G
+    d = tempfile.mkdtemp()
+    old = G.REGISTRY
+    G.REGISTRY = _os.path.join(d, "destinations.json")
+    try:
+        fn(G)
+    finally:
+        G.REGISTRY = old
+        shutil.rmtree(d, ignore_errors=True)
+
+def test_gcal_registry_add_remove():
+    """calendar-add/-remove: đăng ký đích có nhãn, đòi calendar_id CỤ THỂ, từ chối trùng lịch."""
+    def body(G):
+        assert G.add_destination("work", "work@gmail.com").startswith("✓")
+        assert G._load_registry() == {"work": {"calendar_id": "work@gmail.com"}}
+        assert "⛔" in G.add_destination("home", "work@gmail.com")     # trùng calendar_id cụ thể -> từ chối
+        prim = G.add_destination("home", "primary").lower()
+        assert "primary" in prim or "concrete" in prim or "cụ thể" in prim   # 'primary' cho nhãn có tên -> từ chối
+        assert G.add_destination("home", "home@group.calendar.google.com").startswith("✓")
+        for bad in ("bad label", "..", "destinations"):
+            assert "⛔" in G.add_destination(bad, "z@g.com")
+        deflt = G.add_destination("", "z@g.com")
+        assert "mặc định" in deflt or "default" in deflt
+        rows = {lbl: cid for lbl, cid, _a, _d in G.list_destinations()}
+        assert rows[""] and rows["work"] == "work@gmail.com" and rows["home"].endswith("group.calendar.google.com")
+        assert G.list_destinations()[0][0] == ""                      # đích mặc định đứng đầu
+        assert G.remove_destination("work").startswith("✓") and "work" not in G._load_registry()
+    _with_tmp_registry(body)
+
+def test_gcal_check_no_dupe_raises():
+    """_check_no_dupe: nếu sổ đăng ký (bằng tay/lỗi) có 2 nhãn chung 1 lịch cụ thể -> SystemExit trước khi sync."""
+    def body(G):
+        G._save_registry({"a": {"calendar_id": "dup@g.com"}, "b": {"calendar_id": "dup@g.com"}})
+        for lbl in ("a", "b"):
+            try:
+                G._check_no_dupe(lbl); assert False, "phải từ chối khi trùng lịch"
+            except SystemExit as e:
+                assert "dup@g.com" in str(e)
+        G._save_registry({"a": {"calendar_id": "one@g.com"}, "b": {"calendar_id": "two@g.com"}})
+        G._check_no_dupe("a"); G._check_no_dupe("b")                  # khác lịch -> không nổ
+    _with_tmp_registry(body)
+
+def test_gcal_dupe_case_insensitive():
+    """calendar_id là email/lịch -> KHÔNG phân biệt hoa-thường & khoảng trắng: 'Me@Gmail.com' == ' me@gmail.com '.
+    Nếu so-chuỗi thô thì hai nhãn cùng một lịch (khác hoa-thường) lọt guard -> prune xóa chéo."""
+    from fapc.app import gcal as G
+    t = {"a": "Me@Gmail.com", "b": " me@gmail.com "}
+    assert G._dupe_of("a", t) == ["b"] and G._dupe_of("b", t) == ["a"]
+    def body(G):
+        assert G.add_destination("a", "Me@Gmail.com").startswith("✓")
+        assert "⛔" in G.add_destination("b", "me@gmail.com")         # cùng lịch (khác hoa-thường) -> từ chối
+    _with_tmp_registry(body)
+
+def test_gcal_registry_skips_corrupt_entry():
+    """HIGH: một dòng sổ đăng ký có value KHÔNG phải dict (sửa tay / ghi dở) KHÔNG được làm sập
+    _all_targets/destinations_text (nếu không, /calendar-list ném AttributeError giết cả bot Telegram)."""
+    import json as _json
+    def body(G):
+        with open(G.REGISTRY, "w", encoding="utf-8") as f:           # value là CHUỖI, không phải {"calendar_id":…}
+            _json.dump({"work": "cal@g.com", "ok": {"calendar_id": "a@g.com"}}, f)
+        assert G._load_registry() == {"ok": {"calendar_id": "a@g.com"}}   # mục hỏng bị bỏ
+        G._all_targets(); G.destinations_text()                       # KHÔNG được ném
+        assert G._calendar_id("ok") == "a@g.com"
+    _with_tmp_registry(body)
+
+def test_gcal_prune_legacy_scope():
+    """MEDIUM (đa-người-dùng): prune trên lịch CỤ THỂ (có thể DÙNG CHUNG) KHÔNG được nhận lịch cũ chưa
+    gắn dấu (fapc=1 không fapc_owner) — kẻo xóa nhầm sự kiện cũ của SINH VIÊN KHÁC. Chỉ 'primary' cá
+    nhân mới nhận lịch cũ. Kiểm bằng cách theo dõi bộ lọc mà _prune yêu cầu server."""
+    from fapc.app import gcal as G
+    class _Ev:
+        def __init__(self, rec): self.rec = rec
+        def list(self, **kw): self.rec.append(kw.get("privateExtendedProperty")); return self
+        def execute(self): return {"items": []}
+    class _Svc:
+        def __init__(self): self.rec = []
+        def events(self): return _Ev(self.rec)
+    concrete = _Svc()
+    G._prune(concrete, [], "he170001", "team@group.calendar.google.com", log=lambda *_: None)
+    assert concrete.rec == ["fapc_owner=he170001"]               # lịch cụ thể: KHÔNG hỏi trang fapc=1 (lịch cũ)
+    prim = _Svc()
+    G._prune(prim, [], "he170001", "primary", log=lambda *_: None)
+    assert "fapc=1" in prim.rec                                   # primary cá nhân: MỚI nhận lịch cũ chưa gắn dấu
+
+def test_gcal_looks_like_gredirect_beats_fap():
+    """Định tuyến DÁN: URL loopback Google phải được nhận DIỆN, và nó cũng khớp mẫu FAP -> phải xét
+    Google TRƯỚC (bằng host 127.0.0.1) kẻo tin Google bị đẩy nhầm sang luồng /login."""
+    from fapc.app.gcal import looks_like_gredirect
+    from fapc.core.auth import looks_like_redirect
+    g = "http://127.0.0.1/?state=s&code=4/abc&scope=cal"
+    assert looks_like_gredirect(g) and looks_like_gredirect("http://localhost/?error=access_denied")
+    assert looks_like_gredirect("4/0Aeanabc-xyz")                # mã Google TRẦN (dán mỗi code) -> vẫn xoá
+    assert looks_like_redirect(g)                                # FAP cũng khớp -> chứng minh vì sao phải xét Google trước
+    assert not looks_like_gredirect("io.identityserver.demo://cb?code=x")   # redirect FAP -> KHÔNG phải Google
+    assert not looks_like_gredirect("hôm nay có lịch gì") and not looks_like_gredirect("")
+
+def test_gcal_auth_finish_needs_session():
+    """gcal_auth_finish khi CHƯA mở phiên (không có .gcal_oauth.json) -> SystemExit sạch, KHÔNG chạm google lib."""
+    import tempfile, os as _os
+    from fapc.app import gcal as G
+    old = G.OAUTH_STATE
+    G.OAUTH_STATE = _os.path.join(tempfile.gettempdir(), "fapc_test_nope_%d.json" % _os.getpid())
+    try:
+        G.gcal_auth_finish("http://127.0.0.1/?code=x"); assert False
+    except SystemExit as e:
+        assert "calendar-auth" in str(e)
+    finally:
+        G.OAUTH_STATE = old
+
+def test_botgcal_parse_sync_args():
+    from fapc.app.botgcal import parse_sync_args
+    assert parse_sync_args("") == ("", False, False, False)
+    assert parse_sync_args("work") == ("work", False, False, False)
+    assert parse_sync_args("prune yes") == ("", True, True, False)
+    assert parse_sync_args("home force") == ("home", False, False, True)
+    assert parse_sync_args("dọn có") == ("", True, True, False)   # bí danh tiếng Việt
+
+def test_botgcal_auth_session_busy_and_expiry():
+    """GcalAuthSession: giữ 1 phiên (chặn phiên thứ 2 khi đang bận), tự nhả sau PASTE_TTL."""
+    import time as _t
+    from fapc.app import gcal as G
+    from fapc.app import botgcal as B
+    old_url, old_fin = G.gcal_auth_url, G.gcal_auth_finish
+    G.gcal_auth_url = lambda label="": ("http://auth-url", G.norm_label(label))
+    try:
+        s = B.GcalAuthSession()
+        ok, text = s.start("work")
+        assert ok and s.busy and s.waiting_paste() and "http://auth-url" in text
+        ok2, text2 = s.start("home")                             # đang bận -> phiên 2 bị chặn
+        assert not ok2 and "⏳" in text2
+        s.started = _t.time() - (B.PASTE_TTL + 5)                 # giả lập quá hạn
+        ok3, _ = s.start("home")
+        assert ok3 and s.label == "home"                         # phiên cũ tự nhả -> mở phiên mới
+        G.gcal_auth_finish = lambda pasted, label=None: "OK " + str(label)
+        done_ok, done_msg = B.finish_paste(s, "http://127.0.0.1/?code=x")
+        assert done_ok and "OK home" in done_msg and not s.busy  # xong -> nhả phiên
+    finally:
+        G.gcal_auth_url, G.gcal_auth_finish = old_url, old_fin
+
 # ---- feat20: lọc 1 môn · lịch cả kỳ ----
 def test_subjects_resolve_precedence():
     """`grades-detail iap` phải ra ĐÚNG 1 môn: ưu tiên mã khớp đúng > bắt đầu bằng > chứa > TÊN môn.
