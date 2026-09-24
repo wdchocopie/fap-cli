@@ -44,7 +44,8 @@ HELP = """fap <command>   ·   fap-cli
     whatif [target]        mô phỏng GPA · GPA what-if
     exams | exams-ics      lịch thi | xuất lịch thi ra .ics (Calendar tự nhắc) · exams | exams→.ics
     exam-countdown         đếm ngược ngày thi (gần nhất trước, kèm độ gấp) · days until each upcoming exam
-    news [từ khoá] [--type=N] | fees | notifications   tin tức (tìm từ khoá: SearchNews) | học phí | thông báo · news (keyword search) | fees | notifications
+    news [từ khoá] [--type=N] | fees   tin tức (tìm từ khoá: SearchNews) | học phí · news (keyword search) | fees
+    notifications [số|từ khoá]   thông báo + trích nội dung; số = toàn văn, chữ = lọc · notifications (+preview; number = full text, word = filter)
     profile | applications hồ sơ SV | đơn từ + trạng thái xử lý · student profile | applications
 
   Giao diện / UI:
@@ -215,7 +216,7 @@ def main():
         _ty = next((a.split("=", 1)[1] for a in rest if a.startswith("--type=")), "1")   # type 1 = bảng tin trường (0 hay rỗng)
         news(_kw, type=_ty)
     elif cmd == "fees":           from ..core.extras import fees; fees()
-    elif cmd == "notifications":  from ..core.extras import notifications; notifications()
+    elif cmd == "notifications":  from ..core.extras import notifications; notifications(" ".join(rest) or None)
     elif cmd == "profile":        from ..core.extras import profile; profile()
     elif cmd == "applications":   from ..core.extras import applications; applications()
     elif cmd == "watch-grades":   from .gradewatch import run; run(rest)
