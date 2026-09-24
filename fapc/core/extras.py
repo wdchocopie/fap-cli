@@ -65,16 +65,48 @@ def fetch_applications(token, campus, roll):
     check_auth(http, data)
     return as_list(data)
 
+# Mã `studentStatus` của GetApplication, lấy ĐÚNG theo app chính thức (hàm getStatusConfig trong bundle +
+# bảng i18n lb_appli_status_*): '0' -> Đang xử lý, '1' -> Đã được chấp nhận, còn lại -> Đã bị từ chối.
+# Khác app ở MỘT chỗ có chủ ý: app coi MỌI mã lạ là "từ chối"; fap-cli hiện '❔ <mã>' — thà nói "không rõ"
+# còn hơn báo nhầm một lá đơn là bị từ chối.
+_APP_STATUS = {"0": ("⏳", "Đang xử lý", "Processing"),
+               "1": ("✅", "Đã được chấp nhận", "Approved"),
+               "2": ("❌", "Đã bị từ chối", "Rejected")}
+
+def app_status(r):
+    """THUẦN: nhãn trạng thái đơn có icon ('' nếu server không gửi trạng thái)."""
+    raw = r.get("studentStatus")
+    v = str(raw if raw is not None else "").strip()          # int 0 phải thành '0', không được rơi mất
+    if not v:
+        return ""
+    if v in _APP_STATUS:
+        icon, vi, en = _APP_STATUS[v]
+        return f"{icon} {t(vi, en)}"
+    return t(f"❔ trạng thái {v}", f"❔ status {v}")
+
+def _app_tally(rows):
+    """THUẦN: '⏳1 ✅1 ❌2' — đếm theo trạng thái cho dòng tiêu đề ('' nếu không đơn nào có trạng thái)."""
+    counts = {}
+    for r in rows:
+        v = str(r.get("studentStatus") if r.get("studentStatus") is not None else "").strip()
+        if v in _APP_STATUS:
+            counts[v] = counts.get(v, 0) + 1
+    return " ".join(f"{_APP_STATUS[k][0]}{counts[k]}" for k in ("0", "1", "2") if k in counts)
+
 def applications_text(token, campus, roll):
     rows = [r for r in fetch_applications(token, campus, roll) if isinstance(r, dict)]
     if not rows:
         return t("📄 Chưa có đơn từ nào.", "📄 No applications.")
     rows.sort(key=lambda r: _appl_date(r) or datetime.date.min, reverse=True)   # mới nhất trước
-    out = [fmt.header("📄", t("Đơn từ", "Applications"), str(len(rows)))]
+    tally = _app_tally(rows)
+    out = [fmt.header("📄", t("Đơn từ", "Applications"), str(len(rows)) + (f"  ·  {tally}" if tally else ""))]
     for r in rows:
         name = fmt.unescape(r.get("name")) or t("(đơn)", "(application)")
         date = fmt.unescape(r.get("createDate"))
         out.append(f"\n• {name}" + (f"  ·  {date}" if date else ""))
+        st = app_status(r)                                   # trạng thái xử lý (lệnh này hứa hiện từ lâu)
+        if st:
+            out.append(f"   {st}")
         note = fmt.unescape(r.get("processNote"))           # phản hồi của phòng ban (decode &#xxx;)
         if note:
             out.append(f"   ↳ {note}")
@@ -236,24 +268,106 @@ def fetch_notifications(token, campus, roll):
     check_auth(http, data)
     return as_list(data)
 
-def _notif_line(n):
-    """1 dòng gọn cho 1 thông báo (field thật: title/entryDate/entryBy). Decode HTML entity."""
-    title = fmt.unescape(n.get("title")) or t("(không tiêu đề)", "(no title)")
-    meta = " · ".join(x for x in (fmt.fmt_date(n.get("entryDate")) if n.get("entryDate") else "",
-                                  fmt.unescape(n.get("entryBy"))) if x)
-    return f"• {title}" + (f"\n   {meta}" if meta else "")
+_NOTIF_PREVIEW = 140      # ký tự trích nội dung dưới mỗi thông báo (đủ biết "chuyện gì" mà không dài tin)
 
-def notifications_text(token, campus, roll, limit=10):
+# CHỈ bóc thẻ HTML THẬT (theo tên thẻ). `contents` thực tế là TEXT THUẦN (đo trên dump: 0/19 có '<'), nên
+# regex kiểu `<[^>]+>` sẽ XOÁ NHẦM chữ thật: '<MSSV>_<HoTen>.pdf', 'điểm < 5 … ->', '<https://…>' — và vì
+# [^>] khớp cả xuống dòng, có thể nuốt MẤT NHIỀU DÒNG. `[^<>]*` không cho một "thẻ" vắt qua dấu '<' khác.
+_HTML_TAG = re.compile(r"(?i)</?(?:p|br|div|span|b|i|u|a|li|ul|ol|strong|em|font|table|thead|tbody|tr|td|th"
+                       r"|h[1-6]|img|hr|sup|sub|small|center|blockquote|section|article)\b[^<>]*>")
+_HTML_BREAK = re.compile(r"(?i)<br\s*/?>|</(?:p|div|li|tr|h[1-6]|section|article)\s*>")
+
+def _notif_body(n):
+    """THUẦN: nội dung thông báo dạng text GIỮ xuống dòng. Bóc thẻ HTML thật (nếu server gửi HTML), giải
+    entity SAU khi bóc (nên '&lt;MSSV&gt;' ra '<MSSV>' và được GIỮ), gộp các dòng trống liền nhau."""
+    raw = str(n.get("contents") or "")
+    raw = fmt.unescape(_HTML_TAG.sub(" ", _HTML_BREAK.sub("\n", raw)))
+    out, blank = [], False
+    for line in raw.split("\n"):
+        line = " ".join(line.split())
+        if line:
+            out.append(line); blank = False
+        elif out and not blank:
+            out.append(""); blank = True
+    return "\n".join(out).strip()
+
+def _preview(text, limit=_NOTIF_PREVIEW):
+    """THUẦN: 1 dòng trích ≤limit. KHÔNG bóc thẻ lần 2 (text đã sạch). Nếu điểm cắt rơi GIỮA một URL thì lùi
+    về trước URL đó — không để lại link cụt mà chat vẫn biến thành link bấm được (bấm vào là trang lỗi)."""
+    s = " ".join(str(text or "").split())
+    if len(s) <= limit:
+        return s
+    cut = s[:limit]
+    sp = cut.rfind(" ")
+    token = s[sp + 1:].split(" ", 1)[0]
+    if "://" in token or token.lower().startswith("www."):
+        cut = cut[:sp] if sp > 0 else ""
+    cut = cut.rstrip()
+    return (cut + "…") if cut else ""
+
+def _notif_id(n):
+    """Khoá ỔN ĐỊNH của 1 thông báo = `id` của server ('' nếu thiếu). KHÔNG dùng vị trí trong danh sách:
+    vị trí đổi mỗi khi có thông báo mới, và Discord render '3. …' thành danh sách Markdown rồi TỰ ĐÁNH SỐ LẠI
+    ⇒ 'notifications <n>' mở NHẦM cái khác. id: 2–3 chữ số trên dump thật, duy nhất."""
+    v = n.get("id")
+    return str(v).strip() if v is not None and str(v).strip() else ""
+
+def _notif_meta(n):
+    return " · ".join(x for x in (fmt.fmt_date(n.get("entryDate")) if n.get("entryDate") else "",
+                                  fmt.unescape(n.get("entryBy"))) if x)
+
+def _notif_line(n):
+    """1 mục gọn: '#<id> · tiêu đề' · ngày · nơi gửi · 1 dòng trích. Dùng CHUNG cho /notifications và tin
+    đẩy "thông báo MỚI" — cùng một số #id ở cả hai nơi, nên từ tin đẩy gõ '/notifications <id>' là mở đúng."""
+    title = fmt.unescape(n.get("title")) or t("(không tiêu đề)", "(no title)")
+    nid = _notif_id(n)
+    meta = _notif_meta(n)
+    line = (f"#{nid} · {title}" if nid else f"• {title}") + (f"\n   {meta}" if meta else "")
+    snip = _preview(_notif_body(n))
+    if snip and snip != title:                                # nội dung chỉ lặp tiêu đề -> khỏi in 2 lần
+        line += f"\n   💬 {snip}"
+    return line
+
+def _notif_full(n):
+    """Toàn văn MỘT thông báo."""
+    title = fmt.unescape(n.get("title")) or t("(không tiêu đề)", "(no title)")
+    nid, meta = _notif_id(n), _notif_meta(n)
+    body = _notif_body(n) or t("(không có nội dung)", "(no content)")
+    return "\n".join([fmt.header("🔔", t(f"Thông báo #{nid}", f"Notification #{nid}")), title]
+                     + ([f"🗓 {meta}"] if meta else []) + ["", body])
+
+def notifications_text(token, campus, roll, limit=10, arg=None):
+    """Danh sách thông báo mới nhất (kèm trích nội dung), mỗi mục mang số #id ỔN ĐỊNH. `arg`:
+       số (có/không '#')  -> TOÀN VĂN thông báo có id đó
+       từ khoá            -> chỉ các thông báo có từ khoá trong tiêu đề/nội dung."""
     rows = fetch_notifications(token, campus, roll)
     if not rows:
         return t("🔔 Không có thông báo.", "🔔 No notifications.")
-    rows = sorted(rows, key=lambda n: str(n.get("entryDate") or ""), reverse=True)[:limit]
-    lines = [fmt.header("🔔", t("Thông báo mới nhất", "Latest notifications"), str(len(rows)))]
-    return "\n".join(lines + [_notif_line(n) for n in rows])
+    rows = sorted((n for n in rows if isinstance(n, dict)),
+                  key=lambda n: str(n.get("entryDate") or ""), reverse=True)
+    a = str(arg or "").strip()
+    key = a.lstrip("#").strip()
+    if key and key.isascii() and key.isdecimal():            # isdigit() nhận cả '²' rồi int() nổ
+        hit = next((n for n in rows if _notif_id(n) == key.lstrip("0") or _notif_id(n) == key), None)
+        if hit is None:
+            return t(f"🔔 Không có thông báo #{key} (xem số #id trong /notifications).",
+                     f"🔔 No notification #{key} (see the #id numbers in /notifications).")
+        return _notif_full(hit)
+    if a:
+        kw = a.casefold()
+        rows = [n for n in rows if kw in (fmt.unescape(n.get("title")) + "\n" + _notif_body(n)).casefold()]
+        if not rows:
+            return t(f"🔔 Không có thông báo nào khớp {a!r}.", f"🔔 No notifications matching {a!r}.")
+    shown = rows[:limit]
+    head = t(f"Thông báo · tìm {a!r}", f"Notifications · search {a!r}") if a else t("Thông báo mới nhất", "Latest notifications")
+    lines = [fmt.header("🔔", head, str(len(shown)))] + [_notif_line(n) for n in shown]
+    lines.append("\n" + t("👉 Toàn văn: /notifications <số #> · lọc: /notifications <từ khoá>",
+                          "👉 Full text: /notifications <# number> · filter: /notifications <keyword>"))
+    return "\n".join(lines)
 
-def notifications():
+def notifications(arg=None):
     token, campus, roll = creds()
-    print(notifications_text(token, campus, roll))
+    print(notifications_text(token, campus, roll, arg=arg))
 
 # ---------- XUẤT LỊCH THI -> .ics (Calendar TỰ NHẮC trước 1 ngày) ----------
 def _exam_rows(token, campus, roll, sem):

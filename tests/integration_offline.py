@@ -87,7 +87,8 @@ MODE["v"] = "success"
 # (bot gửi thẳng chữ người dùng gõ vào đây, nên đường "gõ sai" cũng là đường chính thức).
 ARGS = {"whatif":        [None, "8", "khong-phai-so"],
         "grades-detail": [None, "IAP301", "iap", "zzz999"],
-        "semester":      [None, "weeks", "list", "Fall1999", "Fall2026 weeks"]}
+        "semester":      [None, "weeks", "list", "Fall1999", "Fall2026 weeks"],
+        "notifications": [None, "1", "999", "học phí", "zzz"]}
 for c in COMMANDS:
     if c == "help": continue
     for a in ARGS.get(c, [None]):
@@ -223,6 +224,50 @@ try:
 finally:
     SUCCESS["GetActivityStudent"] = _saved_act
     SUCCESS.pop("GetActivityStudentByWeek", None)
+    api._CACHE.clear()
+
+# [K] 4 trường API mới (attendanceStatus · studentStatus · contents · start/endDate) — ĐƯỜNG THẬT: requests (mock)
+#     -> api.call -> fetch -> bot_core.handle. Ngày TƯƠNG ĐỐI với hôm nay (±7/30 ngày) => test không thành bom hẹn giờ.
+from fapc.app.bot_core import handle as _h
+_keys = ("GetStudentAttendances", "GetActivityStudent", "GetApplication", "GetNotificationByRoll")
+_saved4 = {k: SUCCESS.get(k) for k in _keys}
+# CÙNG đồng hồ với code đang test (giờ VN, UTC+7) — KHÔNG date.today() của máy: trên máy UTC (CI, VPS) từ
+# 17:00–24:00 UTC ngày VN đã sang hôm sau ⇒ /today rỗng ⇒ selftest đỏ ⇒ chặn luôn cả tự-cập-nhật của bot.
+_td = api._vn_now().date()
+_iso = lambda d: d.strftime("%Y-%m-%dT00:00:00")
+_us = lambda d: f"{d.month}/{d.day}/{d.year} 12:00:00 AM"            # shape THẬT của GetActivityStudent.date
+MODE["v"] = "success"
+SUCCESS["GetStudentAttendances"] = [
+    {"subjectCode": "NEW101", "attendance": 0, "numberOfTakenAttendances": 0, "numberOfAttendances": 0,
+     "startDate": _iso(_td + datetime.timedelta(days=30)), "endDate": _iso(_td + datetime.timedelta(days=120)), "groupName": "G"},
+    {"subjectCode": "IAP301", "attendance": 60, "numberOfTakenAttendances": 3, "numberOfAttendances": 5,
+     "startDate": _iso(_td - datetime.timedelta(days=30)), "endDate": _iso(_td + datetime.timedelta(days=60)), "groupName": "G"}]
+_absent_day = _td - datetime.timedelta(days=7)
+SUCCESS["GetActivityStudent"] = [
+    {"date": _us(_absent_day), "slotTime": "(07:30 - 09:00)", "subjectCode": "IAP301", "roomNo": "BE-304",
+     "isOnline": "false", "groupName": "G", "slot": "1", "attendanceStatus": "A", "meetURL": ""},
+    {"date": _us(_td), "slotTime": "(00:00 - 00:05)", "subjectCode": "IAP301", "roomNo": "BE-304",
+     "isOnline": "false", "groupName": "G", "slot": "1", "attendanceStatus": "P", "meetURL": ""}]
+SUCCESS["GetApplication"] = [{"name": "Đơn xin X", "createDate": "16/09/2025", "studentStatus": "1", "processNote": "ok"}]
+SUCCESS["GetNotificationByRoll"] = [{"id": 7, "title": "Thông báo X", "entryDate": "2026-06-01",
+                                     "contents": "Nội dung dòng 1\nDòng 2 chi tiết"}]
+api._CACHE.clear()
+try:
+    _att = _h("attendance")
+    check("api4: /attendance có ngày VẮNG từ lịch", _absent_day.strftime("%d/%m") in _att, _att[-200:])
+    _new = next((l for l in _att.split("\n") if "NEW101" in l), "")
+    check("api4: môn CHƯA bắt đầu không in 0% / không ⚠️", _new and "%" not in _new and "⚠️" not in _new, _new)
+    _ban = _h("banrisk")
+    check("api4: /banrisk giữ môn 60% đang học, bỏ môn chưa bắt đầu", "IAP301" in _ban and "NEW101" not in _ban, _ban)
+    check("api4: /today đánh ✅ buổi đã điểm danh", "✅" in _h("today"))
+    check("api4: /applications có huy hiệu trạng thái", "✅" in _h("applications"))
+    check("api4: /notifications có trích nội dung", "💬" in _h("notifications"))
+    check("api4: /notifications <id> = toàn văn", "Dòng 2 chi tiết" in _h("notifications", "7"))   # số = #id ỔN ĐỊNH
+    check("api4: /notifications có số #id", "#7 · Thông báo X" in _h("notifications"))
+finally:
+    for _k, _v in _saved4.items():
+        if _v is None: SUCCESS.pop(_k, None)
+        else: SUCCESS[_k] = _v
     api._CACHE.clear()
 
 total = OK["n"] + FAIL["n"]
