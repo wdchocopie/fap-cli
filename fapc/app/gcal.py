@@ -477,12 +477,16 @@ def _events(sessions, owner, adopt=frozenset()):
         subj, room = s.get("subjectCode", "Lớp"), s.get("roomNo", "")
         online = fmt.is_online(s)
         uid = _pick_uid(s, owner, adopt)
+        desc = (f"Môn {subj} • Lớp {s.get('groupName','')} • Slot {s.get('slot','')} • "
+                f"GV {s.get('lecturer','')} • Buổi {s.get('sessionNo','')}")
+        mu = fmt.meet_url(s)                  # buổi online -> link Meet (Google Calendar tự làm link bấm được)
+        if mu:                                # ngang hàng build_ics; conferenceData KHÔNG dùng được cho link ngoài
+            desc += f" • {mu}"
         yield {
             "iCalUID": uid,
             "summary": subj + (f" @ {room}" if room and not online else (" (Online)" if online else "")),
             "location": "Online" if online else room,
-            "description": f"Môn {subj} • Lớp {s.get('groupName','')} • Slot {s.get('slot','')} • "
-                           f"GV {s.get('lecturer','')} • Buổi {s.get('sessionNo','')}",
+            "description": desc,
             "start": {"dateTime": start.isoformat(), "timeZone": config.TZID},
             "end":   {"dateTime": end.isoformat(),   "timeZone": config.TZID},
             # fapc=1 giữ nguyên (tương thích ngược) + fapc_owner = mã SV → prune không bao giờ chạm người khác

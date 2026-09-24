@@ -1618,6 +1618,123 @@ def test_semester_text_pattern_and_empty():
     line = [l for l in sug.split("\n") if l.lstrip().startswith("📅")]
     assert line and "Fall2026" in line[0] and "Spring2027" not in line[0]   # đừng gợi ý lại chính kỳ vừa hỏi
 
+# ---- feat: link Meet cho buổi ONLINE (thông báo + nhắc tiết) ----
+# Dữ liệu THẬT (đo trên dump): `meetURL` là MÃ PHÒNG Meet TRẦN 'abc-defg-hij', KHÔNG phải URL; mỗi lớp
+# có đúng 1 mã nhưng FAP chỉ gắn vào vài buổi; mã gắn cả vào buổi học tại phòng.
+_CODE, _URL = "abc-defg-hij", "https://meet.google.com/abc-defg-hij"
+
+def test_meet_url_shapes():
+    """fmt.meet_url: mã trần -> link Meet; nhận 'meet.google.com/…' thiếu scheme và URL đầy đủ; bỏ rác;
+    CHỈ buổi online (mã Meet gắn cả buổi tại phòng nhưng người dùng chỉ cần link cho buổi online)."""
+    from fapc.fmt import meet_url
+    on = lambda v, k="meetURL": dict(_sess("06/15/2026", "(07:30 - 09:00)", "EXE101", online="true"), **{k: v})
+    assert meet_url(on(_CODE)) == _URL                                       # dạng FAP đang trả
+    assert meet_url(on("ABC-DEFG-HIJ")) == _URL                              # hoa -> thường
+    assert meet_url(on("  " + _CODE + "\n")) == _URL                         # khoảng trắng bao quanh
+    assert meet_url(on("meet.google.com/" + _CODE)) == _URL                  # thiếu scheme
+    assert meet_url(on("https://zoom.us/j/123")) == "https://zoom.us/j/123"  # URL đầy đủ giữ nguyên
+    assert meet_url(on("https://us02web.zoom.us/j/9?pwd=Ab1")) == "https://us02web.zoom.us/j/9?pwd=Ab1"  # subdomain
+    teams = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_X%40thread.v2/0?context=%7b%7d"
+    assert meet_url(on(teams)) == teams
+    assert meet_url(on("HTTPS://meet.google.com/" + _CODE)) == _URL          # chữ hoa ở scheme -> chuẩn hoá
+    assert meet_url(on(_CODE, k="meeturl")) == _URL                          # bí danh chữ thường của app
+    for junk in ("", "N/A", "null", "abc-def-ghi", "abcdefghij", "javascript:alert(1)", None,
+                 "https://x.y/a\n  b",                                       # có khoảng trắng -> BỎ, không cắt bớt
+                 "http://meet.google.com/" + _CODE,                          # không phải https
+                 "https://example.com/abc",                                  # host không phải phòng họp
+                 "https://evilzoom.us/j/1", "https://zoom.us.evil.com/j/1"): # giả host
+        assert meet_url(on(junk)) == "", junk
+    # REVIEW (bảo mật): chuỗi server chèn link mạo danh / mention NGAY SAU nhãn 'Vào lớp' -> không hiện gì
+    for inj in ("https://meet.google.com/" + _CODE + " [Vào lớp](https://evil.example) @everyone",
+                "meet.google.com/x [a](https://evil.example)",
+                "https://meet.google.com/" + _CODE + ")[x](https://evil.example",
+                "https://meet.google.com/<@123>", "https://meet.google.com/a*b|c"):
+        assert meet_url(on(inj)) == "", inj
+    inperson = dict(_sess("06/15/2026", "(07:30 - 09:00)", "CES202"), meetURL=_CODE)
+    assert meet_url(inperson) == ""                                          # buổi tại phòng -> KHÔNG link
+
+def test_meet_line_and_with_meet():
+    from fapc.fmt import meet_line, with_meet
+    s = dict(_sess("06/15/2026", "(07:30 - 09:00)", "EXE101", online="true"), meetURL=_CODE)
+    assert meet_line(s) == "🔗 " + _URL
+    assert meet_line(s, indent="   ", label="Join: ") == "   🔗 Join: " + _URL
+    assert with_meet("LINE", s, indent="  ") == "LINE\n  🔗 " + _URL          # link ở DÒNG RIÊNG
+    assert with_meet("LINE", MON) == "LINE" and meet_line(MON) == ""           # không link -> nguyên văn
+
+def test_fill_meet_inherits_per_class():
+    """schedule.fill_meet: buổi thiếu mã MƯỢN mã của CHÍNH lớp (môn+nhóm) — chỉ khi lớp có ĐÚNG 1 mã."""
+    from fapc.core.schedule import fill_meet
+    a1 = dict(_sess("06/15/2026", "(07:30 - 09:00)", "EXE101", online="true"), meetURL=_CODE)
+    a2 = _sess("06/22/2026", "(07:30 - 09:00)", "EXE101", online="true")       # online, KHÔNG mã
+    other_grp = dict(_sess("06/16/2026", "(07:30 - 09:00)", "EXE101", online="true"), groupName="OTHER")
+    b1 = dict(_sess("06/17/2026", "(07:30 - 09:00)", "HOD402"), meetURL="aaa-bbbb-ccc")
+    b2 = dict(_sess("06/18/2026", "(07:30 - 09:00)", "HOD402"), meetURL="ddd-eeee-fff")
+    b3 = _sess("06/19/2026", "(07:30 - 09:00)", "HOD402", online="true")       # lớp có 2 mã -> mơ hồ
+    nosubj = {"date": "06/20/2026", "slotTime": "(07:30 - 09:00)", "isOnline": "true"}
+    src = [a1, a2, other_grp, b1, b2, b3, nosubj, "not-a-dict"]
+    out = fill_meet(src)
+    assert len(out) == len(src) and out[0] is a1                               # giữ thứ tự, không đụng buổi đã có mã
+    assert out[1]["meetURL"] == _CODE and "meetURL" not in a2                  # được điền — dict GỐC không bị sửa
+    assert not out[2].get("meetURL")                                           # KHÁC nhóm -> không mượn
+    assert not out[5].get("meetURL")                                           # lớp 2 mã -> không đoán
+    assert out[6] is nosubj and out[7] == "not-a-dict"                         # thiếu môn / không phải dict -> để nguyên
+    assert fill_meet([]) == []
+
+def test_reminder_text_meet_link():
+    """Nhắc tiết (Telegram/Discord): buổi online -> dòng '🔗 Vào lớp: <link>' RIÊNG ở cuối; tại phòng -> không."""
+    from fapc.app.reminders import reminder_text
+    start, end = datetime.datetime(2026, 6, 24, 7, 30), datetime.datetime(2026, 6, 24, 9, 0)
+    s = dict(_sess("06/24/2026", "(07:30 - 09:00)", "EXE101", online="true"), meetURL=_CODE)
+    txt = reminder_text(start, end, s, 15)
+    last = txt.split("\n")[-1]
+    assert last.startswith("🔗 ") and last.endswith(_URL)                      # link đứng riêng, ở CUỐI dòng
+    assert "EXE101" in txt and "💻 Online" in txt and "GV" in txt
+    inperson = dict(_sess("06/24/2026", "(07:30 - 09:00)", "CES202", room="BE-304"), meetURL=_CODE)
+    assert "🔗" not in reminder_text(start, end, inperson, 15)
+
+def test_digests_meet_link_and_session_count():
+    """Lịch ngày/tuần có link Meet ở dòng riêng; _day_lines vẫn MỘT phần tử/buổi (status() in len() = số buổi)."""
+    online = dict(_sess("06/15/2026", "(09:10 - 10:40)", "EXE101", online="true"), meetURL=_CODE)
+    day = datetime.date(2026, 6, 15)
+    assert ("   🔗 " + _URL) in _day_digest([MON, online], day).split("\n")
+    assert ("      🔗 " + _URL) in _week_digest([MON, online], day).split("\n")
+    lines = _day_lines([MON, online], day)
+    assert len(lines) == 2 and lines[1].endswith(_URL) and "\n" in lines[1]   # 2 buổi -> 2 phần tử, link bên trong
+    assert "🔗" not in _day_digest([MON, MON2], day)                           # không buổi online -> không link
+
+def test_ics_and_gcal_meet_link():
+    """ICS + Google Calendar: buổi online có link đầy đủ trong mô tả; buổi tại phòng mang mã -> KHÔNG."""
+    from fapc.core.schedule import build_ics
+    from fapc.app.gcal import _events
+    online = dict(_sess("06/15/2026", "(09:10 - 10:40)", "EXE101", online="true"), meetURL=_CODE)
+    inperson = dict(_sess("06/16/2026", "(09:10 - 10:40)", "CES202"), meetURL="zzz-yyyy-xxx")
+    ics = build_ics([online, inperson])[0]
+    assert "meet.google.com/abc-defg-hij" in ics and "zzz-yyyy-xxx" not in ics
+    evs = {e["summary"].split()[0]: e for e in _events([online, inperson], "he190000")}
+    assert evs["EXE101"]["description"].endswith(_URL)
+    assert "meet.google.com" not in evs["CES202"]["description"]
+
+def test_discord_webhook_never_pings():
+    """REVIEW: nội dung webhook đến từ FAP — '@everyone' trong dữ liệu server không được ping cả server."""
+    import fapc.app.notify as N
+    sent, orig_post, orig_url = [], N._post_retry, N.config.DISCORD_WEBHOOK_URL
+    N._post_retry = lambda url, payload: (sent.append(payload), type("R", (), {"status_code": 204})())[1]
+    N.config.DISCORD_WEBHOOK_URL = "https://discord.invalid/webhook"
+    try:
+        assert N._discord("tin @everyone") is True
+        assert sent and all(p.get("allowed_mentions") == {"parse": []} for p in sent)
+    finally:
+        N._post_retry, N.config.DISCORD_WEBHOOK_URL = orig_post, orig_url
+
+def test_byweek_line_online_aware():
+    """TKB-theo-tuần trước đây KHÔNG BAO GIỜ hiện 'Online'. Nay online -> '💻 Online' + link; thiếu cờ -> như cũ."""
+    from fapc.app.dashboard import _byweek_line
+    r = {"subjectCode": "EXE101", "roomNo": "BE-304", "slot": "2", "isOnline": "true", "meetURL": _CODE}
+    out = _byweek_line(r)
+    assert "💻 Online" in out and "📍" not in out and out.endswith(_URL)
+    legacy = {"subjectCode": "IAP301", "roomNo": "BE-304", "slot": "1"}
+    assert _byweek_line(legacy) == "   🕐 slot 1  IAP301  📍 BE-304"            # shape cũ: y hệt trước đây
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

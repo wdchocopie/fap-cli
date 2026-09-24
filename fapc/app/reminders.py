@@ -54,13 +54,15 @@ def due_reminders(sessions, now, lead, sent):
 
 
 def reminder_text(start, end, s, mins):
-    """THUẦN: 1 lời nhắc gọn cho chat."""
+    """THUẦN: 1 lời nhắc gọn cho chat. Buổi ONLINE có mã Meet -> thêm dòng '🔗 Vào lớp: <link>' riêng ở
+    cuối: chạm một cái là vào lớp ngay từ thông báo (Telegram/Discord tự biến URL thành link)."""
     rng = start.strftime("%H:%M") + "–" + end.strftime("%H:%M")
     head = (t(f"⏰ Còn {mins}' nữa có tiết:", f"⏰ Class in {mins}':") if mins > 0
             else t("⏰ Tiết bắt đầu ngay:", "⏰ Class starting now:"))
     line = f"🕐 {rng}  {s.get('subjectCode','')}  {fmt.room(s)}"
     gv = s.get("lecturer")
-    return head + "\n" + line + (t(f"  ·  GV {gv}", f"  ·  lecturer {gv}") if gv else "")
+    line += t(f"  ·  GV {gv}", f"  ·  lecturer {gv}") if gv else ""
+    return head + "\n" + fmt.with_meet(line, s, label=t("Vào lớp: ", "Join: "))
 
 
 class ClassReminder:

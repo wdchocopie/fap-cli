@@ -100,7 +100,9 @@ def _discord(text):
         if i:
             time.sleep(_GAP)
         try:
-            r = _post_retry(config.DISCORD_WEBHOOK_URL, {"content": part})
+            # allowed_mentions parse=[]: nội dung đến từ FAP (tin tức, tên GV, link lớp…) — một chuỗi server
+            # chứa '@everyone'/'@here' không được phép ping cả server Discord. Bot không bao giờ cần mention.
+            r = _post_retry(config.DISCORD_WEBHOOK_URL, {"content": part, "allowed_mentions": {"parse": []}})
         except requests.RequestException as e:
             print("  Discord lỗi mạng · network:", e); return _partial("Discord", i, len(parts))
         if r.status_code not in (200, 204):          # webhook thành công = 204 (hoặc 200)
@@ -175,7 +177,9 @@ def _day_digest(sessions, day):
     lines = [fmt.header("📅", title, t(f"{len(items)} buổi", f"{len(items)} sessions"))]
     for start, end, s in items:
         rng = start.strftime("%H:%M") + "–" + end.strftime("%H:%M")
-        lines.append(f"🕐 {rng}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}")
+        # with_meet: buổi online -> link Meet ở DÒNG RIÊNG ngay dưới (vẫn 1 phần tử/buổi)
+        lines.append(fmt.with_meet(f"🕐 {rng}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}",
+                                   s, indent="   "))
     return "\n".join(lines)
 
 def _week_digest(sessions, today):
@@ -193,7 +197,9 @@ def _week_digest(sessions, today):
         total += len(day_items)
         lines.append(f"\n📌 {fmt.weekday(d)} · {d.strftime('%d/%m')}")
         for start, end, s in day_items:
-            lines.append(f"   🕐 {start.strftime('%H:%M')}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}")
+            lines.append(fmt.with_meet(
+                f"   🕐 {start.strftime('%H:%M')}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}",
+                s, indent="      "))
     if total == 0:
         lines.append(t("🎉 Tuần này không có buổi học", "🎉 No classes this week"))
     return "\n".join(lines)

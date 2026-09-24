@@ -33,8 +33,10 @@ def _ident():
         return "", ""
 
 def _day_lines(sessions, day):
-    """Các dòng buổi học trong 'day' (date), đã sắp theo giờ bắt đầu."""
-    return [f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  {s.get('subjectCode','')}  {fmt.room(s)}"
+    """Các dòng buổi học trong 'day' (date), đã sắp theo giờ bắt đầu. MỘT phần tử = MỘT buổi (status()
+    in len() làm 'số buổi'); link Meet của buổi online nằm TRONG phần tử đó, sau '\\n'."""
+    return [fmt.with_meet(f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  {s.get('subjectCode','')}  "
+                          f"{fmt.room(s)}", s, indent="      ")
             for a, b, s in sessions_on_day(sessions, day)]
 
 def _week_bounds(day):
@@ -203,7 +205,8 @@ def semester_view_text(sessions, sem, view=None, sems=None, today=None):
             if a.date() != cur:
                 cur = a.date()
                 lines.append(f"\n📌 {fmt.weekday(cur)} · {cur.strftime('%d/%m/%Y')}")
-            lines.append(f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  {s.get('subjectCode','')}  {fmt.room(s)}")
+            lines.append(fmt.with_meet(f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  "
+                                       f"{s.get('subjectCode','')}  {fmt.room(s)}", s, indent="      "))
         return "\n".join(lines + ["\n" + _honesty_note(skipped)])
 
     if view == "weeks":
@@ -287,12 +290,15 @@ def _first(*vals):
     return ""
 
 def _byweek_line(r):
+    """1 buổi của TKB-theo-tuần. GetActivityStudentByWeek trả CÙNG cờ isOnline + meetURL như
+    GetActivityStudent (bundle app đọc cả hai ở nhánh theo-tuần) -> hiện 'Online' + link Meet. Thiếu
+    field thì is_online=False -> ra đúng như cũ ('📍 <phòng>'), không hỏng gì."""
     subj = r.get("subjectCode", "")
     room = _first(r.get("roomNo"), r.get("room"))
     slot = _first(r.get("slotTime"), r.get("slot"))
-    bits = [f"slot {slot}" if str(slot) != "" else "", subj,
-            ("📍 " + str(room)) if str(room) != "" else "", str(r.get("lecturer") or "")]
-    return "   🕐 " + "  ".join(b for b in bits if b)
+    where = "💻 Online" if fmt.is_online(r) else (("📍 " + str(room)) if str(room) != "" else "")
+    bits = [f"slot {slot}" if str(slot) != "" else "", subj, where, str(r.get("lecturer") or "")]
+    return fmt.with_meet("   🕐 " + "  ".join(b for b in bits if b), r, indent="      ")
 
 def week_exact_text(rows, week, year):
     """Render TKB-theo-tuần (THUẦN, test được). Group theo ngày, field generic vì shape chưa kiểm chứng."""
