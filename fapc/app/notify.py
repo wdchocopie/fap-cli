@@ -19,6 +19,7 @@ allowlist = `bot_core.COMMANDS` nên lệnh mới tự dùng được, không ph
 import os, sys, time, json, datetime
 import requests
 from ..core.schedule import sessions_on_day
+from ..core.attendance import att_tail
 from ..core import subjects, paths
 from ..i18n import t
 from .. import config, fmt
@@ -178,8 +179,8 @@ def _day_digest(sessions, day):
     for start, end, s in items:
         rng = start.strftime("%H:%M") + "–" + end.strftime("%H:%M")
         # with_meet: buổi online -> link Meet ở DÒNG RIÊNG ngay dưới (vẫn 1 phần tử/buổi)
-        lines.append(fmt.with_meet(f"🕐 {rng}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}",
-                                   s, indent="   "))
+        lines.append(fmt.with_meet(f"🕐 {rng}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}"
+                                   f"{att_tail(s)}", s, indent="   "))   # ✅/❌ = đã điểm danh (buổi đã qua)
     return "\n".join(lines)
 
 def _week_digest(sessions, today):
@@ -198,8 +199,8 @@ def _week_digest(sessions, today):
         lines.append(f"\n📌 {fmt.weekday(d)} · {d.strftime('%d/%m')}")
         for start, end, s in day_items:
             lines.append(fmt.with_meet(
-                f"   🕐 {start.strftime('%H:%M')}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}",
-                s, indent="      "))
+                f"   🕐 {start.strftime('%H:%M')}  {subjects.label(s.get('subjectCode',''))}  {fmt.room(s)}"
+                f"{att_tail(s)}", s, indent="      "))
     if total == 0:
         lines.append(t("🎉 Tuần này không có buổi học", "🎉 No classes this week"))
     return "\n".join(lines)

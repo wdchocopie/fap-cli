@@ -49,7 +49,7 @@
 | `fap grades-detail [MÔN] [--raw]` | điểm thành phần từng môn + dòng **"cần X/10 ở phần còn lại để qua"**. Hợp nhất `GetStudentMark` với **`GetCourseOfSemester`** → môn bị bỏ sót / thiếu `courseID` vẫn lấy được điểm thành phần. Kèm **mã hoặc tên môn** = chỉ kéo **1 môn** (kỳ 6 môn: **8 → 3 request**) · component grades + pass-projection; pass a subject code/name to fetch just that one | `[MÔN]` = mã (`IAP301`, `iap`) hoặc **một phần tên môn**; `--raw` = in nguyên response `GetMarkByCourse` (chẩn đoán) | stdout |
 | `fap subjects` | tải & cache **danh mục môn** (`GetSubjets`) → từ đó **TÊN môn + tín chỉ** hiện ở grades/điểm danh/lịch/bot/web · cache the subject catalog → names + credits everywhere | *(không · none)* | `output/subjects_catalog.json` + stdout |
 | `fap courses` | **lớp đang học** trong kỳ: môn / lớp / **giảng viên** / phòng (`GetCourseOfSemester`; fallback gộp từ `GetActivityStudent` nếu lỗi) · my classes this term (subject/class/lecturer/room) | *(không · none)* | stdout |
-| `fap attendance` | bảng điểm danh (có mặt / tổng / %) · attendance table (present / total / %) | *(không · none)* | stdout |
+| `fap attendance` | điểm danh theo môn (% · x/y) + **giai đoạn môn** (chưa bắt đầu / còn N ngày / đã kết thúc) + **ngày vắng** · attendance per subject + term phase + absence dates | *(không · none)* | stdout |
 | `fap banrisk` | liệt kê môn nguy cơ cấm thi (proxy chuyên cần < 80%) · list exam-ban-risk subjects (attendance < 80% proxy) | *(không · none)* | stdout + **exit code 2** nếu có nguy cơ · if at risk |
 | `fap transcript` | bảng điểm tích lũy; rỗng nếu chưa hoàn tất kỳ nào · academic transcript; empty if no completed semester | *(không · none)* | stdout |
 | `fap gpa` | GPA tích lũy **theo tín chỉ** (toàn khoá + từng kỳ) từ `AcademicTranscript`; khác `whatif` (TB cộng kỳ hiện tại) · credit-weighted cumulative GPA | *(không · none)* | stdout |
@@ -62,9 +62,9 @@
 | `fap exams-ics` | xuất lịch thi ra `.ics` (kèm nhắc trước 1 ngày) để import Calendar · export exams to `.ics` (1-day reminder) | *(không · none)* | `output/lichthi.ics` |
 | `fap news [từ khoá] [--type=N]` | tin tức: không tham số → `GetTop10News`; có **từ khoá** → **`SearchNews`** (vd `fap news học bổng`); `--type=N` đổi nhóm tin · school news; keyword → SearchNews | `[từ khoá]` · `--type=N` | stdout |
 | `fap fees` | số dư + chi tiết học phí (`GetBalance`/`GeFeeByRoll`) · balance + fee details | *(không · none)* | stdout |
-| `fap notifications` | thông báo cá nhân của trường (`GetNotificationByRoll`), mới nhất trước · personal school notifications, newest first | *(không · none)* | stdout |
+| `fap notifications [#id\|từ khoá]` | thông báo cá nhân (`GetNotificationByRoll`), mới nhất trước; mỗi mục có **số `#id` cố định** + **dòng trích nội dung** 💬; số = **toàn văn** thông báo đó, chữ = **lọc** theo tiêu đề/nội dung · notifications with a stable `#id` and a 💬 content preview; a number shows that notification's full text, a word filters | `102` · `#102` · `học phí` | stdout |
 | `fap profile` | hồ sơ sinh viên (`GetStudentById`): tên/MSSV/email/ngày sinh/ngành/lớp… (chỉ hiện field có giá trị) · student profile | *(không · none)* | stdout |
-| `fap applications` | đơn từ + trạng thái xử lý + phản hồi (`GetApplication`), mới nhất trước, **decode tiếng Việt** · applications & processing status | *(không · none)* | stdout |
+| `fap applications` | đơn từ + **huy hiệu trạng thái** ⏳ đang xử lý / ✅ chấp nhận / ❌ từ chối + phản hồi (`GetApplication`), mới nhất trước · applications with status badges | *(không · none)* | stdout |
 | `fap web [port]` | **dashboard web cục bộ** (Python stdlib, 0 dep) — bấm nút xem lịch/điểm/điểm danh; nút **sinh từ `COMMAND_INFO`** (thêm lệnh là có nút ngay) + ô **tham số** trên đầu trang (gõ `IAP491` / `weeks` / `8` rồi Enter để chạy lại lệnh đang xem); CHỈ localhost · local web dashboard (stdlib), buttons derived from `COMMAND_INFO` + an arg box, localhost-only | `[port]` mặc định `8000` · default `8000` | trình duyệt · browser; tiến trình nền |
 
 ### Đẩy · Push
@@ -76,7 +76,7 @@
 | `fap notify [<lệnh> [tham số]]` | gửi kết quả lên Telegram/Discord · push a view to Telegram/Discord | `test` (mặc định) hoặc **bất kỳ lệnh bot nào** — danh sách allowlist **sinh từ `COMMAND_INFO`** nên không bao giờ sót lệnh mới (`today`/`tomorrow`/`weekly`/`semester`/`attendance`/`banrisk`/`grades`/`grades-detail [môn]`/`status`/`whatif [điểm]`/`exams`/`gpa`/`notifications`/`all`…). Xem danh sách: `fap notify help`. Tham số **nhiều từ được giữ nguyên** · any bot command + its argument; multi-word args preserved | tin nhắn kênh · channel message; stdout |
 | `fap watch-attendance [loop [phút]] [--absent-only]` | dò & báo khi **VỪA được điểm danh** (near real-time) · ping when attendance is just recorded | `loop [phút]` = chạy nền dò mỗi N phút (mặc định 15, tối thiểu 5); `--absent-only` = chỉ báo vắng/muộn · resident loop, one-shot, or absent-only | tin nhắn kênh + stdout; mốc lưu `output/attendance_state.json` |
 | `fap watch-grades [loop [phút]]` | dò & báo khi có **ĐIỂM MỚI** (thành phần hoặc tổng kết) · ping on new component/final marks | `loop [phút]` = chạy nền (mặc định 30, tối thiểu 10) · resident loop or one-shot | tin nhắn kênh + stdout; mốc lưu `output/grade_state.json` |
-| `fap notify notifications` | đẩy **thông báo trường MỚI** (dedupe theo `id`, lần đầu chỉ ghi mốc) · push only NEW school notifications | *(không · none)* | tin nhắn kênh; mốc lưu `output/seen_notifications.json` |
+| `fap notify notifications` | đẩy **thông báo trường MỚI** (dedupe theo `id`, lần đầu chỉ ghi mốc) · push only NEW school notifications Mỗi tin đẩy kèm **số `#id`** và **1 dòng trích nội dung** (≤140 ký tự) — gõ `/notifications <id>` để đọc toàn văn · each pushed item carries its `#id` and a one-line content preview (≤140 chars); send `/notifications <id>` for the full text. | *(không · none)* | tin nhắn kênh; mốc lưu `output/seen_notifications.json` |
 
 ### Bot tương tác · Interactive bots *(chạy nền · long-running)*
 
@@ -172,16 +172,25 @@ fap grades-detail --raw IAP301    # in NGUYÊN response GetMarkByCourse · raw d
 > ⚠️ **EN —** `--raw` is a **diagnostic path**: it does NOT call `GetCourseOfSemester`, so it can only resolve subjects that `GetStudentMark` returned. A subject `GetStudentMark` omits still shows in the normal view but is **not findable** under `--raw`.
 
 ### `fap attendance`
-**VI —** Gọi `GetStudentAttendances` với checksum `cs12(rollNumber, campusCode)` (mặc định). In số buổi có mặt / tổng / phần trăm theo môn.
-**EN —** Calls `GetStudentAttendances` with checksum `cs12(rollNumber, campusCode)` (default). Prints present / total / percent per subject.
+**VI —** Gọi `GetStudentAttendances` với checksum `cs12(rollNumber, campusCode)` (mặc định). In % chuyên cần + số buổi theo môn, kèm **giai đoạn môn** từ `startDate`/`endDate` và **các ngày vắng**. Dùng CHUNG renderer với bot `/attendance` nên CLI và chat luôn khớp.
+- **Chưa bắt đầu** (`hôm nay < startDate`): hiện `⏳ chưa bắt đầu (từ dd/mm)` thay vì `0%` vô nghĩa, và **không** bị tính nguy cơ cấm thi.
+- **Đang học**: `còn N ngày`; môn chưa có buổi nào được điểm danh hiện `chưa điểm danh buổi nào` (cũng không báo nguy cơ).
+- **Đã kết thúc**: `✔ đã kết thúc`.
+- **Ngày vắng** (`❌ Vắng 2: 12/06, 19/06`): lấy từ `attendanceStatus` của từng buổi trong `GetActivityStudent` — mã theo app chính thức: `P` có mặt, `A` vắng, còn lại = chưa diễn ra. Tốn **thêm 1 request** lịch học (`GetActivityStudent`; `api.call` chỉ cache khi `FAP_CACHE_MIN>0`, mặc định tắt); lấy lỗi thì chỉ thiếu ngày vắng, màn chính vẫn hiện. `banrisk` chỉ lấy lịch khi có môn dưới 80% — không có thì 0 request thêm.
+
+**EN —** Calls `GetStudentAttendances` with checksum `cs12(rollNumber, campusCode)` (default). Prints attendance % and session counts per subject, plus the **term phase** from `startDate`/`endDate` and the **dates you were absent**. It shares the renderer with the bot's `/attendance`, so CLI and chat always match.
+- **Not started** (`today < startDate`): shows `⏳ not started (from dd/mm)` instead of a meaningless `0%`, and is **not** counted as an exam-ban risk.
+- **Ongoing**: `N days left`; a subject with no session recorded yet shows `no session recorded yet` (also no risk).
+- **Ended**: `✔ ended`.
+- **Absence dates** (`❌ Absent 2: 12/06, 19/06`) come from each session's `attendanceStatus` in `GetActivityStudent` — codes as the official app maps them: `P` present, `A` absent, anything else = not yet held. This costs **one extra** schedule request (`GetActivityStudent`; `api.call` only caches when `FAP_CACHE_MIN>0`, off by default); if it fails, only the absence dates are missing and the main view still renders. `banrisk` fetches the schedule only when some subject is below 80% — otherwise no extra request.
 
 ```bash
 fap attendance
 ```
 
 ### `fap banrisk`
-**VI —** Dùng cùng dữ liệu `GetStudentAttendances` (checksum `cs12(rollNumber, campusCode)`). Gắn cờ môn có **% chuyên cần hiện tại < 80%**. Đây chỉ là **PROXY (xấp xỉ)** cho quy định cấm thi thật của FPT (vốn tính trên tổng số buổi đã xếp lịch của kỳ), không phải con số chính thức. Trả **exit code 2** nếu có môn nguy cơ (tiện cho cron/CI), `0` nếu an toàn.
-**EN —** Uses the same `GetStudentAttendances` data (checksum `cs12(rollNumber, campusCode)`). Flags subjects whose **current attendance % < 80%**. This is only a **PROXY (approximation)** of FPT's real exam-ban rule (which is based on the term's total scheduled sessions), not the official figure. Returns **exit code 2** when any subject is at risk (handy for cron/CI), `0` when safe.
+**VI —** Dùng cùng dữ liệu `GetStudentAttendances` (checksum `cs12(rollNumber, campusCode)`). Gắn cờ môn có **% chuyên cần hiện tại < 80%**. Đây chỉ là **PROXY (xấp xỉ)** cho quy định cấm thi thật của FPT (vốn tính trên tổng số buổi đã xếp lịch của kỳ), không phải con số chính thức. Trả **exit code 2** nếu có môn nguy cơ (tiện cho cron/CI), `0` nếu an toàn. Môn **chưa bắt đầu** hoặc **chưa có buổi nào được điểm danh** không bị tính nguy cơ (0% đầu kỳ là vô nghĩa) — cùng một luật với `/banrisk`, `/status`, `/weekly`, `/all`.
+**EN —** Uses the same `GetStudentAttendances` data (checksum `cs12(rollNumber, campusCode)`). Flags subjects whose **current attendance % < 80%**. This is only a **PROXY (approximation)** of FPT's real exam-ban rule (which is based on the term's total scheduled sessions), not the official figure. Returns **exit code 2** when any subject is at risk (handy for cron/CI), `0` when safe. A subject that **hasn't started** or has **no session recorded yet** is not counted (0% at term start is meaningless) — the same rule as `/banrisk`, `/status`, `/weekly`, `/all`.
 
 ```bash
 fap banrisk; echo "exit=$?"      # exit=2 nếu có nguy cơ · if at risk

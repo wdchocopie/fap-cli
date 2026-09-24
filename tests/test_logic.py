@@ -21,6 +21,23 @@ from fapc.app.dashboard import _week_bounds, _day_lines
 from fapc.fmt import room as fmt_room, safe_float
 from fapc.app.notify import _day_digest, _week_digest
 
+# ---- HỢP ĐỒNG OFFLINE: CHẶN mọi lời gọi mạng THẬT (api.fpt.edu.vn / Google / Telegram / Discord) ----
+# Chỉ raise thôi là KHÔNG đủ: code hay bọc `except Exception` (vd phần phụ "degrade gracefully") nên lỗi
+# bị nuốt âm thầm và test vẫn PASS dù đã bắn request thật lên server trường — đã xảy ra 2 lần (GetSemester ở
+# 68c7ada, GetActivityStudent ở /attendance). Vì vậy GHI LẠI mọi lần thử; runner đánh FAIL test làm tăng số đó.
+import requests as _rq
+_NET_ATTEMPTS = []
+def _no_network(url="?", *a, **k):
+    # CHỈ ghi HOST: token FAP nằm trong query, nhưng token bot Telegram nằm NGAY TRONG PATH (/bot<TOKEN>/…) và
+    # secret webhook Discord cũng trong path — mà process test có nạp .env THẬT, và /update gửi output selftest
+    # vào chat. Host là đủ biết đã gọi dịch vụ nào.
+    from urllib.parse import urlsplit
+    _NET_ATTEMPTS.append(urlsplit(str(url)).netloc or "?")
+    raise _rq.ConnectionError("offline test: real network call blocked")
+_rq.get = _rq.post = _no_network
+_rq.request = lambda method, url, *a, **k: _no_network(url)
+_rq.Session.request = lambda self, method, url, *a, **k: _no_network(url)
+
 # ---- fixtures (đúng field GetActivityStudent thật) ----
 def _sess(date, slot_time, code, room="BE-301", online="false", slot="1"):
     return {"date": date, "slotTime": slot_time, "subjectCode": code, "roomNo": room,
@@ -182,6 +199,7 @@ def test_notify_routes_to_botcore():
     B.creds = lambda: ("t", "FPTU", "HE1")
     B.current_semester = lambda *a, **k: "Summer2026"
     B.fetch_att = lambda *a, **k: [{"subjectCode": "B", "attendance": "60"}]
+    B.fetch_sessions = lambda *a, **k: []           # /banrisk nay đọc lịch (môn chưa điểm danh) -> stub, giữ OFFLINE
     cap = {}
     N.push = lambda text: (cap.__setitem__("text", text), ["Telegram"])[1]
     _cap(lambda: N.run("banrisk"))                  # notify đẩy điểm danh/cấm thi qua bot_core
@@ -1735,13 +1753,252 @@ def test_byweek_line_online_aware():
     legacy = {"subjectCode": "IAP301", "roomNo": "BE-304", "slot": "1"}
     assert _byweek_line(legacy) == "   🕐 slot 1  IAP301  📍 BE-304"            # shape cũ: y hệt trước đây
 
+# ---- feat: 4 trường API chưa dùng (attendanceStatus · studentStatus · contents · start/endDate) ----
+# Mã trạng thái lấy ĐÚNG theo app chính thức (bundle): getAttendanceStatus 'P' có mặt / 'A' vắng / còn lại
+# chưa diễn ra; getStatusConfig '0' đang xử lý / '1' chấp nhận / còn lại từ chối.
+
+def test_session_status_codes_from_official_app():
+    from fapc.core.attendance import session_status, att_tail
+    S = lambda v: {"attendanceStatus": v}
+    assert session_status(S("P")) == "present" and session_status(S("p")) == "present"
+    assert session_status(S("A")) == "absent" and session_status(S(" a ")) == "absent"
+    assert session_status(S("Present")) == "present" and session_status(S("Absent")) == "absent"
+    for v in ("N", "", None, "Future", "Late", "X"):                # chưa diễn ra / mã lạ -> KHÔNG đoán
+        assert session_status(S(v)) is None, v
+    assert session_status({}) is None and session_status(None) is None
+    assert att_tail(S("P")) == "  ✅" and att_tail(S("A")) == "  ❌" and att_tail(S("N")) == ""
+
+def test_absences_and_recorded_by_subject():
+    from fapc.core.attendance import absences_by_subject, recorded_by_subject, absence_line
+    ss = [dict(_sess("06/19/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A"),
+          dict(_sess("06/12/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A"),
+          dict(_sess("06/05/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="P"),
+          dict(_sess("06/26/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="N"),
+          dict(_sess("06/08/2026", "(07:30 - 09:00)", "HOD402"), attendanceStatus="N"),   # chưa buổi nào ghi
+          dict(_sess("", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A"),              # thiếu ngày -> bỏ
+          _sess("06/09/2026", "(07:30 - 09:00)", "CES202")]                                # KHÔNG có field
+    ab = absences_by_subject(ss)
+    assert ab == {"IAP301": [datetime.date(2026, 6, 12), datetime.date(2026, 6, 19)]}      # tăng dần
+    rec = recorded_by_subject(ss)
+    assert rec["IAP301"] == 4 and rec["HOD402"] == 0                                        # P+A (kể cả buổi thiếu ngày)
+    assert "CES202" not in rec                    # FAIL-SAFE: thiếu field != "0 buổi" (không được giấu cảnh báo)
+    assert absence_line(ab["IAP301"]).endswith("12/06, 19/06") and "2" in absence_line(ab["IAP301"])
+    assert absence_line([]) == "" and absence_line(None) == ""
+
+def test_phase_and_att_state():
+    from fapc.core.attendance import phase, att_state
+    today = datetime.date(2026, 9, 25)
+    r = lambda s, e: {"startDate": s, "endDate": e}
+    assert phase(r("2026-10-05T00:00:00", "2026-12-20T00:00:00"), today) == "not_started"
+    assert phase(r("2026-09-07T00:00:00", "2026-12-20T00:00:00"), today) == "ongoing"
+    assert phase(r("2026-05-11T00:00:00", "2026-08-30T00:00:00"), today) == "ended"
+    assert phase({}, today) is None and phase(r("2026-09-07T00:00:00", ""), None) is None
+    assert "05/10" in att_state(r("2026-10-05T00:00:00", "2026-12-20T00:00:00"), today)
+    assert att_state(r("2026-05-11T00:00:00", "2026-08-30T00:00:00"), today) in ("✔ đã kết thúc", "✔ ended")
+    left = att_state(r("2026-09-07T00:00:00", "2026-10-05T00:00:00"), today)
+    assert "10" in left                                                          # còn 10 ngày
+    assert att_state(r("2026-09-07T00:00:00", "2026-12-20T00:00:00"), today, recorded=0) in (
+        "chưa điểm danh buổi nào", "no session recorded yet")
+    assert att_state({}, today) == ""
+
+def test_at_risk_backward_compatible_and_new_guards():
+    """_at_risk KHÔNG truyền tham số mới = y hệt cũ (0% thật vẫn là nguy cơ). today/recorded chỉ BỚT báo nhầm."""
+    from fapc.core.attendance import _at_risk
+    assert _at_risk({"attendance": "0"}) is True and _at_risk({"attendance": "60"}) is True
+    assert _at_risk({"attendance": ""}) is False and _at_risk({"attendance": "100"}) is False
+    today = datetime.date(2026, 9, 25)
+    future = {"attendance": "0", "startDate": "2026-10-05T00:00:00", "endDate": "2026-12-20T00:00:00"}
+    ongoing = {"attendance": "60", "startDate": "2026-09-07T00:00:00", "endDate": "2026-12-20T00:00:00"}
+    assert _at_risk(future, today) is False                 # chưa bắt đầu: 0% đầu kỳ KHÔNG phải nguy cơ
+    assert _at_risk(future) is True                         # không truyền today -> hành vi cũ
+    assert _at_risk(ongoing, today) is True                 # đang học 60% -> nguy cơ thật
+    assert _at_risk(ongoing, today, recorded=0) is False    # chưa buổi nào điểm danh -> chưa có gì để xét
+    assert _at_risk(ongoing, today, recorded=None) is True  # KHÔNG biết (thiếu dữ liệu) -> KHÔNG được giấu
+    assert _at_risk(ongoing, today, recorded=3) is True
+
+def test_attendance_lines_render():
+    from fapc.core.attendance import attendance_lines
+    today = datetime.date(2026, 9, 25)
+    rows = [{"subjectCode": "NEW101", "attendance": "0", "numberOfTakenAttendances": 0, "numberOfAttendances": 0,
+             "startDate": "2026-10-05T00:00:00", "endDate": "2026-12-20T00:00:00"},
+            {"subjectCode": "IAP301", "attendance": "60", "numberOfTakenAttendances": 3, "numberOfAttendances": 5,
+             "startDate": "2026-09-07T00:00:00", "endDate": "2026-12-20T00:00:00"},
+            {"subjectCode": "OLD201", "attendance": "100", "numberOfTakenAttendances": 9, "numberOfAttendances": 9,
+             "startDate": "2026-05-11T00:00:00", "endDate": "2026-08-30T00:00:00"}]
+    ss = [dict(_sess("09/14/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A"),
+          dict(_sess("09/21/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="P")]
+    out = attendance_lines(rows, today, ss, label=lambda c: c)
+    txt = "\n".join(out)
+    new = next(l for l in out if "NEW101" in l)
+    assert "%" not in new and "⚠️" not in new and "05/10" in new     # chưa bắt đầu: KHÔNG in 0%, KHÔNG báo nhầm
+    iap = out.index(next(l for l in out if "IAP301" in l))
+    assert "60%" in out[iap] and "⚠️" in out[iap] and "(3/5)" in out[iap]
+    assert "14/09" in out[iap + 1]                                     # dòng ngày vắng NGAY dưới môn
+    assert ("✔ đã kết thúc" in txt) or ("✔ ended" in txt)
+    # FAIL-SAFE: lịch KHÔNG có field attendanceStatus -> vẫn cảnh báo 60% như cũ
+    plain = attendance_lines(rows[1:2], today, [_sess("09/14/2026", "(07:30 - 09:00)", "IAP301")], label=lambda c: c)
+    assert "⚠️" in plain[0]
+    assert attendance_lines(rows[1:2], None, None, label=lambda c: c) == ["• IAP301 — 60% ⚠️  (3/5)"]   # y hệt cũ
+
+def test_botcore_attendance_absences_and_no_false_banrisk():
+    """End-to-end qua bot_core (stub mạng): /attendance có ngày vắng; môn CHƯA bắt đầu không vào /banrisk,
+    /status; và KHÔNG gọi mạng thật (tripwire)."""
+    import fapc.app.bot_core as B
+    saved = (B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now, B.fetch_marks)
+    try:
+        B.creds = lambda: ("t", "FPTU", "HE1")
+        B.current_semester = lambda *a, **k: "Fall2026"
+        B._vn_now = lambda: datetime.datetime(2026, 9, 25, 8, 0)
+        B.fetch_marks = lambda *a, **k: []
+        B.fetch_att = lambda *a, **k: [
+            {"subjectCode": "NEW101", "attendance": "0", "startDate": "2026-10-05T00:00:00", "endDate": "2026-12-20T00:00:00"},
+            {"subjectCode": "IAP301", "attendance": "60", "startDate": "2026-09-07T00:00:00", "endDate": "2026-12-20T00:00:00"}]
+        B.fetch_sessions = lambda *a, **k: [dict(_sess("09/14/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A")]
+        att = B.handle("attendance")
+        assert "14/09" in att and "NEW101" in att
+        ban = B.handle("banrisk")
+        assert "IAP301" in ban and "NEW101" not in ban                   # không báo nhầm môn chưa bắt đầu
+        st = B.handle("status")
+        assert "IAP301" in st and "NEW101" not in st.split("⚠️")[-1]
+        B.fetch_sessions = lambda *a, **k: (_ for _ in ()).throw(SystemExit("token hết hạn"))
+        assert "60%" in B.handle("attendance")        # phần PHỤ hỏng (kể cả SystemExit) -> màn chính vẫn hiện
+    finally:
+        B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now, B.fetch_marks = saved
+
+def test_day_digest_attendance_marks():
+    past_p = dict(MON, attendanceStatus="P")
+    past_a = dict(MON2, attendanceStatus="A")
+    msg = _day_digest([past_p, past_a], datetime.date(2026, 6, 15))
+    lines = msg.split("\n")
+    assert any("EXE101" in l and l.endswith("✅") for l in lines)
+    assert any("HOD402" in l and l.endswith("❌") for l in lines)
+    assert "✅" not in _day_digest([dict(MON, attendanceStatus="N")], datetime.date(2026, 6, 15))
+    online = dict(_sess("06/15/2026", "(13:00 - 15:00)", "EXE101", online="true"), meetURL=_CODE, attendanceStatus="P")
+    lines = _day_lines([past_p, online], datetime.date(2026, 6, 15))
+    assert len(lines) == 2 and "✅\n" in lines[1] and lines[1].endswith(_URL)   # dấu ✅ rồi mới tới link, vẫn 1 phần tử/buổi
+
+def test_application_status_badges():
+    import fapc.core.extras as E
+    from fapc.core.extras import app_status, _app_tally
+    assert app_status({"studentStatus": "0"}).startswith("⏳")
+    assert app_status({"studentStatus": "1"}).startswith("✅")
+    assert app_status({"studentStatus": "2"}).startswith("❌")
+    assert app_status({"studentStatus": 0}).startswith("⏳")                # int 0 không được rơi mất
+    assert app_status({"studentStatus": "7"}).startswith("❔") and "7" in app_status({"studentStatus": "7"})
+    assert app_status({}) == "" and app_status({"studentStatus": ""}) == ""
+    assert _app_tally([{"studentStatus": "2"}, {"studentStatus": "1"}, {"studentStatus": "2"}, {}]) == "✅1 ❌2"
+    orig = E.fetch_applications
+    try:
+        E.fetch_applications = lambda *a, **k: [
+            {"name": "Đơn A", "createDate": "16/09/2023", "studentStatus": "1", "processNote": "OK"},
+            {"name": "Đơn B", "createDate": "05/03/2026", "studentStatus": "2", "processNote": ""}]
+        txt = E.applications_text("t", "FPTU", "HE1")
+        assert "✅1 ❌1" in txt.split("\n")[0]
+        b = txt.index("Đơn B")
+        assert txt.index("❌", b) < txt.index("Đơn A")                    # huy hiệu nằm ngay dưới đúng lá đơn
+    finally:
+        E.fetch_applications = orig
+
+def test_notification_preview_and_full_text():
+    import fapc.core.extras as E
+    from fapc.core.extras import _notif_body, _notif_line
+    body = "Kính gửi SV,\n\n\n  Lịch thi   đã thay đổi.\n<b>Xem</b> &amp; phản hồi."
+    assert _notif_body({"contents": body}) == "Kính gửi SV,\n\nLịch thi đã thay đổi.\nXem & phản hồi."
+    long = {"id": 5, "title": "T", "contents": "x" * 500}
+    ln = _notif_line(long)
+    assert ln.startswith("#5 · T") and "💬" in ln and ln.endswith("…") and len(ln.split("💬 ")[1]) <= E._NOTIF_PREVIEW + 1
+    assert "💬" not in _notif_line({"title": "Chỉ tiêu đề", "contents": "Chỉ tiêu đề"})   # không lặp tiêu đề
+    assert _notif_line({"title": "Không id"}).startswith("• Không id")                  # thiếu id -> không số
+    orig = E.fetch_notifications
+    try:
+        E.fetch_notifications = lambda *a, **k: [
+            {"id": 101, "title": "Học phí kỳ Fall", "entryDate": "2026-06-01", "contents": "Đóng học phí trước 10/06."},
+            {"id": 102, "title": "Lịch thi", "entryDate": "2026-06-09", "contents": "Thi PE ngày 20/06.\nPhòng BE-101."}]
+        lst = E.notifications_text("t", "FPTU", "HE1")
+        assert lst.index("#102 · Lịch thi") < lst.index("#101 · Học phí") and "💬" in lst   # số = id, mới nhất trước
+        assert "\n1. " not in lst and "\n2. " not in lst            # KHÔNG dùng cú pháp danh sách Markdown (Discord đánh số lại)
+        assert "/notifications" in lst.split("\n")[-1]             # gợi ý có '/' như /help
+        full = E.notifications_text("t", "FPTU", "HE1", arg="101")
+        assert "#101" in full and "Đóng học phí trước 10/06." in full
+        assert "Phòng BE-101." in E.notifications_text("t", "FPTU", "HE1", arg="#102")   # nhận cả '#', giữ xuống dòng
+        oor = E.notifications_text("t", "FPTU", "HE1", arg="9")
+        assert "#9" in oor and "💬" not in oor
+        flt = E.notifications_text("t", "FPTU", "HE1", arg="học phí")
+        assert "#101 · Học phí" in flt and "Lịch thi" not in flt   # lọc vẫn giữ ĐÚNG số #id
+        assert "PE" in E.notifications_text("t", "FPTU", "HE1", arg="pe")     # khớp cả trong NỘI DUNG
+        E.notifications_text("t", "FPTU", "HE1", arg="²")          # REVIEW: '²'.isdigit() -> int() nổ; nay không nổ
+        none = E.notifications_text("t", "FPTU", "HE1", arg="zzz")
+        assert "zzz" in none and "💬" not in none
+    finally:
+        E.fetch_notifications = orig
+
+def test_notif_body_keeps_plain_text_angle_brackets():
+    """REVIEW: contents là TEXT THUẦN — '<MSSV>', 'điểm < 5', '->', '<https://…>' KHÔNG được bị coi là thẻ HTML
+    và xoá mất (trước đây còn nuốt cả nhiều dòng). Thẻ HTML thật vẫn được bóc."""
+    from fapc.core.extras import _notif_body
+    for txt in ("Nộp file theo mẫu <MSSV>_<HoTen>.pdf", "Link: <https://forms.gle/abc>", "Diem < 5 va > 3"):
+        assert _notif_body({"contents": txt}) == txt, txt
+    multi = "SV có điểm TB < 5.0 phải học lại.\nHạn chót: 30/09.\nChi tiết: FAP -> Thông báo."
+    assert _notif_body({"contents": multi}) == multi                    # không nuốt dòng giữa '<' và '->'
+    assert _notif_body({"contents": "&lt;MSSV&gt;.pdf"}) == "<MSSV>.pdf"   # entity giải SAU khi bóc -> giữ lại
+    assert _notif_body({"contents": "Dòng1<br>Dòng2 <b>đậm</b> <p>đoạn</p>"}) == "Dòng1\nDòng2 đậm đoạn"
+
+def test_preview_never_cuts_a_url():
+    from fapc.core.extras import _preview
+    url = "https://forms.gle/" + "a" * 60
+    s = "Điền khảo sát tại " + url + " trước thứ 6 nhé các bạn."
+    p = _preview(s, 40)
+    assert p.endswith("…") and "https" not in p                          # không để lại link CỤT bấm được
+    assert _preview("ngắn", 40) == "ngắn" and _preview(url + " x", 30) == ""
+    assert _preview("a " * 100, 20).endswith("…")
+
+def test_att_state_last_day_and_singular():
+    from fapc.core.attendance import att_state
+    r = {"startDate": "2026-09-07T00:00:00", "endDate": "2026-09-25T00:00:00"}
+    assert att_state(r, datetime.date(2026, 9, 25)) in ("hôm nay là ngày cuối", "last day today")   # không 'còn 0 ngày'
+    assert att_state(r, datetime.date(2026, 9, 24)) in ("còn 1 ngày", "1 day left")                 # EN số ít
+
+def test_not_started_overridden_when_sessions_recorded():
+    """REVIEW fail-safe: lịch đã có buổi P/A cho môn thì môn ĐÃ bắt đầu — một startDate đọc sai không được
+    giấu cảnh báo cấm thi thật."""
+    from fapc.core.attendance import _at_risk, attendance_lines
+    today = datetime.date(2026, 9, 25)
+    r = {"subjectCode": "IAP301", "attendance": "60", "startDate": "2026-10-05T00:00:00", "endDate": "2026-12-20T00:00:00"}
+    assert _at_risk(r, today) is False and _at_risk(r, today, recorded=0) is False   # thật sự chưa bắt đầu
+    assert _at_risk(r, today, recorded=3) is True                                      # lịch nói đã học 3 buổi
+    ss = [dict(_sess("09/14/2026", "(07:30 - 09:00)", "IAP301"), attendanceStatus="A")]
+    assert "⚠️" in attendance_lines([r], today, ss, label=lambda c: c)[0]
+
+def test_banrisk_skips_schedule_request_when_nothing_below_threshold():
+    """REVIEW (nhẹ tay với server): lịch chỉ để BỚT cảnh báo nhầm -> không môn nào dưới ngưỡng thô thì KHÔNG
+    tốn request GetActivityStudent. Có môn dưới ngưỡng thì mới lấy lịch."""
+    import fapc.app.bot_core as B
+    saved = (B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now)
+    calls = []
+    try:
+        B.creds = lambda: ("t", "FPTU", "HE1")
+        B.current_semester = lambda *a, **k: "Fall2026"
+        B._vn_now = lambda: datetime.datetime(2026, 9, 25, 8, 0)
+        B.fetch_sessions = lambda *a, **k: (calls.append(1), [])[1]
+        B.fetch_att = lambda *a, **k: [{"subjectCode": "A", "attendance": "100"}, {"subjectCode": "B", "attendance": "90"}]
+        B.handle("banrisk")
+        assert calls == []                                      # an toàn -> 0 request lịch
+        B.fetch_att = lambda *a, **k: [{"subjectCode": "B", "attendance": "60"}]
+        assert "B" in B.handle("banrisk") and calls == [1]      # có nguy cơ thô -> mới lấy lịch (1 lần)
+    finally:
+        B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now = saved
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = failed = 0
     for fn in tests:
+        before = len(_NET_ATTEMPTS)
         try:
             fn()
+            if len(_NET_ATTEMPTS) > before:                  # tripwire: test đã THỬ gọi mạng thật
+                raise AssertionError(f"made {len(_NET_ATTEMPTS) - before} REAL network call(s): "
+                                     f"{_NET_ATTEMPTS[before:][:3]}")
             print(f"  PASS  {fn.__name__}")
             passed += 1
         except AssertionError as e:

@@ -21,7 +21,7 @@ from ..core.schedule import (fetch_sessions, sessions_on_day, fetch_week_by_date
                              upcoming_semesters, week_index, weekly_pattern, group_by_week,
                              all_sessions_sorted, parse_session)
 from ..core.grades import fetch_marks, _gpa
-from ..core.attendance import fetch as fetch_att, _at_risk, BAN_THRESHOLD
+from ..core.attendance import fetch as fetch_att, _at_risk, BAN_THRESHOLD, recorded_by_subject, att_state, att_tail
 from ..i18n import t
 from .. import fmt
 
@@ -36,7 +36,7 @@ def _day_lines(sessions, day):
     """Các dòng buổi học trong 'day' (date), đã sắp theo giờ bắt đầu. MỘT phần tử = MỘT buổi (status()
     in len() làm 'số buổi'); link Meet của buổi online nằm TRONG phần tử đó, sau '\\n'."""
     return [fmt.with_meet(f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  {s.get('subjectCode','')}  "
-                          f"{fmt.room(s)}", s, indent="      ")
+                          f"{fmt.room(s)}{att_tail(s)}", s, indent="      ")
             for a, b, s in sessions_on_day(sessions, day)]
 
 def _week_bounds(day):
@@ -65,11 +65,16 @@ def status():
 
     arows = fetch_att(token, campus, roll, sem)
     print(t(f"\n🟢 Điểm danh ({len(arows)} môn):", f"\n🟢 Attendance ({len(arows)} subjects):"))
+    # CÙNG luật với bot (_at_risk + today + số buổi đã điểm danh theo lịch): môn chưa bắt đầu không bị
+    # báo nhầm "nguy cơ cấm thi" vì 0% đầu kỳ. `sessions` đã có sẵn ở trên -> không tốn thêm request.
+    rec = recorded_by_subject(sessions)
     risk = []
     for r in arows:
-        atrisk = _at_risk(r)
-        if atrisk: risk.append(r.get("subjectCode", ""))
-        print(f"   • {r.get('subjectCode','')} — {r.get('attendance','')}%" + ("  ⚠️" if atrisk else ""))
+        code = r.get("subjectCode", "")
+        atrisk = _at_risk(r, today, rec.get(code))
+        if atrisk: risk.append(code)
+        state = att_state(r, today, rec.get(code))
+        print(f"   • {code} — {r.get('attendance','')}%" + ("  ⚠️" if atrisk else "") + (f"  ·  {state}" if state else ""))
     if risk:
         print(t(f"   ⚠️ Nguy cơ cấm thi (<{BAN_THRESHOLD}%): " + ", ".join(risk),
                 f"   ⚠️ Exam-ban risk (<{BAN_THRESHOLD}%): " + ", ".join(risk)))
@@ -206,7 +211,7 @@ def semester_view_text(sessions, sem, view=None, sems=None, today=None):
                 cur = a.date()
                 lines.append(f"\n📌 {fmt.weekday(cur)} · {cur.strftime('%d/%m/%Y')}")
             lines.append(fmt.with_meet(f"   🕐 {a.strftime('%H:%M')}–{b.strftime('%H:%M')}  "
-                                       f"{s.get('subjectCode','')}  {fmt.room(s)}", s, indent="      "))
+                                       f"{s.get('subjectCode','')}  {fmt.room(s)}{att_tail(s)}", s, indent="      "))
         return "\n".join(lines + ["\n" + _honesty_note(skipped)])
 
     if view == "weeks":
@@ -298,7 +303,7 @@ def _byweek_line(r):
     slot = _first(r.get("slotTime"), r.get("slot"))
     where = "💻 Online" if fmt.is_online(r) else (("📍 " + str(room)) if str(room) != "" else "")
     bits = [f"slot {slot}" if str(slot) != "" else "", subj, where, str(r.get("lecturer") or "")]
-    return fmt.with_meet("   🕐 " + "  ".join(b for b in bits if b), r, indent="      ")
+    return fmt.with_meet("   🕐 " + "  ".join(b for b in bits if b) + att_tail(r), r, indent="      ")
 
 def week_exact_text(rows, week, year):
     """Render TKB-theo-tuần (THUẦN, test được). Group theo ngày, field generic vì shape chưa kiểm chứng."""

@@ -12,7 +12,7 @@ from .notify import _day_digest, _week_digest
 from ..core.grades import fetch_marks, _gpa, term_gpa, detail_text
 from ..core.courses import courses_text
 from ..core import subjects
-from ..core.attendance import fetch as fetch_att, _at_risk
+from ..core.attendance import fetch as fetch_att, _at_risk, attendance_lines, recorded_by_subject
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
 from ..core.extras import exams_text, notifications_text, profile_text, applications_text, countdown_text
 from ..core.transcript import gpa_text, trend_text, credits_overview, fetch as _fetch_transcript
@@ -78,6 +78,7 @@ def arg_hint(name):
     return {
         "whatif":        t(" [điểm]", " [mark]"),
         "grades-detail": t(" [mã môn]", " [subject]"),
+        "notifications": t(" [số|từ khoá]", " [number|keyword]"),
         "semester":      " [pattern|weeks|list|" + t("kỳ", "term") + "]",
     }.get(name, "")
 
@@ -132,23 +133,42 @@ def _grades_text(token, campus, roll, sem, rows=None):
                          else t(f"🎯 GPA tạm tính: {gv}", f"🎯 Provisional GPA: {gv}")))
     return "\n".join(lines)
 
-def _att_text(token, campus, roll, sem, rows=None):
+def _sessions_safe(token, campus, roll, sem):
+    """Lịch cả kỳ cho phần PHỤ của màn điểm danh (ngày vắng, môn chưa điểm danh). Hỏng thì None — kể cả
+    SystemExit (lỗi token/auth của api) — màn chính KHÔNG được sập vì phần phụ. Gọi qua `fetch_sessions` của
+    CHÍNH module này (test stub được). Tốn THÊM 1 request (api.call chỉ cache khi FAP_CACHE_MIN>0, mặc định
+    TẮT) nên chỉ gọi khi thật sự cần — xem _banrisk_text."""
+    try:
+        return fetch_sessions(token, campus, roll, sem)
+    except (Exception, SystemExit):                    # noqa: BLE001
+        return None
+
+def _risky(rows, sessions, today):
+    """Môn nguy cơ cấm thi — MỘT luật dùng chung cho /attendance, /banrisk, /status, /weekly, /all
+    (không bao giờ lệch nhau): bỏ môn chưa bắt đầu và môn chưa điểm danh buổi nào (xem _at_risk)."""
+    rec = recorded_by_subject(sessions) if sessions is not None else {}
+    return [r for r in rows if _at_risk(r, today, rec.get(r.get("subjectCode")))]
+
+def _att_text(token, campus, roll, sem, rows=None, sessions=None):
+    """Điểm danh + giai đoạn môn (chưa bắt đầu / còn N ngày / đã kết thúc) + NGÀY VẮNG từng môn.
+    `sessions` (lịch cả kỳ) truyền vào nếu caller đã có; không thì tự lấy (cache theo giờ, hỏng thì bỏ qua)."""
     if rows is None:
         rows = fetch_att(token, campus, roll, sem)
     if not rows:
         return t("🟢 Chưa có dữ liệu điểm danh.", "🟢 No attendance yet.")
+    if sessions is None:
+        sessions = _sessions_safe(token, campus, roll, sem)
     lines = [fmt.header("🟢", t(f"Điểm danh · {sem}", f"Attendance · {sem}"))]
-    for r in rows:
-        warn = " ⚠️" if _at_risk(r) else ""
-        taken, total = r.get("numberOfTakenAttendances"), r.get("numberOfAttendances")
-        cnt = f"  ({taken}/{total})" if taken is not None and total is not None else ""
-        lines.append(f"• {subjects.label(r.get('subjectCode',''))} — {r.get('attendance','')}%{warn}{cnt}")
-    return "\n".join(lines)
+    return "\n".join(lines + attendance_lines(rows, _vn_now().date(), sessions))
 
-def _banrisk_text(token, campus, roll, sem, rows=None):
+def _banrisk_text(token, campus, roll, sem, rows=None, sessions=None):
     if rows is None:
         rows = fetch_att(token, campus, roll, sem)
-    risk = [r for r in rows if _at_risk(r)]
+    # Không môn nào dưới ngưỡng THÔ -> chắc chắn an toàn, KHỎI tốn thêm request lịch (lịch chỉ BỚT cảnh báo
+    # nhầm; fail-safe của nó chỉ trả lại cảnh báo thô, không bao giờ thêm môn ngoài danh sách thô).
+    if sessions is None and any(_at_risk(r) for r in rows):
+        sessions = _sessions_safe(token, campus, roll, sem)
+    risk = _risky(rows, sessions, _vn_now().date())
     if not risk:
         return t("✅ Không môn nào nguy cơ cấm thi (≥80%).", "✅ No exam-ban risk (≥80%).")
     lines = [fmt.header("⚠️", t("Nguy cơ cấm thi (<80%)", "Exam-ban risk (<80%)"))]
@@ -189,7 +209,7 @@ def _status_text(token, campus, roll, sem):
     parts = [_day_digest(sessions, _vn_now().date())]
     g = fmt.gpa_val(_gpa(fetch_marks(token, campus, roll, sem)))
     parts.append(t(f"🎯 GPA tạm tính: {g}", f"🎯 Provisional GPA: {g}"))
-    risk = [r.get("subjectCode", "") for r in fetch_att(token, campus, roll, sem) if _at_risk(r)]
+    risk = [r.get("subjectCode", "") for r in _risky(fetch_att(token, campus, roll, sem), sessions, _vn_now().date())]
     parts.append(t("⚠️ Nguy cơ cấm thi: ", "⚠️ Ban risk: ") + ", ".join(risk) if risk
                  else t("✅ Chuyên cần ổn (≥80%)", "✅ Attendance OK (≥80%)"))
     return "\n\n".join(parts)
@@ -203,8 +223,8 @@ def weekly_text(token, campus, roll, sem):
     today = _vn_now().date()
     parts = [
         _week_digest(sessions, today),
-        _att_text(token, campus, roll, sem, rows=att),
-        _banrisk_text(token, campus, roll, sem, rows=att),
+        _att_text(token, campus, roll, sem, rows=att, sessions=sessions),
+        _banrisk_text(token, campus, roll, sem, rows=att, sessions=sessions),
         _grades_text(token, campus, roll, sem, rows=marks),
     ]
     return ("\n\n" + fmt.RULE + "\n\n").join(parts)
@@ -221,8 +241,8 @@ def all_text(token, campus, roll, sem):
         _week_digest(sessions, today),
         _grades_text(token, campus, roll, sem, rows=marks),
         detail_text(token, campus, roll, sem, rows=marks),
-        _att_text(token, campus, roll, sem, rows=att),
-        _banrisk_text(token, campus, roll, sem, rows=att),
+        _att_text(token, campus, roll, sem, rows=att, sessions=sessions),
+        _banrisk_text(token, campus, roll, sem, rows=att, sessions=sessions),
         exams_text(token, campus, roll, sem),
     ]
     return ("\n\n" + fmt.RULE + "\n\n").join(parts)
@@ -282,7 +302,7 @@ def handle(cmd, arg=None):
         if cmd == "gpa-trend":     return trend_text(_fetch_transcript(token, campus, roll))
         if cmd == "credits":       return credits_overview(token, campus, roll)
         if cmd == "conduct":       return conduct_text(token, campus, roll, sem)
-        if cmd == "notifications": return notifications_text(token, campus, roll)
+        if cmd == "notifications": return notifications_text(token, campus, roll, arg=arg)   # số = toàn văn, chữ = lọc
         if cmd == "profile":       return profile_text(token, campus, roll)
         if cmd == "applications":  return applications_text(token, campus, roll)
         if cmd == "all":           return all_text(token, campus, roll, sem)
