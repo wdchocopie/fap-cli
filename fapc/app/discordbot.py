@@ -136,7 +136,8 @@ def run():
 
     intents = discord.Intents.default()
     intents.message_content = True          # cần bật ở Developer Portal (privileged intent)
-    client = discord.Client(intents=intents)
+    # Không bao giờ ping: nội dung trả lời đến từ FAP — '@everyone' trong dữ liệu server không được thành mention.
+    client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
 
     def _owner(user_id):
         """Quyền chạy lệnh — Y HỆT luật của tin nhắn/slash: có DISCORD_ALLOWED_USER_ID thì chỉ chủ bot;

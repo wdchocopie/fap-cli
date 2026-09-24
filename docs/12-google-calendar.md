@@ -177,8 +177,8 @@ Lấy 96 buổi (kỳ Summer2026). Đang đẩy lên Calendar 'primary'...
 ✓ Đồng bộ 96 sự kiện (lỗi 0). Chạy lại = cập nhật, không trùng.
 ```
 
-**VI —** Mỗi buổi học thành 1 sự kiện với tiêu đề `<MãMôn> @ <Phòng>` (hoặc `(Online)`), kèm mô tả (lớp, slot, giảng viên, buổi). Múi giờ luôn là **`Asia/Ho_Chi_Minh`** (cố định trong code, không phải biến `.env`).
-**EN —** Each session becomes one event titled `<SubjectCode> @ <Room>` (or `(Online)`), with a description (group, slot, lecturer, session no.). The timezone is always **`Asia/Ho_Chi_Minh`** (hard-coded, not an `.env` key).
+**VI —** Mỗi buổi học thành 1 sự kiện với tiêu đề `<MãMôn> @ <Phòng>` (hoặc `(Online)`), kèm mô tả (lớp, slot, giảng viên, buổi). Buổi **online** có thêm **link Google Meet** ở cuối mô tả (Google Calendar tự biến thành link bấm được) — cách lấy link xem [13-notify §5](13-notify.md#5-nội-dung-tin-nhắn--what-the-digest-looks-like). Múi giờ luôn là **`Asia/Ho_Chi_Minh`** (cố định trong code, không phải biến `.env`).
+**EN —** Each session becomes one event titled `<SubjectCode> @ <Room>` (or `(Online)`), with a description (group, slot, lecturer, session no.). **Online** sessions also get the **Google Meet link** at the end of the description (Google Calendar makes it clickable) — see [13-notify §5](13-notify.md#5-nội-dung-tin-nhắn--what-the-digest-looks-like) for where it comes from. The timezone is always **`Asia/Ho_Chi_Minh`** (hard-coded, not an `.env` key).
 
 ### Chạy lại = cập nhật, không trùng · Re-run = update, no duplicates
 

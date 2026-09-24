@@ -14,7 +14,7 @@ import os, re, datetime
 from .api import (creds, call, call_login_retry, as_list, unwrap,
                   current_semester, check_auth, _vn_now)
 from . import paths
-from ..fmt import is_online
+from ..fmt import is_online, meet_url
 
 OUT = paths.out_dir()          # output/ hoặc output/profiles/<tên>/ (xem core/paths.py)
 TZID = "Asia/Ho_Chi_Minh"
@@ -26,11 +26,35 @@ def _fmt(dt):
 def _esc(t):
     return str(t or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
+def _meet_raw(s):
+    """Giá trị mã/link Meet thô của 1 buổi ('' nếu trống). Key gốc `meetURL`, bí danh `meeturl`."""
+    return " ".join(str(s.get("meetURL") or s.get("meeturl") or "").split())
+
+def fill_meet(sessions):
+    """THUẦN: điền mã Meet còn thiếu cho từng buổi từ CHÍNH LỚP của nó (subjectCode + groupName).
+
+    FAP chỉ gắn `meetURL` vào MỘT SỐ buổi của mỗi lớp (đo trên dump thật: vd 8/20 buổi CES202), trong
+    khi mỗi lớp có đúng MỘT phòng Meet cố định (6/6 lớp: đúng 1 mã khác nhau). Không điền thì 9/11 buổi
+    ONLINE trên dump thật KHÔNG có link. Chỉ mượn khi lớp có ĐÚNG MỘT mã (≥2 mã = mơ hồ, không đoán) và
+    có subjectCode. Không sửa dict của caller: buổi được điền là bản SAO; thứ tự giữ nguyên."""
+    codes = {}
+    for s in sessions:
+        if isinstance(s, dict) and s.get("subjectCode") and _meet_raw(s):
+            codes.setdefault((s.get("subjectCode"), s.get("groupName") or ""), set()).add(_meet_raw(s))
+    out = []
+    for s in sessions:
+        if isinstance(s, dict) and s.get("subjectCode") and not _meet_raw(s):
+            got = codes.get((s.get("subjectCode"), s.get("groupName") or ""))
+            if got and len(got) == 1:
+                s = dict(s, meetURL=next(iter(got)))
+        out.append(s)
+    return out
+
 def fetch_sessions(token, campus, roll, sem):
     http, data = call("GetActivityStudent",
         [("campusCode", campus), ("Authen", token), ("Semester", sem), ("rollNumber", roll)], roll, campus)
     check_auth(http, data)
-    return as_list(data)
+    return fill_meet(as_list(data))       # cả kỳ trong 1 lời gọi -> đủ ngữ cảnh để mượn mã Meet theo lớp
 
 def fetch_week_by_date(token, campus, roll, day):
     """GetWeekByDate: ngày -> số tuần FAP. Trả dict {week, year, startDate, endDate} (hoặc {} nếu lỗi)."""
@@ -46,6 +70,8 @@ def fetch_week_activities(token, campus, roll, sem, week, year):
         [("campusCode", campus), ("Authen", token), ("Semester", sem), ("rollNumber", roll),
          ("week", str(week)), ("year", str(year))], roll, campus)
     check_auth(http, data)
+    # KHÔNG fill_meet ở đây: chỉ có 1 tuần nên KHÔNG kiểm được "lớp có đúng 1 mã" trên cả kỳ — một lớp có
+    # 2 phòng Meet trong kỳ có thể trông như 1 mã trong tuần này ⇒ gắn NHẦM phòng. Buổi tự mang mã vẫn có link.
     return as_list(data)
 
 def parse_session(s):
@@ -265,8 +291,9 @@ def build_ics(sessions):
         loc = "Online" if online else room
         desc = f"Môn {subj} • Lớp {s.get('groupName','')} • Slot {s.get('slot','')} • " \
                f"GV {s.get('lecturer','')} • Buổi {s.get('sessionNo','')}"
-        if online and s.get("meetURL"):
-            desc += f" • {s['meetURL']}"
+        mu = meet_url(s)                  # mã Meet trần -> link đầy đủ; chỉ buổi online (xem fmt.meet_url)
+        if mu:
+            desc += f" • {mu}"
         summary = subj + (f" @ {room}" if room and not online else (" (Online)" if online else ""))
         lines += [
             "BEGIN:VEVENT",

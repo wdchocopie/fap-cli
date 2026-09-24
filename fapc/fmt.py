@@ -5,7 +5,7 @@
 Gom các mảnh hay lặp: tên thứ trong tuần, nhãn phòng/online, đường kẻ, tiêu đề, nhãn trạng thái.
 Dùng emoji + xuống dòng thay vì căn cột (font chat KHÔNG đều) để hiển thị đẹp trên Telegram/Discord/console.
 """
-import datetime, html
+import datetime, html, re
 from .config import FAP_LANG
 
 def unescape(s):
@@ -29,6 +29,68 @@ def is_online(s):
 def room(s):
     """Nhãn phòng có icon: '💻 Online' hoặc '📍 <phòng>'."""
     return "💻 Online" if is_online(s) else ("📍 " + (s.get("roomNo") or "?"))
+
+# Link vào lớp ONLINE. Key GỐC trong GetActivityStudent(+ByWeek) là `meetURL` — bundle app đọc đúng key
+# này rồi đổi tên nội bộ thành `meeturl`, nên nhận cả hai.
+# ⚠️ Dù tên là "URL", dữ liệu THẬT là MÃ PHÒNG Google Meet TRẦN dạng `abc-defg-hij` (đã đo trên dump
+# thật: 28/28 giá trị khớp mẫu 3-4-3, KHÔNG giá trị nào bắt đầu bằng http). Nếu chỉ nhận http(s) thì
+# tính năng này im lặng không hiện link nào. Field có mặt ở mọi buổi nhưng "" ở phần lớn buổi.
+_MEET_KEYS = ("meetURL", "meeturl")
+_MEET_CODE = re.compile(r"^[a-z]{3}-[a-z]{4}-[a-z]{3}$")   # mã phòng Google Meet (chữ thường, 3-4-3)
+# URL đầy đủ: MỘT token https, host thuộc nhà cung cấp phòng họp quen biết, bộ ký tự an toàn — KHÔNG có
+# khoảng trắng / [ ] ( ) < > @ * | `. Dòng link đứng NGAY SAU nhãn "Vào lớp" (chỗ người dùng quen bấm):
+# không được để chuỗi từ server chèn link mạo danh '[Vào lớp](https://…)' hay '@everyone' (Discord render
+# markdown + mention trong content). Không khớp -> KHÔNG hiện link (thà thiếu còn hơn sai).
+_MEET_URL = re.compile(r"^https://([A-Za-z0-9.-]+)(/[A-Za-z0-9\-._~/?#=&%+:]*)?$")
+_MEET_HOSTS = ("meet.google.com", "zoom.us", "teams.microsoft.com", "teams.live.com")
+
+def _meet_host_ok(host):
+    """Host thuộc nhà cung cấp phòng họp (kể cả subdomain như us02web.zoom.us; KHÔNG khớp 'evilzoom.us')."""
+    return any(host == h or host.endswith("." + h) for h in _MEET_HOSTS)
+
+def meet_url(s):
+    """THUẦN: link vào lớp online của 1 buổi, '' nếu không có.
+
+    Chỉ trả khi buổi ONLINE (cờ isOnline qua is_online — KHÔNG suy online từ việc có mã: mã Meet gắn
+    cả vào buổi học TẠI PHÒNG). Nhận:
+      • mã Meet trần 'abc-defg-hij'     -> https://meet.google.com/abc-defg-hij   (dạng FAP đang trả, 28/28)
+      • 'meet.google.com/…' thiếu scheme -> thêm https:// rồi kiểm như URL
+      • URL https đầy đủ trên Meet/Zoom/Teams, đúng MỘT token, bộ ký tự an toàn (xem _MEET_URL)
+    Mọi thứ khác ('N/A', rác, http://, host lạ, có khoảng trắng/markdown) -> ''. Mã chỉ được ghép vào URL
+    khi khớp ĐÚNG mẫu 3-4-3; URL không bao giờ bị "cắt bớt cho vừa" — không hợp lệ là bỏ hẳn."""
+    if not is_online(s):
+        return ""
+    for k in _MEET_KEYS:
+        v = str(s.get(k) or "").strip()
+        if not v:
+            continue
+        low = v.lower()
+        if _MEET_CODE.match(low):
+            return "https://meet.google.com/" + low
+        if low.startswith("meet.google.com/"):
+            v = "https://" + v
+        elif low.startswith("https://"):
+            v = "https://" + v[8:]                          # chuẩn hoá chữ hoa trong scheme
+        m = _MEET_URL.match(v)
+        if m and _meet_host_ok(m.group(1).lower()):
+            return v
+    return ""
+
+def meet_line(s, indent="", label=""):
+    """THUẦN: dòng '🔗 <nhãn><link>' ('' nếu buổi không có link online).
+
+    Link đứng RIÊNG một dòng, ở CUỐI dòng: Telegram/Discord gửi plain text (không parse_mode) nên tự
+    nhận diện URL thành link bấm được, không dính chữ phía sau. `label` do caller dịch sẵn (fmt không
+    phụ thuộc i18n), vd t('Vào lớp: ', 'Join: ')."""
+    u = meet_url(s)
+    return f"{indent}🔗 {label}{u}" if u else ""
+
+def with_meet(line, s, indent="", label=""):
+    """THUẦN: `line` + (xuống dòng + dòng link online nếu có). Vẫn là MỘT chuỗi cho MỘT buổi — caller
+    thường đếm 'số buổi' bằng len(danh sách dòng) (vd dashboard.status), tách link ra phần tử riêng
+    sẽ làm sai con số đó."""
+    m = meet_line(s, indent, label)
+    return line + "\n" + m if m else line
 
 def header(emoji, title, sub=None):
     """Dòng tiêu đề + đường kẻ. sub = chú thích nhỏ bên phải (vd số buổi)."""

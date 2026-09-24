@@ -129,14 +129,18 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
 ━━━━━━━━━━━━━━━━
 🕐 07:30–09:50  SWP391  📍 AL-R201
 🕐 12:30–14:50  PRN231  💻 Online
+   🔗 https://meet.google.com/abc-defg-hij
 ```
 
 **VI —** Định dạng mỗi dòng: `🕐 HH:MM–HH:MM  <mã môn>  📍 <phòng>`.
-- **Học online** (`isOnline`): hiện **`💻 Online`** thay cho phòng.
+- **Học online** (`isOnline`): hiện **`💻 Online`** thay cho phòng, và **link vào lớp `🔗` ở dòng ngay dưới** (chạm là vào Google Meet).
 - **Học tại lớp**: hiện **`📍 <số phòng>`** (`roomNo`).
 **EN —** Each line is `🕐 HH:MM–HH:MM  <subjectCode>  📍 <room>`.
-- **Online class** (`isOnline`): shows **`💻 Online`** instead of a room.
+- **Online class** (`isOnline`): shows **`💻 Online`** instead of a room, plus the **join link `🔗` on the next line** (tap to open Google Meet).
 - **In-person class**: shows **`📍 <room number>`** (`roomNo`).
+
+> 🔗 **VI — Link vào lớp online lấy từ đâu?** FAP trả field `meetURL`, nhưng thực chất là **mã phòng Google Meet trần** (`abc-defg-hij`), không phải URL — fap-cli ghép thành `https://meet.google.com/<mã>`. Mỗi lớp có **một** phòng Meet cố định, nhưng FAP chỉ gắn mã vào **vài buổi** của lớp; buổi online nào thiếu mã sẽ **mượn mã của chính lớp đó** (cùng môn + cùng nhóm, và chỉ khi lớp có đúng một mã — không đoán). Link chỉ hiện ở buổi **online**; buổi học tại phòng không hiện dù có mã. Có mặt ở: nhắc tiết, `/today` `/tomorrow` `/week` `/status` `/all`, `fap notify today|weekly`, `fap status|week`, `semester list`, `week-exact` (chỉ buổi tự mang mã — TKB theo tuần không đủ ngữ cảnh cả kỳ để mượn mã an toàn), file `.ics` và **Google Calendar** (trong mô tả sự kiện — chạy `calendar-sync` một lần để cập nhật sự kiện cũ).
+> 🔗 **EN — Where does the online join link come from?** FAP returns a `meetURL` field that is really a **bare Google Meet room code** (`abc-defg-hij`), not a URL — fap-cli builds `https://meet.google.com/<code>`. Each class has **one** fixed Meet room, but FAP attaches the code to only **some** of its sessions; an online session missing it **borrows its own class's code** (same subject + same group, and only when the class has exactly one code — no guessing). The link shows only for **online** sessions. It appears in: class reminders, `/today` `/tomorrow` `/week` `/status` `/all`, `fap notify today|weekly`, `fap status|week`, `semester list`, `week-exact` (only sessions that carry their own code — a single week lacks the whole-term context to borrow safely), the `.ics` file and **Google Calendar** (in the event description — run `calendar-sync` once to update existing events).
 
 **VI —** Hôm đó không có buổi nào:
 **EN —** If there are no sessions that day:
@@ -220,8 +224,8 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 > 📋 **VI —** Bot **tự đăng ký danh sách lệnh gợi ý** lúc khởi động — khỏi nhớ lệnh. Telegram hiện nút **Menu ☰** cạnh ô nhập + tự gợi ý khi gõ `/`. Discord có **slash command** (`/today`, `/grades`, `/whatif`…) hiện ngay khi gõ `/`. Muốn **chạm là chạy** thì gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) — xem [§8.3](#83-nút-bấm--menu--buttons--menu). Danh sách đầy đủ vẫn là `/help`. Nguồn lệnh: `COMMAND_INFO` trong `fapc/app/bot_core.py` (thêm 1 dòng là cả 2 nền tảng có ngay).
 > 📋 **EN —** The bots **auto-register a suggested command list** on startup — no need to memorize. Telegram shows a **Menu ☰** button + autocompletes as you type `/`. Discord exposes **slash commands** (`/today`, `/grades`, `/whatif`…) the moment you type `/`. For **tap-to-run**, send `/menu` (Telegram) or `!menu` / `/menu` (Discord) — see [§8.3](#83-nút-bấm--menu--buttons--menu). Full list is still `/help`. Source of truth: `COMMAND_INFO` in `fapc/app/bot_core.py` (add one line → both platforms get it).
 
-> ⏰ **VI —** **Nhắc trước mỗi tiết:** khi đang chạy, bot **tự đẩy lời nhắc `FAP_REMIND_MINUTES` phút trước giờ vào lớp** (mặc định 30', mỗi tiết đúng 1 lần, theo giờ VN). Telegram nhắc vào chat `TELEGRAM_CHAT`; Discord **DM** cho `DISCORD_ALLOWED_USER_ID`. Đặt `FAP_REMIND_MINUTES=15` để đổi, `0` để tắt. Bot phải **đang chạy** mới nhắc (trên VPS dùng `fap-bot.service` để chạy 24/7). Vòng nhắc cũng **tự `refresh` token ~50'** nên bot không chết token khi chạy dài.
-> ⏰ **EN —** **Per-class reminders:** while running, the bot **auto-pushes a reminder `FAP_REMIND_MINUTES` minutes before each class** (default 30, once per session, VN time). Telegram pings `TELEGRAM_CHAT`; Discord **DMs** `DISCORD_ALLOWED_USER_ID`. Set `FAP_REMIND_MINUTES=15` to change, `0` to disable. The bot must be **running** to remind (on a VPS use `fap-bot.service` for 24/7). The reminder loop also **auto-`refresh`es the token ~50m** so a long-running bot won't die on token expiry.
+> ⏰ **VI —** **Nhắc trước mỗi tiết:** khi đang chạy, bot **tự đẩy lời nhắc `FAP_REMIND_MINUTES` phút trước giờ vào lớp** (mặc định 30', mỗi tiết đúng 1 lần, theo giờ VN). Telegram nhắc vào chat `TELEGRAM_CHAT`; Discord **DM** cho `DISCORD_ALLOWED_USER_ID`. Đặt `FAP_REMIND_MINUTES=15` để đổi, `0` để tắt. Bot phải **đang chạy** mới nhắc (trên VPS dùng `fap-bot.service` để chạy 24/7). Vòng nhắc cũng **tự `refresh` token ~50'** nên bot không chết token khi chạy dài. Tiết **online** kèm luôn dòng **`🔗 Vào lớp: https://meet.google.com/…`** ở cuối lời nhắc — chạm là vào lớp (xem [§5](#5-nội-dung-tin-nhắn--what-the-digest-looks-like)).
+> ⏰ **EN —** **Per-class reminders:** while running, the bot **auto-pushes a reminder `FAP_REMIND_MINUTES` minutes before each class** (default 30, once per session, VN time). Telegram pings `TELEGRAM_CHAT`; Discord **DMs** `DISCORD_ALLOWED_USER_ID`. Set `FAP_REMIND_MINUTES=15` to change, `0` to disable. The bot must be **running** to remind (on a VPS use `fap-bot.service` for 24/7). The reminder loop also **auto-`refresh`es the token ~50m** so a long-running bot won't die on token expiry. **Online** classes get a final **`🔗 Join: https://meet.google.com/…`** line — tap it to join (see [§5](#5-nội-dung-tin-nhắn--what-the-digest-looks-like)).
 
 ### 8.1. Telegram bot
 **VI —** Dùng lại `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` ở §2 (cả hai **bắt buộc**). Chạy `fap telegram-bot` rồi nhắn `/today` cho bot. Dừng bằng `Ctrl+C`. Long-polling — không cần URL công khai, chạy sau NAT được.

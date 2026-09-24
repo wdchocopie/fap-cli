@@ -183,6 +183,48 @@ finally:
     notify.requests.post, notify.time.sleep = _real_post, _real_sleep
     notify.config.TELEGRAM_TOKEN, notify.config.TELEGRAM_CHAT = _real_tok, _real_chat
 
+# [J] link Meet cho buổi ONLINE — đi ĐƯỜNG THẬT: GetActivityStudent (mock) -> fetch_sessions -> fill_meet
+#     -> render. Shape giống dữ liệu thật: `meetURL` là MÃ TRẦN, chỉ gắn vào VÀI buổi của lớp.
+import datetime
+from fapc.core.schedule import fetch_sessions as _fs, build_ics as _ics
+from fapc.app.notify import _day_digest as _dd
+from fapc.app.reminders import reminder_text as _rt
+_saved_act = SUCCESS["GetActivityStudent"]
+MODE["v"] = "success"
+SUCCESS["GetActivityStudent"] = [
+    {"date": "06/22/2026", "slotTime": "(07:30 - 09:00)", "subjectCode": "EXE101", "roomNo": "", "isOnline": "true",
+     "groupName": "G", "slot": "1", "meetURL": "abc-defg-hij"},
+    {"date": "06/29/2026", "slotTime": "(07:30 - 09:00)", "subjectCode": "EXE101", "roomNo": "", "isOnline": "true",
+     "groupName": "G", "slot": "1", "meetURL": ""},                      # online nhưng FAP KHÔNG gắn mã
+    {"date": "06/29/2026", "slotTime": "(09:10 - 10:40)", "subjectCode": "CES202", "roomNo": "BE-305", "isOnline": "false",
+     "groupName": "G", "slot": "2", "meetURL": "zzz-yyyy-xxx"},          # tại phòng nhưng CÓ mã
+]
+api._CACHE.clear()
+try:
+    _ss = _cap(lambda: _fs("SECRETTOKEN123", "FPTU", "HE190000", os.environ["FAP_SEMESTER"]))
+    check("meet: fetch_sessions giữ đủ buổi", len(_ss) == 3, str(len(_ss)))
+    check("meet: buổi online thiếu mã MƯỢN mã của lớp", _ss[1].get("meetURL") == "abc-defg-hij", str(_ss[1].get("meetURL")))
+    _txt = _dd(_ss, datetime.date(2026, 6, 29))
+    check("meet: lịch ngày có link buổi online", "https://meet.google.com/abc-defg-hij" in _txt)
+    check("meet: lịch ngày KHÔNG link buổi tại phòng", "zzz-yyyy-xxx" not in _txt)
+    _st = datetime.datetime(2026, 6, 29, 7, 30)
+    _rem = _rt(_st, _st + datetime.timedelta(minutes=90), _ss[1], 10)
+    check("meet: nhắc tiết có link ở dòng cuối", _rem.split("\n")[-1].endswith("https://meet.google.com/abc-defg-hij"))
+    _ical = _ics(_ss)[0]
+    check("meet: ICS có link đầy đủ, không có mã tại phòng",
+          _ical.count("meet.google.com/abc-defg-hij") == 2 and "zzz-yyyy-xxx" not in _ical)
+    # REVIEW: nhánh THEO TUẦN chỉ thấy 1 tuần -> không kiểm được "lớp có đúng 1 mã" trên cả kỳ -> KHÔNG mượn mã
+    from fapc.core.schedule import fetch_week_activities as _fwa
+    SUCCESS["GetActivityStudentByWeek"] = [dict(r) for r in SUCCESS["GetActivityStudent"][:2]]
+    api._CACHE.clear()
+    _wk = _cap(lambda: _fwa("SECRETTOKEN123", "FPTU", "HE190000", os.environ["FAP_SEMESTER"], 27, 2026))
+    check("meet: TKB-theo-tuần KHÔNG mượn mã (thiếu ngữ cảnh cả kỳ)",
+          len(_wk) == 2 and _wk[0].get("meetURL") == "abc-defg-hij" and not _wk[1].get("meetURL"))
+finally:
+    SUCCESS["GetActivityStudent"] = _saved_act
+    SUCCESS.pop("GetActivityStudentByWeek", None)
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)
