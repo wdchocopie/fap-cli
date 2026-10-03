@@ -7,7 +7,7 @@ Cấu hình qua .env: TELEGRAM_TOKEN, TELEGRAM_CHAT, DISCORD_WEBHOOK_URL (xem .e
 
 Chạy (từ gốc repo):
     fap notify test                    # gửi tin thử tới các kênh đã cấu hình
-    fap notify today|tomorrow|weekly   # lịch học -> kênh
+    fap notify today|tomorrow|weekly   # lịch học -> kênh (today kèm "Việc cần làm" KHI có việc)
     fap notify semester [weeks]        # lịch cả kỳ (mẫu lặp / từng tuần) -> kênh
     fap notify attendance|banrisk      # điểm danh / cảnh báo cấm thi -> kênh
     fap notify grades|status|whatif    # điểm / tổng quan / mô phỏng GPA -> kênh
@@ -222,6 +222,19 @@ def push_application_changes():
     sent = push(msg)
     print(t("→ Đã gửi tới:", "→ Sent to:"), sent or t("(chưa cấu hình kênh — sửa .env)", "(no channel — edit .env)"))
 
+# ---------- "Việc cần làm" gắn vào digest hằng ngày ----------
+def _todo_tail():
+    """Khối "Việc cần làm" để GẮN vào digest `fap notify today` — CHỈ khi có ≥1 việc; '' khi không có việc /
+    không kiểm tra được. Hỏng gì (token, mạng…) cũng KHÔNG được làm mất digest lịch học."""
+    try:
+        from ..core.api import creds
+        from ..core.extras import todo_fetch, todo_items, todo_block
+        token, campus, roll = creds()
+        fb, apps, err = todo_fetch(token, campus, roll)
+        return todo_block(fb, apps, err) if todo_items(fb, apps) else ""
+    except (Exception, SystemExit):                 # noqa: BLE001
+        return ""
+
 # ---------- nội dung ----------
 def _day_digest(sessions, day):
     items = sessions_on_day(sessions, day)         # [(start, end, session), ...] đã sort
@@ -291,6 +304,10 @@ def run(cmd="test"):
         print(t(f"Lệnh notify không rõ. Dùng: {avail}", f"Unknown notify command. Use: {avail}"))
         return
     msg = handle(name, arg)
+    if name == "today":                         # digest hằng ngày: kèm "Việc cần làm" CHỈ khi có việc
+        tail = _todo_tail()
+        if tail:
+            msg += "\n\n" + fmt.RULE + "\n\n" + tail
     print(msg)
     sent = push(msg)
     print(t("→ Đã gửi tới:", "→ Sent to:"),

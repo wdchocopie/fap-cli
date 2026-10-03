@@ -538,6 +538,48 @@ finally:
     else: SUCCESS["GetApplication"] = _saved_app
     api._CACHE.clear()
 
+# [M] B4a: khối "Việc cần làm" — ĐƯỜNG THẬT: requests (mock) -> api.call -> todo_fetch -> /todo, /all và
+#     digest `notify.run("today")` (chỉ gắn khi CÓ việc). Không endpoint GHI nào được gọi.
+_saved_m = {k: SUCCESS.get(k) for k in ("CheckOpenFeedBack", "GetApplication")}
+_saved_tg = notify._telegram
+_pushed_m, _urls = [], []
+notify._telegram = lambda t: (_pushed_m.append(t), True)[1]
+_real_fake_get = api.requests.get
+api.requests.get = lambda url, **k: (_urls.append(url.split("/MyFAP/")[1].split("?")[0]), _real_fake_get(url, **k))[1]
+MODE["v"] = "success"
+try:
+    SUCCESS["CheckOpenFeedBack"] = "true"                       # app 2.0.5 nhận cả CHUỖI 'true'
+    SUCCESS["GetApplication"] = [{"w_APP_ID": "601", "name": "Đơn xin Z", "createDate": "01/10/2026", "studentStatus": "3"}]
+    api._CACHE.clear()
+    _todo = _cap(lambda: handle("todo"))
+    check("todo: feedback mở + đơn chờ thanh toán", "📝" in _todo and "💳" in _todo and "Đơn xin Z" in _todo, _todo[:200])
+    check("todo: /all có khối việc cần làm", "Đơn xin Z" in _cap(lambda: handle("all")))
+    _cap(lambda: notify.run("today"))
+    check("todo: digest hôm nay gắn khối to-do khi CÓ việc", _pushed_m and "💳" in _pushed_m[-1])
+    SUCCESS["CheckOpenFeedBack"] = False
+    SUCCESS["GetApplication"] = [dict(SUCCESS["GetApplication"][0], studentStatus="1")]
+    api._CACHE.clear()
+    _cap(lambda: notify.run("today"))
+    check("todo: digest KHÔNG gắn gì khi không có việc", _pushed_m and "📌" not in _pushed_m[-1], _pushed_m[-1][-120:])
+    _none = _cap(lambda: handle("todo"))
+    check("todo: không việc -> 1 dòng ✅", "✅" in _none and "\n" not in _none.strip(), _none)
+    MODE["v"] = "expired"; api._CACHE.clear()
+    _exp = _cap(lambda: handle("todo"))
+    check("todo: token hết hạn -> không nói 'không có việc', nhắc refresh",
+          "không có việc" not in _exp and "refresh" in _exp.lower(), _exp[:200])
+    MODE["v"] = "netdown"; api._CACHE.clear()
+    no_raise("todo: mất mạng không sập", lambda: handle("todo"))
+    _write = {"AddRate", "SubmitStudentFeedback", "UpdateTokedevices", "UpdateTokenDonor", "GetStudentRate", "GetApiActive"}
+    check("todo: không gọi endpoint ghi / GetStudentRate", not (_write & set(_urls)), str(sorted(set(_urls)))[:200])
+finally:
+    MODE["v"] = "success"
+    api.requests.get = _real_fake_get
+    notify._telegram = _saved_tg
+    for _k, _v in _saved_m.items():
+        if _v is None: SUCCESS.pop(_k, None)
+        else: SUCCESS[_k] = _v
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)

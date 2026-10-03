@@ -2259,6 +2259,110 @@ def test_notify_notifications_also_checks_applications_isolated():
     finally:
         N.push_new_notifications, N.push_application_changes = saved
 
+# ---- B4a: khối "Việc cần làm · To-do" (CheckOpenFeedBack · đơn '3' chờ thanh toán) ----
+def _fake_call(table, log=None):
+    """call() giả theo endpoint: giá trị là (http, data) hoặc Exception để ném. Ghi lại (endpoint, params)."""
+    def _c(endpoint, params, *a, **k):
+        if log is not None:
+            log.append((endpoint, dict(params)))
+        v = table.get(endpoint, (200, {"code": "200", "data": []}))
+        if isinstance(v, BaseException):
+            raise v
+        return v
+    return _c
+
+def test_todo_items_and_block_pure():
+    from fapc.core.extras import todo_items, todo_block, _feedback_open
+    for v, want in ((True, True), ("true", True), (" TRUE ", True), (False, False), ("false", False),
+                    ("", False), (None, None), ([], None), (1, None)):
+        assert _feedback_open(v) is want, (v, want)
+    pay = [{"w_APP_ID": "1", "name": "Đơn P", "createDate": "02/10/2026", "studentStatus": "3"},
+           {"w_APP_ID": "2", "name": "Đơn Q", "studentStatus": 3},                 # int 3 cũng là chờ thanh toán
+           {"w_APP_ID": "3", "name": "Đơn R", "studentStatus": "1"}]
+    items = todo_items("true", pay)
+    assert len(items) == 3 and items[0].startswith("📝") and "myFAP" in items[0]
+    assert "Đơn P (02/10/2026)" in items[1] and items[1].startswith("💳") and "Đơn Q" in items[2]
+    assert all("Đơn R" not in i for i in items)
+    assert todo_items(False, []) == [] and todo_items(None, None) == []
+    full = todo_block("true", pay)
+    assert full.startswith("📌") and "3" in full.split("\n")[0] and ("chỉ ĐỌC" in full or "read-only" in full)
+    none = todo_block(False, [])
+    assert ("không có việc gì" in none or "nothing to do" in none) and "\n" not in none   # 1 dòng ngắn
+    unk = todo_block(None, None, "⚠️ Token FAP có thể đã hết hạn")
+    assert "không có việc" not in unk and "nothing to do" not in unk                # KHÔNG nói dối "không có việc"
+    assert ("chưa kiểm tra được" in unk or "couldn't check" in unk) and "hết hạn" in unk
+    part = todo_block(None, pay[:1])                                                # có việc + 1 nguồn không biết
+    assert "💳" in part and ("Chưa kiểm tra được: feedback" in part or "Couldn't check: feedback" in part)
+    part2 = todo_block(False, None)                                                 # không việc + đơn từ không biết
+    assert ("không có việc gì" in part2 or "nothing to do" in part2) and "❔" in part2
+
+def test_todo_fetch_isolates_failures_and_stays_read_only():
+    import fapc.core.extras as E
+    saved = E.call
+    log = []
+    try:
+        E.call = _fake_call({
+            "CheckOpenFeedBack": (200, {"code": "201", "message": "Token invalid", "data": None}),   # -> SystemExit
+            "GetApplication": (200, {"code": "200", "data": [{"w_APP_ID": "9", "name": "Đơn P", "studentStatus": "3"}]}),
+        }, log)
+        fb, apps, err = E.todo_fetch("test-key", "FPTU", "HE000000")
+        assert fb is None and apps and apps[0]["name"] == "Đơn P"         # 1 nguồn hỏng KHÔNG kéo sập nguồn kia
+        assert err and ("hết hạn" in err or "expired" in err)
+        assert [e for e, _ in log] == ["CheckOpenFeedBack", "GetApplication"]          # đúng 2 GET, KHÔNG endpoint ghi
+        assert all(p == {"campusCode": "FPTU", "Authen": "test-key", "rollNumber": "HE000000"} for _, p in log)
+        E.call = _fake_call({"CheckOpenFeedBack": (None, "Lỗi mạng (ConnectionError) khi gọi CheckOpenFeedBack"),
+                             "GetApplication": RuntimeError("boom")})
+        fb, apps, err = E.todo_fetch("test-key", "FPTU", "HE000000")
+        assert fb is None and apps is None and err == "boom"              # mạng hỏng = không biết, KHÔNG phải []
+        txt = E.todo_text("test-key", "FPTU", "HE000000")
+        assert "không có việc" not in txt and "nothing to do" not in txt
+        E.call = _fake_call({"CheckOpenFeedBack": (200, {"code": "200", "data": "true"})})
+        assert "📝" in E.todo_text("test-key", "FPTU", "HE000000")
+    finally:
+        E.call = saved
+
+def test_botcore_todo_command_menu_and_help():
+    import fapc.app.bot_core as B, fapc.core.extras as E
+    assert "todo" in B.COMMANDS and ("todo", B.menu_commands()[B.COMMANDS.index("todo")][1]) in B.menu_commands()
+    overview = next(items for title, items in B.command_groups() if title in ("Tổng quan", "Overview"))
+    assert ("todo", "📌") in [(n, e) for n, e, _ in overview]
+    assert "📌 /todo" in B.help_text()
+    saved = (B.creds, B.current_semester, E.call)
+    try:
+        B.creds = lambda: ("test-key", "FPTU", "HE000000")
+        B.current_semester = lambda *a, **k: "Fall2026"
+        E.call = _fake_call({"CheckOpenFeedBack": (200, {"code": "200", "data": True})})
+        out = B.handle("/todo")
+        assert "📝" in out and "📌" in out
+    finally:
+        B.creds, B.current_semester, E.call = saved
+
+def test_notify_today_appends_todo_only_when_items():
+    import fapc.app.notify as N, fapc.app.bot_core as B, fapc.core.extras as E
+    from fapc.core import api as A
+    saved = (N.push, B.creds, B.current_semester, B.fetch_sessions, B._vn_now, A.creds, E.call)
+    try:
+        sent = []
+        N.push = lambda text: (sent.append(text), ["Telegram"])[1]
+        B.creds = A.creds = lambda: ("test-key", "FPTU", "HE000000")
+        B.current_semester = lambda *a, **k: "Summer2026"
+        B.fetch_sessions = lambda *a, **k: [MON]
+        B._vn_now = lambda: datetime.datetime(2026, 6, 15, 8, 0)
+        E.call = _fake_call({"CheckOpenFeedBack": (200, {"code": "200", "data": True})})
+        _cap(lambda: N.run("today"))
+        assert "EXE101" in sent[-1] and ("Việc cần làm" in sent[-1] or "To-do" in sent[-1])
+        assert sent[-1].index("EXE101") < sent[-1].index("📌")                # lịch trước, to-do gắn SAU
+        E.call = _fake_call({"CheckOpenFeedBack": (200, {"code": "200", "data": False})})
+        _cap(lambda: N.run("today"))
+        assert "EXE101" in sent[-1] and "📌" not in sent[-1]                 # không có việc -> KHÔNG gắn gì
+        E.call = _fake_call({"CheckOpenFeedBack": RuntimeError("x"), "GetApplication": (None, "Lỗi mạng")})
+        _cap(lambda: N.run("today"))
+        assert "EXE101" in sent[-1] and "📌" not in sent[-1]                 # lỗi -> digest lịch vẫn nguyên vẹn
+        _cap(lambda: N.run("tomorrow"))
+        assert "📌" not in sent[-1]                                          # chỉ digest HÔM NAY mới gắn
+    finally:
+        N.push, B.creds, B.current_semester, B.fetch_sessions, B._vn_now, A.creds, E.call = saved
+
 def test_notification_preview_and_full_text():
     import fapc.core.extras as E
     from fapc.core.extras import _notif_body, _notif_line

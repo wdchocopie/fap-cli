@@ -13,7 +13,7 @@
 | Lệnh · Command | Tác dụng · What it does |
 |---|---|
 | `fap notify test` | vi · gửi tin nhắn thử "kênh hoạt động" tới mọi kênh đã cấu hình — kiểm tra dây nối. en · send a "channels work" sanity ping to every configured channel. |
-| `fap notify today` | vi · gửi lịch **HÔM NAY** (theo giờ VN). en · push **TODAY's** schedule (VN time). |
+| `fap notify today` | vi · gửi lịch **HÔM NAY** (theo giờ VN); **có việc cần làm** (feedback đang mở / đơn chờ thanh toán) thì gắn thêm khối **📌 Việc cần làm** ở cuối — xem [§11](#11-việc-cần-làm--to-do). en · push **TODAY's** schedule (VN time); when there is **something to do** a **📌 To-do** block is appended (see §11). |
 | `fap notify tomorrow` | vi · gửi lịch **NGÀY MAI**. en · push **TOMORROW's** schedule. |
 | `fap notify weekly` | vi · gửi lịch **CẢ TUẦN** (T2–CN). en · push the **WHOLE WEEK** (Mon–Sun). |
 | `fap notify semester [pattern\|weeks\|list] [<kỳ>]` | vi · gửi lịch **CẢ KỲ**: mẫu lặp hằng tuần (mặc định) / mỗi tuần 1 dòng / liệt kê từng ngày. en · push the **WHOLE TERM**: weekly pattern (default) / one line per week / day-by-day list. |
@@ -195,11 +195,11 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
 
 ## 8. Bot tương tác · Interactive bots
 
-**VI —** Khác với `notify` (đẩy 1 chiều), bot là **tiến trình chạy nền** trả lời lệnh bạn gõ trong chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [môn]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [điểm]`, `/status`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
-**EN —** Unlike `notify` (one-way push), a bot is a **long-running process** that answers commands you type in chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [subject]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [mark]`, `/status`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
+**VI —** Khác với `notify` (đẩy 1 chiều), bot là **tiến trình chạy nền** trả lời lệnh bạn gõ trong chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [môn]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [điểm]`, `/status`, `/todo`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
+**EN —** Unlike `notify` (one-way push), a bot is a **long-running process** that answers commands you type in chat: `/today`, `/tomorrow`, `/week`, `/weekly`, `/semester`, `/courses`, `/grades`, `/grades-detail [subject]`, `/gpa`, `/gpa-trend`, `/credits`, `/conduct`, `/attendance`, `/banrisk`, `/exams`, `/exam-countdown`, `/whatif [mark]`, `/status`, `/todo`, `/all`, `/notifications`, `/profile`, `/applications`, `/help`.
 
-> ✅ **VI —** Danh sách trên là **23/23 lệnh** — đúng bằng `COMMAND_INFO`. Trước đây `/help` và các nút web chép tay nên **sót 6 lệnh** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): chúng chạy được nhưng **không ai thấy**. Nay `/help` + nút web đều **sinh từ `COMMAND_INFO`** (`bot_core.command_groups()`), lệnh chưa xếp nhóm tự rơi vào nhóm **"Lệnh khác"** thay vì biến mất ⇒ **không thể sót nữa**. Bản chuẩn luôn là `/help`.
-> ✅ **EN —** That is **23 of 23 commands** — exactly `COMMAND_INFO`. `/help` and the web buttons used to be hand-written lists that **missed 6 commands** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): they worked, but nobody could see them. Both are now **generated from `COMMAND_INFO`** (`bot_core.command_groups()`), and an ungrouped command falls into a trailing **"More"** group instead of disappearing ⇒ **drift is now impossible**. `/help` is always the source of truth.
+> ✅ **VI —** Danh sách trên là **24/24 lệnh** — đúng bằng `COMMAND_INFO`. Trước đây `/help` và các nút web chép tay nên **sót 6 lệnh** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): chúng chạy được nhưng **không ai thấy**. Nay `/help` + nút web đều **sinh từ `COMMAND_INFO`** (`bot_core.command_groups()`), lệnh chưa xếp nhóm tự rơi vào nhóm **"Lệnh khác"** thay vì biến mất ⇒ **không thể sót nữa**. Bản chuẩn luôn là `/help`.
+> ✅ **EN —** That is **24 of 24 commands** — exactly `COMMAND_INFO`. `/help` and the web buttons used to be hand-written lists that **missed 6 commands** (`weekly`, `courses`, `exam-countdown`, `gpa-trend`, `credits`, `conduct`): they worked, but nobody could see them. Both are now **generated from `COMMAND_INFO`** (`bot_core.command_groups()`), and an ungrouped command falls into a trailing **"More"** group instead of disappearing ⇒ **drift is now impossible**. `/help` is always the source of truth.
 
 > 🎓 **VI —** `/semester` gửi lịch **CẢ KỲ** (mặc định = **mẫu lặp hằng tuần** mỗi môn + buổi lệch mẫu; `/semester weeks` = mỗi tuần 1 dòng; `/semester list` = liệt kê từng ngày, tin này **dài** nên sẽ bị chia thành nhiều mẩu). ⚠️ Mẫu đó **suy ra** từ lịch xếp cả kỳ nên **KHÔNG phản ánh buổi huỷ / nghỉ lễ** — ghi chú này in **ngay trong tin**. Nghi ngờ một tuần cụ thể thì dùng **`fap week-exact`** ở CLI (`GetActivityStudentByWeek`, bản server trả cho đúng tuần đó); `week-exact` **không** phải lệnh bot.
 > 🎓 **EN —** `/semester` pushes the **whole term** (default = each subject's **repeating weekly slot** + off-pattern sessions; `/semester weeks` = one line per week; `/semester list` = day-by-day, a **long** reply that gets split into several messages). ⚠️ The pattern is **inferred** from the planned term timetable, so it does **NOT reflect cancellations or holidays** — that caveat is printed **inside the message**. For a disputed week use **`fap week-exact`** on the CLI (`GetActivityStudentByWeek`, the server's answer for that exact week); `week-exact` is **not** a bot command.
@@ -396,3 +396,35 @@ fap watch-attendance loop 15 --absent-only
 
 > ⚠️ **VI —** Như `seen_notifications.json`: `applications_state.json` là mốc **riêng từng máy** — đừng copy sang máy khác (sẽ báo trùng/báo sót).
 > ⚠️ **EN —** Like `seen_notifications.json`, `applications_state.json` is a **per-machine** baseline — don't copy it between machines (duplicate/missed alerts).
+
+---
+
+## 11. Việc cần làm · To-do
+
+**VI —** `fap todo` / `/todo` gom những việc **chỉ bạn làm được** trong **app myFAP chính thức** — fap-cli **chỉ đọc**, không bao giờ nộp feedback hay thanh toán thay bạn (không gọi `AddRate` / `SubmitStudentFeedback`).
+**EN —** `fap todo` / `/todo` lists what **only you can do** in the **official myFAP app** — fap-cli is **read-only** and never submits feedback or pays for you (no `AddRate` / `SubmitStudentFeedback`).
+
+| Mục · Item | Nguồn · Source | Khi nào hiện · Shown when |
+|---|---|---|
+| 📝 Đợt feedback giảng dạy đang mở · teaching-feedback round open | `CheckOpenFeedBack` | `data` là `true` — boolean **hoặc chuỗi** `'true'` (app 2.0.5 nhận cả hai) · `data` is `true`, boolean **or the string** `'true'` (app 2.0.5 accepts both) |
+| 💳 Đơn chờ thanh toán · application awaiting payment | `GetApplication` | `studentStatus` = `3` (mỗi đơn 1 dòng) · one line per application |
+
+```
+📌 Việc cần làm  ·  2
+━━━━━━━━━━━━━━━━
+📝 Đang mở đợt feedback giảng dạy — làm trên app myFAP (hoặc fap.fpt.edu.vn).
+💳 Đơn chờ thanh toán: Đơn xin … (02/10/2026) — thanh toán trong app myFAP.
+ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên trong app myFAP chính thức.
+```
+
+**VI —**
+- **Không có việc** → đúng 1 dòng `📌 Việc cần làm: ✅ không có việc gì.`
+- Mỗi nguồn **cô lập lỗi**: nguồn nào hỏng (mạng / token) thì ghi `❔ Chưa kiểm tra được: …` — **không bao giờ** báo "không có việc" khi chưa kiểm được gì.
+- Có mặt ở: `fap todo`, `/todo` (menu + slash), cuối `/all`, và **gắn vào cuối `fap notify today` CHỈ KHI có ≥1 việc** (ngày không có việc thì digest y như cũ). Tốn **2 request**; đặt `FAP_CACHE_MIN` nếu muốn dùng chung cache theo giờ.
+- `GetStudentRate` **không** dùng: nghĩa các trường của nó chưa kiểm chứng.
+
+**EN —**
+- **Nothing to do** → a single line `📌 To-do: ✅ nothing to do.`
+- Each source is **failure-isolated**: a failed source (network / token) prints `❔ Couldn't check: …` — it **never** claims "nothing to do" when nothing could be checked.
+- Available as `fap todo`, `/todo` (menu + slash), at the end of `/all`, and **appended to `fap notify today` ONLY when there is at least one item** (on a clear day the digest is unchanged). Costs **2 requests**; set `FAP_CACHE_MIN` to share the per-hour cache.
+- `GetStudentRate` is **not** used: its field meanings are unverified.
