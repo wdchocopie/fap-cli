@@ -30,7 +30,7 @@
 | `GetActivityStudent.attendanceStatus` | Mã **1 chữ**: `P` có mặt · `A` vắng · còn lại (thực tế `N`) = chưa diễn ra — theo hàm `getAttendanceStatus` của app. **Không có mã "muộn".** · One-letter code per the app's own function. | `attendance.session_status` / `att_tail`: ✅/❌ ở buổi đã qua; ngày vắng theo môn trong `/attendance` |
 | `GetActivityStudent.date` | `"M/D/YYYY 12:00:00 AM"` (vd `9/14/2026 12:00:00 AM`) | `parse_session` / `parse_date` lấy phần trước dấu cách |
 | `getCourseAttendance.attendanceStatus` | Chữ **đầy đủ**: `Present` / `Absent` / `Future` (khác endpoint lịch) · full words, unlike the schedule | Watcher điểm danh đọc bằng chữ; `session_status` nhận **cả hai** dạng |
-| `GetApplication.studentStatus` | `"0"` đang xử lý · `"1"` đã được chấp nhận · còn lại bị từ chối — theo `getStatusConfig` + bảng i18n `lb_appli_status_*` của app | Huy hiệu ⏳/✅/❌. **Cố ý khác app:** mã lạ hiện `❔ <mã>` thay vì "từ chối" |
+| `GetApplication.studentStatus` | **Theo app 2.0.5** (`getStatusConfig` + i18n `lb_appli_status_*`): `"0"` đang xử lý · `"1"` đã được chấp nhận · `"2"` **Hủy** · `"3"` **Đang chờ thanh toán** · khác **"Khác"**. ⚠️ App 2.0.4 chỉ có nhánh 0/1, mọi mã khác rơi vào "Đã bị từ chối" ⇒ `"2"` **từng** bị hiển thị là "từ chối" — 2.0.5 sửa lại và bỏ hẳn nhãn đó · per the 2.0.5 app; 2.0.4 showed every other code as "rejected" | Huy hiệu ⏳ / ✅ / 🚫 / 💳; mã lạ hiện `❔ Khác (mã N)` (khớp nhãn "Khác" của app) |
 | `GetNotificationByRoll.contents` | **Text thuần** có xuống dòng (0/19 có `<`), 77–888 ký tự · plain text with newlines | Chỉ bóc **thẻ HTML thật theo tên** (không phải `<[^>]+>` — sẽ xoá nhầm `<MSSV>`, `điểm < 5`, `->`). Trích 1 dòng ≤140 ký tự, không cắt giữa URL |
 | `GetNotificationByRoll.id` | Số nguyên **2–3 chữ số, duy nhất**, thứ tự giảm dần = mới nhất trước · stable small int | Khoá `#id` cho `/notifications <id>` (KHÔNG dùng vị trí: đổi khi có tin mới, và Discord đánh số lại danh sách Markdown) |
 | `GetNotificationByRoll.rollnumbers` | Có thể chứa **mã SV của người khác** (5/19 có giá trị) · may hold other students' roll numbers | **Không bao giờ hiển thị** |
@@ -82,13 +82,22 @@
 
 **EN —** Check `versionCode` with `gplaydl info com.fuct`; diff response fields with `fap extract` + `analysis/keys_schema.py`; read status mappings from the app's own functions in a disassembly kept **outside the repo** (or in gitignored paths), printing only identifier-shaped strings; diff the `MyFAP/…` endpoint set against [01](01-reverse-engineering.md) §B.
 
+> ⚠️ **VI — Từ 2.0.5, versionCode KHÔNG còn đủ.** App tự cập nhật JS qua **OTA** (máy chủ của bên phát triển app — `codepushota.ptudev.net`, không phải `fpt.edu.vn`), có cả bản **bắt buộc reload ngay**. Endpoint, trường, ánh xạ mã có thể đổi mà Play Store **không** có bản mới. Cách theo dõi:
+> 1. Định kỳ `fap extract` rồi so `analysis/keys_schema.py` với lần trước — đổi khoá = đáng xem.
+> 2. Trên máy/emulator **của mình**, xem `adb logcat` dòng `[OTA]` ("Update available", "Bundle … ready"); có bundle OTA thì phân tích **bundle đó** chứ không phải asset trong APK.
+> 3. **Không** tự gọi máy chủ OTA (cần deployment key, đăng ký deviceId — không phải dữ liệu của mình).
+> 4. Mỗi APK mới: chạy lại bước 3–4 ở trên. Đặc tả API v2 (chưa dùng): [21-api-v2](21-api-v2.md).
+>
+> ⚠️ **EN — Since 2.0.5 the versionCode is no longer enough:** the app updates its JS **over the air** (the vendor's server, not `fpt.edu.vn`), including mandatory reloads, so endpoints/fields/mappings can change with no new Play release. Diff `analysis/keys_schema.py` output periodically, watch `[OTA]` lines in `adb logcat` on your own device and analyse the downloaded bundle, never query the OTA server yourself, and re-run steps 3–4 for every new APK. API v2 spec: [21-api-v2](21-api-v2.md).
+
 ---
 
 ## 6. Phiên bản đã kiểm · Versions checked
 
 | versionCode | Tên · Name | Kết quả · Result |
 |---|---|---|
-| 26 | myFAP 2.0.4 | 38 endpoint (37 MyFAP + GetRequiredSurvey), không endpoint ẩn; ánh xạ mã trạng thái như §1 |
+| 26 | myFAP 2.0.4 | 38 endpoint (37 MyFAP + GetRequiredSurvey), không endpoint ẩn; `studentStatus` chỉ có nhánh 0/1 (mọi mã khác = "từ chối") |
+| 29 | myFAP 2.0.5 | **v1 y hệt** (37 + GetRequiredSurvey; SECRET/BASE/CLIENT_ID/ISSUER/REDIRECT_URI giữ nguyên ⇒ fap-cli chạy bình thường). **Mới:** API v2 qua `fap-proxy.fpt.edu.vn` (39 đường dẫn, chọn bằng `GetApiActive`, mặc định v1 — [21](21-api-v2.md)); `studentStatus` thêm `2` Hủy / `3` Chờ thanh toán / Khác (§1); OTA tự host thay CodePush (§5); minSdk 24 → 32, targetSdk 35 → 37; bỏ ô "Thanh toán điện tử" khỏi trang chủ. `attendanceStatus` không đổi. Bundle **vẫn** chứa dữ liệu cá nhân của người khác |
 
 ---
 
