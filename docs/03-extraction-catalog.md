@@ -1,6 +1,6 @@
 # Danh mục toàn bộ thông tin có thể extract từ FAP
 
-Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng MyFAP (FPT University, package `com.fuct`, React Native + Hermes bytecode) cùng với **dữ liệu cục bộ** lưu trên thiết bị. Hầu hết endpoint dùng base URL `https://api.fpt.edu.vn` (riêng khảo sát dùng `survey.fpt.edu.vn`, hóa đơn Đà Nẵng dùng `dng.fpt.edu.vn`). Cơ chế xác thực gồm hai phần: tham số **`Authen`** (token đăng nhập lưu plaintext trong AsyncStorage key `authenkey`) và **`checksum`** ký theo **HMAC-SHA1** với SECRET hard-code trong hàm `getCheckSumAuthenicated`, công thức dựng từ `rollNumber + "MYFAP" + campusCode + giờ hiện tại` (sai checksum trả `code=201` "Thông tin checksum không chính xác"). Ngoài API, một lượng lớn dữ liệu (hồ sơ đầy đủ, danh mục môn ~3240 lớp, danh sách học kỳ, số dư) đã được **cache offline** trong SQLite `catalystLocalStorage`, đọc được không cần mạng. Mức độ tin cậy: `confirmed` = có mẫu phản hồi thật / cache thật; `high` = đọc trường trực tiếp trong bundle; `medium`/`low` = suy đoán từ tên endpoint và nhãn UI.
+Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng MyFAP (FPT University, package `com.fuct`, React Native + Hermes bytecode) cùng với **dữ liệu cục bộ** lưu trên thiết bị. Hầu hết endpoint dùng base URL `https://api.fpt.edu.vn` (riêng khảo sát dùng `survey.fpt.edu.vn`, trang hoá đơn / thanh toán điện tử dùng `dng.fpt.edu.vn` — app hiện cho mọi campus). Cơ chế xác thực gồm hai phần: tham số **`Authen`** (token đăng nhập lưu plaintext trong AsyncStorage key `authenkey`) và **`checksum`** ký theo **HMAC-SHA1** với SECRET hard-code trong hàm `getCheckSumAuthenicated`, công thức dựng từ `rollNumber + "MYFAP" + campusCode + giờ hiện tại` (sai checksum trả `code=201` "Thông tin checksum không chính xác"). Ngoài API, một lượng lớn dữ liệu (hồ sơ đầy đủ, danh mục môn ~3240 lớp, danh sách học kỳ, số dư) đã được **cache offline** trong SQLite `catalystLocalStorage`, đọc được không cần mạng. Mức độ tin cậy: `confirmed` = có mẫu phản hồi thật / cache thật; `high` = đọc trường trực tiếp trong bundle; `medium`/`low` = suy đoán từ tên endpoint và nhãn UI.
 
 ---
 
@@ -44,7 +44,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | `GetCourseOfSemester` | Danh sách môn/lớp đăng ký trong kỳ (kèm CourseId) | `campusCode`, `Authen`, `checksum`, `rollNumber`, `semester` | `courseId`, `subjectCode`, `subjectName`, `groupName`, `slot`, `room`, `lecturer`, `sessionNo` | high |
 | `GetActivityStudent` | Lịch học theo kỳ (xem theo ngày, đếm buổi/ngày) | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `date` (`M/D/YYYY 12:00:00 AM`), `slot`, `slotTime`, `subjectCode`, `roomNo`, `isOnline` (`"true"`/`"false"`), `meetURL` (**mã Meet trần**, không phải URL), `attendanceStatus` (`P`/`A`/`N`), `material` (URL), `lecturer`, `sessionNo`, `groupName` — ý nghĩa: [20](20-api-fields.md) §1 | high |
 | `GetActivityStudentByWeek` | Thời khóa biểu theo tuần | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber`, `week`, `year` | `date`, `slot`, `subjectCode`, `room`, `lecturer`, `sessionNo`, `groupName`, `dayOfWeek` | high |
-| `GetScheduleExam` | Lịch thi trong một kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `examSubject`, `examDate`, `examTime`, `examRoom`, `examType`, `examForm` | high |
+| `GetScheduleExam` | Lịch thi trong một kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `examSubject`, `examDate`, `examTime`, `examRoom`, `examType`, `examForm` · thẻ lịch thi của **app 2.0.5** đọc `realSubject` (Môn thi), `date`, `time`, `roomNo`, `kythi` (Kiểu), `note` (Ghi chú) · fap-cli dò **mọi biến thể, không phân biệt hoa/thường**, dùng chung cho `exams` / `exam-countdown` / `.ics` | high |
 | `GetStudentAttendances` | Tổng hợp điểm danh theo kỳ (số buổi, % chuyên cần) | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `groupName`, `subjectCode`, `rollNumber`, `numberOfTakenAttendances`, `numberOfAttendances`, `attendance`, `startDate`, `endDate` | **confirmed** |
 | `getCourseAttendance` | Chi tiết điểm danh từng buổi của một lớp/môn | `campusCode`, `Authen`, `ClassName`, `Semester`, `SubjectCode`, `checksum`, `rollNumber` | `date`, `slot`, `className`, `lecturer`, `attendanceStatus`, `present`, `absent` | high |
 
@@ -64,20 +64,20 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | Endpoint | Lấy gì | Tham số | Trường trả về | Độ tin |
 |---|---|---|---|---|
 | `GetBalance` | Số dư tài khoản hiện tại (VND) | `campusCode`, `Authen`, `checksum`, `rollNumber` | `balance` (data vô hướng, số) | high |
-| `GeFeeByRoll` *(sai chính tả "GeFee")* | Danh sách khoản học phí/hóa đơn theo MSSV | `campusCode`, `Authen`, `checksum`, `rollNumber` | `amount`, `invoiceNo`, `invoiceDate`, `note`, `rollNumber`, `balance` | high |
-| `Invoice` *(dng.fpt.edu.vn)* | Trang HTML hóa đơn học phí (chỉ campus Đà Nẵng), mở WebView | `StudentId` (= rollNumber) | *(HTML, không phải JSON)* | confirmed |
+| `GeFeeByRoll` *(sai chính tả "GeFee")* | Danh sách khoản học phí/hóa đơn theo MSSV | `campusCode`, `Authen`, `checksum`, `rollNumber` | `amount`, `invoiceNo`, `invoiceDate`, `note`, `rollNumber`, `balance` · với nhiều tài khoản trả **HTTP 404** + JSON chỉ có khoá `Message` (**không** có envelope `code`/`data`) — dump thật; `fap fees` báo "không dùng được với tài khoản này" thay vì "chưa có học phí" | high (404: confirmed) |
+| `Invoice` *(dng.fpt.edu.vn)* | Trang hoá đơn / thanh toán điện tử học phí. **myFAP 2.0.5 hiện nút này cho MỌI campus** (nút `lb_fee_dng` — "Thanh toán điện tử" / "FPT DNG" — trên màn Học phí, không có điều kiện campus); ghi chú "chỉ Đà Nẵng" trước đây là **giả định của fap-cli**, không phải của app. App mở bằng **trình duyệt ngoài** (`Linking.openURL`), không phải WebView. `fap fees` chỉ **in link** (dựng tại chỗ, không gọi) và **chỉ ở CLI** — link chứa MSSV nên không đưa vào bot/notify/web | `StudentId` (= rollNumber, nối thẳng vào cuối URL `…/Invoice?StudentId=`) | *(HTML, không phải JSON)* | confirmed |
 
 ### A.7. Tin tức / Thông báo
 
 | Endpoint | Lấy gì | Tham số | Trường trả về | Độ tin |
 |---|---|---|---|---|
-| `GetTop10News` | 10 tin tức mới nhất của campus theo loại | `campusCode`, `Authen`, `checksum`, `type` | `Title`, `Contents`, `EntryDate`, `EntryBy` *(có thể `Url`/`Image`)* | medium |
-| `SearchNews` | Tìm tin tức theo từ khóa + loại | `campusCode`, `Authen`, `checksum`, `keysearch`, `type` | `Title`, `Contents`, `EntryDate`, `EntryBy` | medium |
+| `GetTop10News` | 10 tin tức mới nhất của campus theo loại | `campusCode`, `Authen`, `checksum`, `type` | màn tin **app 2.0.5** đọc `tittle` *(typo của FAP)*, `content`, `createDate` · biến thể hoa `Title`, `Contents`, `EntryDate`, `EntryBy` *(có thể `Url`/`Image`)* — fap-cli đọc **cả hai, không phân biệt hoa/thường** | medium |
+| `SearchNews` | Tìm tin tức theo từ khóa + loại | `campusCode`, `Authen`, `checksum`, `keysearch`, `type` | như `GetTop10News` (`tittle`/`content`/`createDate` hoặc `Title`/`Contents`/`EntryDate`/`EntryBy`) | medium |
 | `GetNotificationByRoll` | Thông báo cá nhân gửi tới sinh viên | `campusCode`, `Authen`, `checksum`, `rollNumber` | `id` (số nhỏ, ổn định), `title`, `contents` (**text thuần**), `entryBy`, `entryDate`, `pType`, `topic`, `uRL`, `campusId`, `rollnumbers` (⚠️ có thể là mã SV **người khác** — không hiển thị) — [20](20-api-fields.md) | high |
 | `GetNotificationByDonor` | Thông báo cho phụ huynh/người bảo trợ | `CampusCode` *(C hoa)*, `Authen`, `rollNumber` *(không có checksum)* | `Title`, `Contents`, `EntryBy`, `EntryDate` | high |
 | `GetApplication` | Danh sách đơn từ + trạng thái xử lý | `campusCode`, `Authen`, `checksum`, `rollNumber` | `w_APP_ID`, `name`, `description`, `processNote`, `createDate` (`dd/mm/yyyy`), `studentStatus` (theo app 2.0.5: `0` xử lý / `1` chấp nhận / `2` hủy / `3` chờ thanh toán / khác), `fileUpLoad` (⚠️ tệp đính kèm), `amount` — [20](20-api-fields.md) | high |
 
-> `keysearch` được `encodeURIComponent` + trim trước khi gọi. News và Notification dùng chung hạ tầng (state `dataNotifi`), tên trường gốc từ FAP là `Title`, `Contents` (có "s"), `EntryDate`, `EntryBy`.
+> `keysearch` được `encodeURIComponent` + trim trước khi gọi. News và Notification dùng chung hạ tầng (state `dataNotifi`). Trong app 2.0.5, bộ khoá hoa `Title`, `Contents` (có "s"), `EntryDate`, `EntryBy` được map ở **luồng tin nhắn** (`MESSENGER_USER` → `title`/`content`/`userSend`/`dateSend`), còn **màn tin tức** đọc `tittle`/`content`/`createDate` — vì vậy fap-cli so khớp khoá **không phân biệt hoa/thường** và nhận cả `content` lẫn `contents`.
 
 ### A.8. Hệ thống
 
@@ -126,7 +126,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 - **Thời khóa biểu:** `GetActivityStudentByWeek` (TKB theo tuần) + `GetWeekByDate` (quy đổi ngày → tuần) + `GetCourseOfSemester` (lấy `CourseId`/danh sách lớp). Đây là bộ ba lõi cho app lịch học.
 - **Điểm:** `GetStudentMark` (điểm **tổng kết** mỗi môn trong kỳ, kèm `courseID`) + `AcademicTranscript` (bảng điểm toàn khóa) + `GetMarkByCourse` (**điểm thành phần** một môn theo `courseID`). `GetSemester` cung cấp danh sách kỳ để đổ dropdown.
 - **Điểm danh:** `GetStudentAttendances` (đã có mẫu thật, đáng tin nhất) + `getCourseAttendance` (chi tiết từng buổi).
-- **Học phí:** `GeFeeByRoll` (danh sách hóa đơn) + `GetBalance` (số dư).
+- **Học phí:** `GeFeeByRoll` (danh sách hóa đơn; có thể 404 tuỳ tài khoản) + `GetBalance` (số dư) + link `dng.fpt.edu.vn/Invoice?StudentId=<MSSV>` (trang hoá đơn điện tử, mọi campus — chỉ in ở CLI vì chứa MSSV).
 - **Tra cứu nhanh / offline:** cache `RKStorage:profile`, `:subjects`, `:semester` cho phép dựng phần lớn UI mà **không cần gọi mạng hay checksum**.
 
 **Endpoint GHI / ĐỔI dữ liệu — CẢNH BÁO (gọi sẽ thay đổi trạng thái máy chủ, không phải chỉ đọc):**
