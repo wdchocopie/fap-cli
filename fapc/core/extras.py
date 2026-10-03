@@ -22,13 +22,17 @@ _PROFILE_ROWS = [            # (key, nhãn_vi, nhãn_en) — chỉ hiện field 
     ("batch", "Khoá", "Batch"), ("lopchinh", "Lớp", "Class"), ("currentTermNo", "Kỳ hiện tại", "Term"),
     ("mobilePhone", "SĐT", "Phone"), ("iDCard", "CCCD", "ID card"), ("statusCode", "Trạng thái", "Status"),
 ]
+# Field NHẠY CẢM: chỉ in ở CLI (máy của chính bạn). Bot/web mặc định ẨN — tin chat nằm lại trên máy chủ
+# Telegram/Discord và mọi thiết bị đăng nhập. Mặc định full=False để đường mới nào quên truyền cờ vẫn AN TOÀN.
+_PROFILE_PRIVATE = ("dateOfBirth", "mobilePhone", "iDCard")
 
 def fetch_profile(token, campus, roll):
     http, data = call("GetStudentById", [("campusCode", campus), ("Authen", token), ("rollNumber", roll)], roll, campus)
     check_auth(http, data)
     return as_list(data)
 
-def profile_text(token, campus, roll):
+def profile_text(token, campus, roll, full=False):
+    """full=True chỉ cho CLI (`fap profile`): hiện thêm ngày sinh/SĐT/CCCD. Chat gọi mặc định -> ẩn."""
     rows = fetch_profile(token, campus, roll)
     if not rows or not isinstance(rows[0], dict):
         return t("👤 Không lấy được hồ sơ.", "👤 Couldn't fetch profile.")
@@ -36,6 +40,8 @@ def profile_text(token, campus, roll):
     out = [fmt.header("👤", fmt.unescape(r.get("fullname")) or t("Hồ sơ", "Profile"), fmt.unescape(r.get("rollNumber")))]
     seen = set()
     for key, vi, en in _PROFILE_ROWS:
+        if key in _PROFILE_PRIVATE and not full:
+            continue
         if key == "dateOfBirth":
             v = fmt.fmt_date(r["dateOfBirth"]) if r.get("dateOfBirth") else ""
         elif key == "gender":
@@ -46,11 +52,14 @@ def profile_text(token, campus, roll):
         label = t(vi, en)
         if v and label not in seen:          # 'major'/'nganh' cùng nhãn 'Ngành' -> chỉ hiện 1
             seen.add(label); out.append(f"• {label}: {v}")
+    if not full:
+        out.append(t("🔒 Ngày sinh · SĐT · CCCD không gửi lên chat — xem trên máy: fap profile",
+                     "🔒 Date of birth · phone · ID card are not sent to chat — view locally: fap profile"))
     return "\n".join(out)
 
 def profile():
     token, campus, roll = creds()
-    print(profile_text(token, campus, roll))
+    print(profile_text(token, campus, roll, full=True))
 
 # ---------- ĐƠN TỪ (GetApplication) ----------
 def _appl_date(r):

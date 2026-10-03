@@ -522,9 +522,32 @@ def test_profile_text_offline():
     import fapc.core.extras as E
     E.fetch_profile = lambda *a, **k: [{"fullname": "Nguyễn Văn A", "rollNumber": "HE190000",
         "email": "x@gmail.com", "dateOfBirth": "2004-09-15T00:00:00", "gender": True, "statusCode": "HD", "iDCard": ""}]
-    txt = E.profile_text("t", "FPTU", "HE1")
+    txt = E.profile_text("t", "FPTU", "HE1", full=True)                      # CLI
     assert "Nguyễn Văn A" in txt and "HE190000" in txt and "15/09/2004" in txt and "Nam" in txt
     assert "CCCD" not in txt                                                 # field rỗng -> KHÔNG hiện
+
+def test_profile_chat_hides_private_fields():
+    """Chat (mặc định) KHÔNG được chứa ngày sinh / SĐT / CCCD dù server có trả; CLI (full=True) thì có."""
+    import fapc.core.extras as E
+    import fapc.app.bot_core as B
+    rec = {"fullname": "Nguyễn Văn A", "rollNumber": "HE000000", "email": "x@example.com",
+           "dateOfBirth": "2004-09-15T00:00:00", "gender": True, "statusCode": "HD",
+           "mobilePhone": "0900000000", "iDCard": "000000000001"}
+    saved = (E.fetch_profile, B.creds, B.current_semester)
+    try:
+        E.fetch_profile = lambda *a, **k: [dict(rec)]
+        B.creds = lambda: ("t", "FPTU", "HE000000")
+        B.current_semester = lambda *a, **k: "Fall2026"
+        for chat in (E.profile_text("t", "FPTU", "HE000000"), B.handle("profile")):
+            assert "Nguyễn Văn A" in chat and "x@example.com" in chat
+            for secret in ("15/09/2004", "0900000000", "000000000001"):
+                assert secret not in chat, secret
+            assert "fap profile" in chat                                    # chỉ đường xem ở máy
+        cli = E.profile_text("t", "FPTU", "HE000000", full=True)
+        assert all(s in cli for s in ("15/09/2004", "0900000000", "000000000001"))
+        assert "🔒" not in cli
+    finally:
+        E.fetch_profile, B.creds, B.current_semester = saved
 
 def test_default_semester_by_date():
     """Học kỳ mặc định suy theo ngày -> đúng cho MỌI sinh viên/mọi kỳ (không hardcode 1 kỳ)."""
