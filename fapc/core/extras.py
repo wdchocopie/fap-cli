@@ -4,12 +4,12 @@
 
     fap exams   # GetScheduleExam   (cũng dùng cho `fap notify exams` + bot /exams)
     fap news    # GetTop10News
-    fap fees    # GetBalance + GeFeeByRoll
+    fap fees    # GetBalance + GeFeeByRoll + link hoá đơn điện tử (CHỈ CLI — link chứa MSSV)
     fap todo    # CheckOpenFeedBack + CheckUpdateProfile + GetApplication ('3' chờ thanh toán) — việc phải TỰ làm
 
 Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa có dữ liệu — xử lý rỗng đàng hoàng.
 """
-import os, re, datetime
+import os, re, datetime, urllib.parse
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth, _vn_now
 from . import subjects, paths
 from ..i18n import t
@@ -345,9 +345,11 @@ def campuses():
 # GetScheduleExam trả mỗi môn 1 dict. Dữ liệu THẬT (đã xác nhận): subjectCode + examDate ('m/d/Y') +
 # examTime ('HH:MM') + examRoom; có thể kèm examType (PE/FE/2ndFE…) / examForm / groupName. Tên field
 # đổi theo campus/kỳ -> DÒ ĐA BIẾN-THỂ (không phân biệt hoa/thường) như courses.py, đừng cứng 1 tên.
-_EX_SUBJ  = ("subjectcode", "subject", "examsubject")
+# Thẻ lịch thi của app myFAP 2.0.5 đọc: realSubject (Môn thi) · date · time · roomNo · kythi (Kiểu) · note.
+# Danh sách này dùng CHUNG cho `fap exams`, exam-countdown và .ics — sửa 1 chỗ, 3 nơi cùng đúng.
+_EX_SUBJ  = ("subjectcode", "subject", "examsubject", "realsubject", "subjectname")
 _EX_ROOM  = ("examroom", "room", "roomno", "phongthi", "examroomname")
-_EX_TYPE  = ("examtype", "type", "publicexamtype")
+_EX_TYPE  = ("examtype", "type", "publicexamtype", "kythi")
 _EX_FORM  = ("examform", "form", "method", "examformat")
 
 def _exam_get(r, keys):
@@ -419,10 +421,17 @@ def fetch_news(token, campus, roll, keyword=None, type="1"):
             for r in as_list(data) if isinstance(r, dict)]
 
 def _news_get(n, keys):
-    """Giá trị đầu tiên KHÁC RỖNG trong các khóa ứng viên (field tin của FAP đổi theo campus/kỳ)."""
+    """Giá trị đầu tiên KHÁC RỖNG trong các khóa ứng viên — KHÔNG phân biệt hoa/thường (như _exam_get).
+    Field tin của FAP đổi theo campus/kỳ: màn tin của app 2.0.5 đọc 'tittle'/'content'/'createDate', còn
+    docs/03 ghi bộ khoá hoa 'Title'/'Contents'/'EntryDate'/'EntryBy' — so khớp chữ thường thì bắt được cả hai.
+    Duyệt theo THỨ TỰ ưu tiên của `keys`; giá trị toàn khoảng trắng coi như rỗng (thử khoá kế tiếp)."""
+    if not isinstance(n, dict):
+        return ""
     for k in keys:
-        if isinstance(n, dict) and n.get(k) not in (None, ""):
-            return n[k]
+        want = k.lower()
+        for key, v in n.items():               # không gộp thành dict chữ-thường: 'title' rỗng + 'Title' có
+            if str(key).lower() == want and v is not None and str(v).strip():   # chữ thì vẫn lấy được
+                return v
     return ""
 
 def _html_snippet(raw, limit=180):
@@ -433,14 +442,24 @@ def _html_snippet(raw, limit=180):
     txt = re.sub(r"\s+", " ", fmt.unescape(txt)).strip()  # &nbsp;/&amp;… + gộp trắng (kể cả \xa0)
     return (txt[:limit].rstrip() + "…") if len(txt) > limit else txt
 
+# Khoá ứng viên của 1 mục tin (so khớp KHÔNG phân biệt hoa/thường qua _news_get).
+_NEWS_TITLE = ("tittle", "title", "subject")                    # 'tittle' = typo GỐC của FAP, app đọc đúng tên này
+_NEWS_DATE  = ("createDate", "editDate", "entryDate", "date")   # entryDate cũng bắt 'EntryDate'
+_NEWS_BODY  = ("content", "contents", "body", "description")    # 'Contents' (có "s") theo docs/03
+_NEWS_BY    = ("entryBy", "createBy", "author")                 # nơi đăng — có thì hiện cạnh ngày
+
 def _news_line(n):
-    """1 mục tin GỌN: tiêu đề + ngày + trích ngắn. Field FAP thật: 'tittle' (typo của FAP), 'content', 'createDate'."""
-    title = fmt.unescape(_news_get(n, ("tittle", "title", "subject"))) or t("(không tiêu đề)", "(no title)")
-    date = fmt.fmt_date(_news_get(n, ("createDate", "editDate", "entryDate", "date")))
-    snippet = _html_snippet(_news_get(n, ("content", "body", "description")))
+    """1 mục tin GỌN: tiêu đề + ngày (· nơi đăng) + trích ngắn. Field FAP thật: 'tittle' (typo của FAP),
+    'content', 'createDate'; biến thể hoa 'Title'/'Contents'/'EntryDate'/'EntryBy' cũng đọc được."""
+    title = fmt.unescape(_news_get(n, _NEWS_TITLE)) or t("(không tiêu đề)", "(no title)")
+    raw_date = _news_get(n, _NEWS_DATE)
+    date = fmt.fmt_date(raw_date) if raw_date else ""
+    by = fmt.unescape(_news_get(n, _NEWS_BY))
+    snippet = _html_snippet(_news_get(n, _NEWS_BODY))
     line = f"• {title}"
-    if date:
-        line += f"\n   🗓 {date}"
+    meta = " · ".join(x for x in (date, by) if x)
+    if meta:
+        line += f"\n   🗓 {meta}"
     if snippet:
         line += f"\n   {snippet}"
     return line
@@ -451,8 +470,7 @@ def news_text(token, campus, roll, keyword=None, type="1", limit=10):
     if not rows:
         return t(f"📰 Không có tin{' khớp ' + repr(keyword) if keyword else ''}.",
                  f"📰 No news{' matching ' + repr(keyword) if keyword else ''}.")
-    rows = sorted(rows, key=lambda n: str(_news_get(n, ("createDate", "editDate", "entryDate")) or ""),
-                  reverse=True)[:limit]
+    rows = sorted(rows, key=lambda n: str(_news_get(n, _NEWS_DATE) or ""), reverse=True)[:limit]
     head = t(f"Tin tức · tìm {keyword!r}", f"News · search {keyword!r}") if keyword else t("Tin tức", "News")
     return "\n".join([fmt.header("📰", head, str(len(rows)))] + [_news_line(n) for n in rows])
 
@@ -461,18 +479,58 @@ def news(keyword=None, type="1"):
     print(news_text(token, campus, roll, keyword, type))
 
 # ---------- HỌC PHÍ / SỐ DƯ ----------
+# Trang hoá đơn / thanh toán điện tử mà màn Học phí của app mở (nút `lb_fee_dng`, Linking.openURL ra trình
+# duyệt). myFAP 2.0.5 hiện nút này cho MỌI campus — KHÔNG chỉ Đà Nẵng dù host là dng.fpt.edu.vn.
+# fap-cli chỉ DỰNG link tại chỗ (không gọi, không tải) để người dùng tự mở.
+INVOICE_URL = "https://dng.fpt.edu.vn/Invoice?StudentId="
+
+def invoice_url(roll):
+    """THUẦN: link trang hoá đơn điện tử của MSSV `roll` ('' nếu thiếu MSSV).
+    ⚠️ Link chứa MSSV -> CHỈ in ở `fap fees` (terminal của chính bạn), KHÔNG đưa vào bot/notify/web."""
+    r = str(roll or "").strip()
+    return INVOICE_URL + urllib.parse.quote(r, safe="") if r else ""
+
+def fee_details_text(http, fee):
+    """THUẦN: phần "chi tiết học phí" từ phản hồi GeFeeByRoll (http, data) — xét HTTP status TRƯỚC.
+    Với nhiều tài khoản FAP trả HTTP 404 + JSON {'Message': …} (không có envelope code/data): đó là endpoint
+    KHÔNG dùng được cho tài khoản này, không phải "chưa có học phí" -> nói đúng như vậy."""
+    if http == 404:
+        return t("(Mục chi tiết học phí không dùng được với tài khoản của bạn — FAP trả 404 cho GeFeeByRoll. "
+                 "Số dư ở trên lấy từ endpoint khác, không bị ảnh hưởng.)",
+                 "(Fee details aren't available for your account — FAP returns 404 for GeFeeByRoll. "
+                 "The balance above comes from a different endpoint and isn't affected.)")
+    if http is None:                                       # lỗi mạng: `fee` là thông báo ĐÃ che token của call()
+        return t(f"(Không lấy được chi tiết học phí: {fee})", f"(Couldn't fetch fee details: {fee})")
+    if http != 200:
+        return t(f"(Không lấy được chi tiết học phí — FAP trả HTTP {http}.)",
+                 f"(Couldn't fetch fee details — FAP returned HTTP {http}.)")
+    rows = as_list(fee)
+    if rows:
+        return t("Chi tiết học phí:", "Fee details:") + "\n" + fmt.table(rows)
+    return t("(Chưa có chi tiết học phí cho tài khoản này.)", "(No fee details for this account yet.)")
+
+def invoice_text(roll):
+    """THUẦN: dòng link hoá đơn điện tử có nhãn trung tính 2 thứ tiếng ('' nếu thiếu MSSV)."""
+    url = invoice_url(roll)
+    if not url:
+        return ""
+    return t(f"🧾 Hoá đơn / thanh toán điện tử (mở bằng trình duyệt): {url}\n"
+             "   (link có MSSV của bạn — đừng dán vào nhóm chat công khai)",
+             f"🧾 E-invoice / online payment page (open in a browser): {url}\n"
+             "   (the link contains your roll number — don't post it in public chats)")
+
 def fees():
     token, campus, roll = creds()
     http, bal = call("GetBalance", [("campusCode", campus), ("Authen", token), ("rollNumber", roll)], roll, campus)
     check_auth(http, bal)         # nếu không, in nguyên envelope lỗi 201 thành "số dư"
     print(t(f"💰 Số dư tài khoản: {unwrap(bal)}", f"💰 Account balance: {unwrap(bal)}"))
     http, fee = call("GeFeeByRoll", [("campusCode", campus), ("Authen", token), ("rollNumber", roll)], roll, campus)
-    check_auth(http, fee)
-    rows = as_list(fee)
-    if rows:
-        print(t("Chi tiết học phí:", "Fee details:")); print(fmt.table(rows))
-    else:
-        print(t("(Chưa có chi tiết học phí cho tài khoản này.)", "(No fee details for this account.)"))
+    if http != 404:               # 404 = endpoint không dùng được cho tài khoản này (xử lý ở fee_details_text),
+        check_auth(http, fee)     #       KHÔNG phải lỗi xác thực -> đừng để check_auth đoán
+    print(fee_details_text(http, fee))
+    line = invoice_text(roll)
+    if line:
+        print(line)
 
 # ---------- THÔNG BÁO CÁ NHÂN (GetNotificationByRoll) ----------
 def fetch_notifications(token, campus, roll):
@@ -620,17 +678,20 @@ def _exam_dt(r):
 # ---------- ĐẾM NGƯỢC LỊCH THI (exam-countdown) ----------
 def exam_countdown(rows, now):
     """THUẦN: [(days, start_dt, subjectCode, room)] cho kỳ thi SẮP tới (bỏ đã qua), sớm nhất trước.
-    `now` truyền vào (datetime naive, giờ VN) → test offline được. Dùng lại `_exam_dt` (parse generic)."""
+    `now` truyền vào (datetime naive, giờ VN) → test offline được. Dùng lại `_exam_dt` (parse generic) và
+    CÙNG getter + danh sách khoá với `fap exams` (_exam_get/_EX_SUBJ/_EX_ROOM, không phân biệt hoa/thường):
+    trước đây đọc cứng 'subjectCode'/'examRoom' nên hàng 'SubjectCode'/'examSubject' ra '?' dù `fap exams` đúng."""
     out = []
     for r in rows or []:
+        if not isinstance(r, dict):                    # as_list có thể lẫn phần tử lạ -> bỏ, đừng nổ
+            continue
         dt = _exam_dt(r)
         if not dt:
             continue
         days = (dt[0].date() - now.date()).days
         if days < 0:                                   # đã thi xong → bỏ
             continue
-        subj = r.get("subjectCode") or r.get("subjectName") or "?"
-        out.append((days, dt[0], str(subj), str(r.get("examRoom") or r.get("roomNo") or r.get("room") or "")))
+        out.append((days, dt[0], _exam_get(r, _EX_SUBJ) or "?", _exam_get(r, _EX_ROOM)))
     out.sort(key=lambda x: x[1])
     return out
 

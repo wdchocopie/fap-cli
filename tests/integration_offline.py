@@ -583,6 +583,70 @@ finally:
         else: SUCCESS[_k] = _v
     api._CACHE.clear()
 
+# [L] B4b — ĐƯỜNG THẬT requests (mock) -> api.call -> extras/conduct: GeFeeByRoll 404 · link hoá đơn CHỈ ở CLI ·
+#     tin khoá hoa · đếm ngược thi 'examSubject'/hoa · GetDiemphongtrao 201 NullReference vs checksum.
+#     ⚠️ Không đưa output vào `info` của check(): `fap selftest` ở máy thật dùng token.json THẬT -> output có MSSV.
+class _RespL:
+    def __init__(s, status, body): s.status_code = status; s._b = body
+    def json(s): return s._b
+_OVR = {}
+def _fake_get_l(url, **k):
+    ep = url.split("/MyFAP/")[1].split("?")[0]
+    return _OVR[ep] if ep in _OVR else fake_get(url, **k)
+_saved_l = {k: SUCCESS.get(k) for k in ("GetTop10News", "GetScheduleExam")}
+MODE["v"] = "success"
+api.requests.get = _fake_get_l
+try:
+    _roll = ex.creds()[2]
+    _OVR["GeFeeByRoll"] = _RespL(404, {"Message": "No HTTP resource was found that matches the request URI."})
+    api._CACHE.clear()
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()): ex.fees()
+    _fees = _buf.getvalue()
+    check("fees: 404 GeFeeByRoll -> vẫn in số dư (GetBalance)", "50000" in _fees)
+    check("fees: 404 -> báo endpoint không dùng được, KHÔNG nói 'chưa có'", "404" in _fees and "Chưa có chi tiết" not in _fees)
+    check("fees: CLI in link hoá đơn dựng từ MSSV", ex.invoice_url(_roll) in _fees and ex.invoice_url(_roll) != "")
+    _OVR.pop("GeFeeByRoll")
+    _leak = [c for c in COMMANDS if c != "help" and "dng.fpt.edu.vn" in _cap(lambda c=c: handle(c))]
+    check("fees: link hoá đơn KHÔNG lọt vào lệnh bot/notify nào", not _leak, str(_leak))
+    # Tin với khoá HOA (docs/03): Title/Contents/EntryDate/EntryBy
+    SUCCESS["GetTop10News"] = [{"Title": "Tin hoa", "Contents": "<p>Nội <b>dung</b></p>",
+                                "EntryDate": "2026-07-31T10:00:00", "EntryBy": "P.CTSV"}]
+    api._CACHE.clear()
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()): ex.news()
+    _nw = _buf.getvalue()
+    check("news: khoá hoa -> tiêu đề + nội dung + ngày + nơi đăng",
+          "Tin hoa" in _nw and "Nội dung" in _nw and "31/07/2026" in _nw and "P.CTSV" in _nw, _nw[:160])
+    # Đếm ngược thi: khoá hoa + 'examSubject' (ngày TƯƠNG ĐỐI theo giờ VN -> không thành bom hẹn giờ)
+    _fd = api._vn_now().date() + datetime.timedelta(days=5)
+    SUCCESS["GetScheduleExam"] = [{"examSubject": "HOD402", "ExamDate": f"{_fd.month:02d}/{_fd.day:02d}/{_fd.year}",
+                                   "ExamTime": "07:30", "ExamRoom": "BE-101"}]
+    api._CACHE.clear()
+    _cd = _cap(lambda: handle("exam-countdown"))
+    check("exam-countdown: 'examSubject'/khoá hoa -> mã môn + phòng, không '?'",
+          "HOD402" in _cd and "BE-101" in _cd and "• ?" not in _cd, _cd[:160])
+    check("exam-countdown khớp `fap exams` (cùng mã môn)", "HOD402" in _cap(lambda: handle("exams")))
+    # Rèn luyện: 201 + NullReference = chưa có điểm; 201 + checksum (sau khi call() tự thử ±1h) = LỖI rõ
+    _OVR["GetDiemphongtrao"] = _RespL(200, {"code": "201", "message": "Thành công", "data": None,
+                                            "errorMessage": "System.NullReferenceException: Object reference not set"})
+    api._CACHE.clear()
+    _c1 = _cap(lambda: handle("conduct"))
+    check("conduct: 201 NullReference -> 'chưa có điểm'", "Chưa có điểm rèn luyện" in _c1, _c1[:120])
+    _OVR["GetDiemphongtrao"] = _RespL(200, {"code": "201", "message": "Thông tin checksum không chính xác",
+                                            "errorMessage": None, "data": None})
+    api._CACHE.clear()
+    _c2 = _cap(lambda: handle("conduct"))
+    check("conduct: 201 checksum -> báo LỖI checksum, KHÔNG giấu thành 'chưa có'",
+          "checksum" in _c2.lower() and "Chưa có điểm" not in _c2, _c2[:120])
+finally:
+    api.requests.get = fake_get
+    _OVR.clear()
+    for _k, _v in _saved_l.items():
+        if _v is None: SUCCESS.pop(_k, None)
+        else: SUCCESS[_k] = _v
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)

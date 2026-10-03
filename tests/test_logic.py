@@ -2951,6 +2951,110 @@ def test_apkdrift_write_v2_key(tmp_path=None):
 
 # ---- B4b: link hoá đơn điện tử (CHỈ CLI) · tin hoa/thường · đếm ngược thi · 404 học phí · 201 rèn luyện ----
 # Giá trị GIẢ hết (MSSV HE000000…). Mọi monkeypatch đều KHÔI PHỤC trong finally (runner chạy theo thứ tự tên).
+def test_invoice_url_built_locally():
+    """Link hoá đơn dựng TẠI CHỖ từ MSSV (không request). Rỗng khi thiếu MSSV; MSSV được quote -> không
+    chèn thêm tham số query được."""
+    import fapc.core.extras as E
+    assert E.invoice_url("HE000000") == "https://dng.fpt.edu.vn/Invoice?StudentId=HE000000"
+    assert E.invoice_url("  HE000000 ") == "https://dng.fpt.edu.vn/Invoice?StudentId=HE000000"
+    assert E.invoice_url("") == "" and E.invoice_url(None) == ""
+    assert E.invoice_url("a&b=c").endswith("StudentId=a%26b%3Dc")     # ký tự đặc biệt bị quote
+    line = E.invoice_text("HE000000")
+    assert "https://dng.fpt.edu.vn/Invoice?StudentId=HE000000" in line
+    assert "Đà Nẵng" not in line and "Da Nang" not in line              # nhãn TRUNG TÍNH (app hiện cho mọi campus)
+    assert E.invoice_text("") == ""
+
+def test_invoice_link_never_reaches_bot():
+    """Link chứa MSSV -> KHÔNG có lệnh 'fees' ở bot/notify/web (bot_core) và help không nhắc tới link."""
+    import fapc.app.bot_core as B
+    assert "fees" not in B.COMMANDS
+    assert "dng.fpt.edu.vn" not in B.handle("fees")                     # lệnh lạ -> trả lời, không đụng mạng
+    assert "dng.fpt.edu.vn" not in B.help_text()
+
+def test_fee_details_text_checks_status_first():
+    """GeFeeByRoll 404 + JSON {'Message'} KHÔNG được báo là "chưa có chi tiết học phí"."""
+    import fapc.core.extras as E
+    m404 = E.fee_details_text(404, {"Message": "No HTTP resource was found"})
+    assert "404" in m404 and "Chưa có chi tiết" not in m404 and "No fee details" not in m404
+    ok = E.fee_details_text(200, {"code": "200", "data": [{"amount": "1000000", "invoiceNo": "X1"}]})
+    assert "1000000" in ok and "X1" in ok
+    empty = E.fee_details_text(200, {"code": "200", "data": []})
+    assert "Chưa có chi tiết" in empty or "No fee details" in empty
+    assert "Lỗi mạng" in E.fee_details_text(None, "Lỗi mạng (ConnectionError) khi gọi GeFeeByRoll")
+    assert "500" in E.fee_details_text(500, "Internal Server Error")
+
+def test_fees_cli_404_keeps_balance_and_prints_invoice():
+    """`fap fees`: GetBalance OK + GeFeeByRoll 404 -> vẫn in số dư, báo 404 đúng nghĩa, in link hoá đơn."""
+    import fapc.core.extras as E
+    saved = (E.call, E.creds)
+    def fake(ep, *a, **k):
+        if ep == "GetBalance":
+            return 200, {"code": "200", "message": "Thành công", "errorMessage": None, "data": "50000"}
+        return 404, {"Message": "No HTTP resource was found"}
+    try:
+        E.creds = lambda: ("test-key", "FPTU", "HE000000")
+        E.call = fake
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            E.fees()
+        out = buf.getvalue()
+        assert "50000" in out                                            # phần GetBalance vẫn chạy
+        assert "404" in out and "Chưa có chi tiết" not in out
+        assert "https://dng.fpt.edu.vn/Invoice?StudentId=HE000000" in out
+        E.call = lambda ep, *a, **k: (200, {"code": "201", "message": "Token invalid", "data": None})
+        raised = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                E.fees()                                                 # token hết hạn -> vẫn raise như cũ
+        except SystemExit:
+            raised = True
+        assert raised
+    finally:
+        E.call, E.creds = saved
+
+def test_news_get_case_insensitive():
+    """_news_get không phân biệt hoa/thường; giữ THỨ TỰ ưu tiên; bỏ giá trị rỗng/toàn khoảng trắng."""
+    import fapc.core.extras as E
+    assert E._news_get({"Title": "X"}, E._NEWS_TITLE) == "X"
+    assert E._news_get({"title": "", "Title": "Y"}, E._NEWS_TITLE) == "Y"      # khoá trùng tên khác hoa
+    assert E._news_get({"Title": "B", "tittle": "A"}, E._NEWS_TITLE) == "A"    # 'tittle' ưu tiên hơn
+    assert E._news_get({"tittle": "   ", "TITLE": "Z"}, E._NEWS_TITLE) == "Z"  # toàn trắng = rỗng
+    assert E._news_get({"Contents": "<p>hi</p>"}, E._NEWS_BODY) == "<p>hi</p>"
+    assert E._news_get({"EntryDate": "2026-07-31T10:00:00"}, E._NEWS_DATE) == "2026-07-31T10:00:00"
+    assert E._news_get(None, E._NEWS_TITLE) == "" and E._news_get({}, E._NEWS_BODY) == ""
+
+def test_news_text_capitalised_keys():
+    """Tin với khoá hoa (Title/Contents/EntryDate/EntryBy) render đủ: tiêu đề, ngày, nơi đăng, trích;
+    sắp MỚI NHẤT trước theo EntryDate."""
+    import fapc.core.extras as E
+    orig = E.fetch_news
+    try:
+        E.fetch_news = lambda *a, **k: [
+            {"Title": "Tin cũ", "Contents": "<p>abc</p>", "EntryDate": "2026-07-01T08:00:00", "EntryBy": "P.A"},
+            {"Title": "Tin mới", "Contents": "<p>xin <b>chào</b></p>", "EntryDate": "2026-07-31T10:00:00",
+             "EntryBy": "P.CTSV"}]
+        out = E.news_text("t", "c", "r")
+        assert out.index("Tin mới") < out.index("Tin cũ")
+        assert "31/07/2026 · P.CTSV" in out and "xin chào" in out and "<b>" not in out
+        assert "(không tiêu đề)" not in out and "(no title)" not in out
+    finally:
+        E.fetch_news = orig
+
+def test_exam_countdown_same_keys_as_exams():
+    """exam-countdown dùng CÙNG getter/khoá với `fap exams`: hoa/thường, 'examSubject', shape app 2.0.5
+    ('realSubject'/'date'/'time'/'roomNo') đều ra mã môn — KHÔNG còn '?' khi `fap exams` đúng."""
+    import fapc.core.extras as E
+    now = datetime.datetime(2026, 6, 24, 8, 0)
+    rows = [{"SubjectCode": "IAP301", "ExamDate": "06/26/2026", "ExamTime": "07:30", "ExamRoom": "BE-101"},
+            {"examSubject": "HOD402", "examDate": "06/25/2026", "examTime": "13:30", "roomNo": "AL-201"},
+            {"realSubject": "CES202", "date": "06/27/2026", "time": "09:00", "roomNo": "BE-305"},
+            "rác-không-phải-dict"]
+    items = E.exam_countdown(rows, now)
+    assert [i[2] for i in items] == ["HOD402", "IAP301", "CES202"]
+    assert [i[3] for i in items] == ["AL-201", "BE-101", "BE-305"]
+    for r in rows[:3]:                                                   # cùng mã môn với dòng của `fap exams`
+        assert E._exam_get(r, E._EX_SUBJ) in E._exam_line(r)[0]
+
 def test_conduct_no_data_vs_checksum_and_auth():
     """GetDiemphongtrao 201: NullReference (errorMessage) = chưa có điểm; checksum/token (message) = LỖI,
     kể cả khi errorMessage của ca NullReference nhắc chữ 'checksum' (chữ ký hàm)."""
