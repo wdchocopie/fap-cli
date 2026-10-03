@@ -2133,6 +2133,132 @@ def test_application_status_badges():
     finally:
         E.fetch_applications = orig
 
+# ---- B4a: cảnh báo ĐƠN TỪ đổi trạng thái (app_changes thuần + mốc applications_state.json) ----
+def _appl(aid, code, name="Đơn X", **kw):
+    r = {"w_APP_ID": aid, "name": name, "createDate": "16/09/2025", "studentStatus": code, "processNote": ""}
+    r.update(kw)
+    return r
+
+def test_app_changes_baseline_transition_new_and_order():
+    from fapc.core.extras import app_changes, app_changes_text
+    rows = [_appl("101", "0", "Đơn A"), _appl("102", "0", "Đơn B"), _appl("103", "1", "Đơn C")]
+    st, ch = app_changes(None, rows)                                   # lần đầu: ghi mốc IM LẶNG
+    assert st == {"101": "0", "102": "0", "103": "1"} and ch == []
+    st2, ch2 = app_changes(st, rows)                                   # không đổi gì -> không báo
+    assert st2 == st and ch2 == []
+    rows3 = [_appl("101", "1", "Đơn A"), _appl("102", "3", "Đơn B", processNote="Nộp 50k"), _appl("103", "1", "Đơn C"),
+             _appl("104", "0", "Đơn D")]
+    st3, ch3 = app_changes(st2, rows3)
+    assert st3 == {"101": "1", "102": "3", "103": "1", "104": "0"}
+    assert [c["id"] for c in ch3] == ["102", "101", "104"]            # → 3 (thanh toán) trước, → 1 sau, rồi đơn mới
+    assert ch3[0]["old"] == "0" and ch3[0]["new"] == "3" and ch3[2]["old"] is None
+    txt = app_changes_text(ch3)
+    lines = txt.split("\n")
+    pay = next(l for l in lines if "Đơn B" in l)
+    assert pay.startswith("‼️") and "⏳" in pay and "→ 💳" in pay           # old→new badge, nổi bật
+    assert "📄 Đơn B (16/09/2025) · ⏳ Đang xử lý → 💳 Đang chờ thanh toán" in pay or "Pending payment" in pay
+    assert "myFAP" in txt and "Nộp 50k" in txt                          # dòng hành động + phản hồi phòng ban
+    assert next(l for l in lines if "Đơn A" in l).startswith("🎉")
+    new = next(l for l in lines if "Đơn D" in l)
+    assert "🆕" in new and "→" not in new and "⏳" in new                # đơn MỚI: trạng thái hiện tại
+    assert app_changes_text([]) == ""
+
+def test_app_changes_codes_ids_and_edge_cases():
+    from fapc.core.extras import app_changes, app_changes_text
+    prev = {"101": "3", "102": "0"}
+    # int vs str cùng mã -> KHÔNG báo; mốc lưu int cũng so khớp được
+    assert app_changes(prev, [_appl("101", 3), _appl("102", "0")])[1] == []
+    assert app_changes({"101": 3}, [_appl("101", "3")])[1] == []
+    # đơn biến mất -> bỏ khỏi mốc, KHÔNG báo
+    st, ch = app_changes(prev, [_appl("101", "3")])
+    assert st == {"101": "3"} and ch == []
+    # danh sách rỗng khi mốc đang có đơn -> trục trặc tạm thời, GIỮ mốc
+    assert app_changes(prev, []) == (prev, [])
+    # server tạm mất trạng thái -> giữ mã cũ, không báo nhầm
+    st, ch = app_changes(prev, [_appl("101", ""), _appl("102", None)])
+    assert st == prev and ch == []
+    # mã lạ -> nhãn 'Khác (mã N)' của app 2.0.5, vẫn báo
+    st, ch = app_changes(prev, [_appl("101", "3"), _appl("102", "7")])
+    assert len(ch) == 1 and ch[0]["new"] == "7"
+    t7 = app_changes_text(ch)
+    assert "❔" in t7 and "7" in t7 and not t7.split("\n")[2].startswith(("‼️", "🎉"))
+    # khoá: 'w_app_id' chữ thường (app 2.0.5) cũng nhận; đơn thiếu mã -> không theo dõi
+    lower = {"w_app_id": "105", "name": "Đơn E", "studentStatus": "0"}
+    st, ch = app_changes({}, [lower, {"name": "không mã", "studentStatus": "0"}])
+    assert st == {"105": "0"} and [c["id"] for c in ch] == ["105"]
+    # lần đầu với 0 đơn (lấy THÀNH CÔNG) -> mốc rỗng hợp lệ
+    assert app_changes(None, []) == ({}, [])
+
+def test_app_state_corrupt_quarantine_and_roundtrip():
+    import tempfile, fapc.app.notify as N
+    saved = N._APP_STATE
+    try:
+        d = tempfile.mkdtemp()
+        N._APP_STATE = os.path.join(d, "applications_state.json")
+        assert N._load_app_state() is None                              # chưa có file -> chưa ghi mốc
+        N._save_app_state({"101": "3"})
+        assert N._load_app_state() == {"101": "3"}
+        assert not [f for f in os.listdir(d) if f.endswith(".tmp")]     # tmp đã được os.replace
+        for junk in ("{ broken json !!!", "[1, 2]"):                     # JSON hỏng / sai kiểu -> cô lập
+            with open(N._APP_STATE, "w", encoding="utf-8") as f:
+                f.write(junk)
+            res = []
+            out = _cap(lambda: res.append(N._load_app_state()))
+            assert res == [None] and ("hỏng" in out or "corrupt" in out)   # None -> ghi mốc lại, có cảnh báo
+            assert os.path.exists(N._APP_STATE + ".corrupt") and not os.path.exists(N._APP_STATE)
+            os.remove(N._APP_STATE + ".corrupt")
+    finally:
+        N._APP_STATE = saved
+
+def test_push_application_changes_flow():
+    import tempfile, fapc.app.notify as N, fapc.core.extras as E
+    from fapc.core import api as A
+    saved = (N._APP_STATE, N.push, E.fetch_applications_checked, A.creds)
+    try:
+        N._APP_STATE = os.path.join(tempfile.mkdtemp(), "applications_state.json")
+        sent = []
+        N.push = lambda text: (sent.append(text), ["Telegram"])[1]
+        A.creds = lambda: ("t", "FPTU", "HE000000")
+        E.fetch_applications_checked = lambda *a, **k: None            # lấy lỗi -> bỏ lượt, KHÔNG ghi mốc
+        _cap(N.push_application_changes)
+        assert not os.path.exists(N._APP_STATE) and sent == []
+        E.fetch_applications_checked = lambda *a, **k: [_appl("101", "0", "Đơn A")]
+        _cap(N.push_application_changes)                               # lần đầu: ghi mốc, KHÔNG đẩy
+        assert N._load_app_state() == {"101": "0"} and sent == []
+        _cap(N.push_application_changes)                               # không đổi -> không đẩy
+        assert sent == []
+        E.fetch_applications_checked = lambda *a, **k: [_appl("101", "3", "Đơn A")]
+        _cap(N.push_application_changes)
+        assert len(sent) == 1 and "💳" in sent[0] and "Đơn A" in sent[0]
+        assert N._load_app_state() == {"101": "3"}
+        _cap(N.push_application_changes)                               # đã báo rồi -> không báo lại
+        assert len(sent) == 1
+    finally:
+        N._APP_STATE, N.push, E.fetch_applications_checked, A.creds = saved
+
+def test_notify_notifications_also_checks_applications_isolated():
+    """`fap notify notifications` = thông báo MỚI + đơn từ đổi trạng thái (cùng nhịp, không cần job mới).
+    Phần này hỏng KHÔNG làm mất phần kia; lỗi vẫn ném lại để cron thấy exit ≠ 0."""
+    import fapc.app.notify as N
+    saved = (N.push_new_notifications, N.push_application_changes)
+    ran = []
+    try:
+        def _boom():
+            ran.append("notif"); raise SystemExit("⚠️ Token FAP có thể đã hết hạn")
+        N.push_new_notifications = _boom
+        N.push_application_changes = lambda: ran.append("apps")
+        try:
+            _cap(lambda: N.run("notifications")); raised = False
+        except SystemExit:
+            raised = True
+        assert raised and ran == ["notif", "apps"]
+        ran.clear()
+        N.push_new_notifications = lambda: ran.append("notif")
+        _cap(lambda: N.run("notifications"))
+        assert ran == ["notif", "apps"]
+    finally:
+        N.push_new_notifications, N.push_application_changes = saved
+
 def test_notification_preview_and_full_text():
     import fapc.core.extras as E
     from fapc.core.extras import _notif_body, _notif_line

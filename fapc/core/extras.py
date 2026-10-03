@@ -129,6 +129,107 @@ def applications():
     token, campus, roll = creds()
     print(applications_text(token, campus, roll))
 
+def _fetch_ok(endpoint, token, campus, roll):
+    """GET 1 endpoint ký cs12(rollNumber, campusCode) với 3 tham số campusCode/Authen/rollNumber (như
+    extract.SIMPLE) -> (True, data) khi HTTP 200 + code '200'; (False, None) khi lỗi mạng / phản hồi lạ.
+    Khác fetch_*: lỗi mạng KHÔNG bị biến thành [] ("không có gì") — người gọi phân biệt được "KHÔNG BIẾT".
+    Lỗi XÁC THỰC vẫn raise qua check_auth (token hết hạn) để người gọi ghi lại lý do."""
+    http, data = call(endpoint, [("campusCode", campus), ("Authen", token), ("rollNumber", roll)], roll, campus)
+    check_auth(http, data)
+    if http != 200 or not isinstance(data, dict) or str(data.get("code")) != "200":
+        return False, None
+    return True, data.get("data")
+
+def fetch_applications_checked(token, campus, roll):
+    """Đơn từ cho cảnh báo/to-do: list dict khi lấy ĐƯỢC (rỗng = thật sự không có đơn), None khi KHÔNG BIẾT."""
+    ok, d = _fetch_ok("GetApplication", token, campus, roll)
+    if not ok:
+        return None
+    if d is None:
+        return []
+    return [r for r in d if isinstance(r, dict)] if isinstance(d, list) else None
+
+# ---------- ĐƠN TỪ ĐỔI TRẠNG THÁI (đẩy cùng nhịp `fap notify notifications`) ----------
+def _app_id(r):
+    """Khoá ỔN ĐỊNH của 1 lá đơn = mã đơn của server. v1 trả 'w_APP_ID' (analysis/keys_schema.py: có ở 4/4
+    đơn), còn app 2.0.5 đọc 'w_app_id' (sắp đơn theo số này + hiện '#…') ⇒ dò KHÔNG phân biệt hoa/thường.
+    '' nếu thiếu -> lá đơn đó không theo dõi được (KHÔNG đoán bằng vị trí hay tên đơn)."""
+    if not isinstance(r, dict):
+        return ""
+    for k, v in r.items():
+        if str(k).lower() == "w_app_id" and v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+def _app_code(r):
+    """THUẦN: mã studentStatus dạng chuỗi đã strip ('' nếu thiếu) — int 3 và '3' là MỘT mã."""
+    raw = r.get("studentStatus") if isinstance(r, dict) else None
+    return str(raw if raw is not None else "").strip()
+
+def _code_label(code):
+    """Nhãn có icon của 1 MÃ trạng thái (dùng lại app_status/_APP_STATUS); mã rỗng -> '❔ chưa rõ'."""
+    return app_status({"studentStatus": code}) or t("❔ chưa rõ", "❔ unknown")
+
+def app_changes(prev_state, rows):
+    """THUẦN: so trạng thái đơn từ với mốc lần trước -> (new_state, changes).
+      prev_state : {mã_đơn: mã_trạng_thái} hoặc None (CHƯA ghi mốc lần nào)
+      rows       : các dòng GetApplication lấy THÀNH CÔNG ở lượt này
+      new_state  : mốc mới để lưu
+      changes    : [{"id","name","date","note","old","new"}]; old=None = đơn MỚI xuất hiện sau mốc.
+                   Xếp: → '3' (cần thanh toán) trước, → '1' (được chấp nhận) sau đó, rồi phần còn lại.
+    Luật: lần đầu = ghi mốc IM LẶNG · đơn biến mất = bỏ khỏi mốc, KHÔNG báo · danh sách RỖNG trong khi mốc đang
+    có đơn = coi là trục trặc tạm thời, GIỮ mốc cũ · đơn mất trạng thái ('') = giữ mã cũ, KHÔNG báo."""
+    cur, by_id = {}, {}
+    for r in rows or []:
+        aid = _app_id(r)
+        if aid:
+            cur[aid], by_id[aid] = _app_code(r), r
+    if prev_state is None:
+        return cur, []
+    prev = {str(k): str(v if v is not None else "").strip() for k, v in prev_state.items()}
+    if not cur and prev:
+        return prev, []
+    changes = []
+    for aid, code in list(cur.items()):
+        old = prev.get(aid)
+        if old is not None and not code:
+            cur[aid] = old                     # server tạm không gửi trạng thái -> giữ mã cũ, không báo nhầm
+            continue
+        if old == code:
+            continue
+        r = by_id[aid]
+        changes.append({"id": aid, "name": fmt.unescape(r.get("name")), "date": fmt.unescape(r.get("createDate")),
+                        "note": fmt.unescape(r.get("processNote")), "old": old, "new": code})
+    rank = {"3": 0, "1": 1}
+    changes.sort(key=lambda c: rank.get(c["new"], 2))     # sort ổn định: cùng hạng giữ thứ tự server
+    return cur, changes
+
+def app_changes_text(changes):
+    """THUẦN: tin đẩy cho các đơn ĐỔI trạng thái ('' nếu không có gì). Đổi sang '3' (cần thanh toán) và '1'
+    (được chấp nhận) được làm NỔI (đứng đầu + dòng hành động); đơn MỚI hiện trạng thái hiện tại."""
+    if not changes:
+        return ""
+    out = [fmt.header("📄", t("Đơn từ đổi trạng thái", "Application status changes"), str(len(changes)))]
+    for c in changes:
+        name = c.get("name") or t("(đơn)", "(application)")
+        if c.get("date"):
+            name += f" ({c['date']})"         # 2 đơn cùng loại -> phân biệt bằng ngày tạo
+        lead = {"3": "‼️ ", "1": "🎉 "}.get(c.get("new"), "")
+        new = _code_label(c.get("new"))
+        if c.get("old") is None:
+            out.append(f"{lead}🆕 📄 {name} · {new}")
+        else:
+            out.append(f"{lead}📄 {name} · {_code_label(c['old'])} → {new}")
+        if c.get("new") == "3":
+            out.append("   " + t("👉 CẦN THANH TOÁN — thanh toán trong app myFAP chính thức (fap-cli chỉ đọc).",
+                                "👉 PAYMENT NEEDED — pay in the official myFAP app (fap-cli is read-only)."))
+        elif c.get("new") == "1":
+            out.append("   " + t("👉 Đơn đã được CHẤP NHẬN.", "👉 Application APPROVED."))
+        note = _preview(c.get("note") or "")              # phản hồi của phòng ban (1 dòng trích)
+        if note:
+            out.append(f"   ↳ {note}")
+    return "\n".join(out)
+
 # ---------- DANH SÁCH CAMPUS (giúp người MỚI biết campusCode TRƯỚC khi login) ----------
 def campuses_text():
     """GetAllActiveCampus — KHÔNG cần token/đăng nhập. Trả bảng campusCode + tên (chọn campus trước `fap login`)."""
