@@ -20,7 +20,7 @@ CHỈ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN.
 import os, sys, json, time, base64, hashlib, secrets, webbrowser, urllib.parse, datetime
 import requests
 from .api import BASE as FAP_BASE, checksum_login, UA, _vn_now, _is_checksum_error
-from . import paths
+from . import paths, apiv2
 from ..i18n import t
 from .. import config, fmt
 
@@ -65,7 +65,8 @@ def _save(path, obj):
     except OSError: pass
 
 _SECRET_KEYS = ("authenkey", "token", "accesstoken", "refresh_token", "id_token",
-                "email", "studentname", "fullname", "rollnumber")
+                "email", "studentname", "fullname", "rollnumber",
+                "authorization", "checksum", "v2_key")      # API v2: Bearer, chữ ký, khoá FAP_V2_KEY
 def _redact(obj):
     """Che giá trị các khóa nhạy cảm (token/PII) trong dict/list lồng nhau — để dump debug an toàn."""
     if isinstance(obj, dict):
@@ -89,7 +90,30 @@ def _post(url, data, raise_on_neterr=True):
         return r.status_code, r.text
 
 # ---------- đổi access_token -> token FAP ----------
-def fap_login_feid(campus, access_token):
+def _fap_login_feid_v2(campus, access_token):
+    """API v2 (OPT-IN, THỬ NGHIỆM — docs/21-api-v2.md): POST fap-proxy …/MyFAP/AuthenticationByFeId, body
+    {"token": <access_token FE>}; header ký bằng CHÍNH access_token FE đó (Bearer + Checksum), KHÔNG
+    campusCode/checksum trên query — đúng adapter v2 của app 2.0.5 (#7081 + helper POST + _buildHeaders).
+    Chữ ký theo epoch giây -> không thử ±1h. Thiếu FAP_V2_KEY -> SystemExit (0 request)."""
+    key = apiv2.v2_key()
+    if not access_token:                                  # token rỗng = app ký bằng hằng nhúng -> không gửi
+        return None, "AuthenticationByFeId: thiếu access_token FE · missing FE access_token"
+    headers = dict(UA)
+    headers.update(apiv2.build_headers_v2(access_token, campus, int(time.time()), key))
+    try:
+        r = requests.post(f"{apiv2.BASE_V2}/AuthenticationByFeId", json={"token": access_token},
+                          headers=headers, timeout=apiv2.TIMEOUT, allow_redirects=False)
+    except requests.RequestException as e:
+        return None, f"Lỗi mạng ({type(e).__name__}) tới AuthenticationByFeId"   # không str(e) — như v1
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, r.text
+
+def fap_login_feid(campus, access_token, version=None):
+    # version: phiên bản API dùng để đổi token (None = FAP_API_VERSION). _do_fap truyền vào để ĐÓNG DẤU đúng nó.
+    if (version or apiv2.api_version()) == "v2":
+        return _fap_login_feid_v2(campus, access_token)
     # checksum_login là checksum THEO GIỜ → thử ±1h như data-path (call()/current_semester), chống lệch giờ
     # đầu giờ / đồng hồ máy lệch ~1h (nếu không, login lỗi khó hiểu trong khi `fap grades` vẫn chạy nhờ retry).
     out = (None, None)
@@ -109,9 +133,20 @@ def fap_login_feid(campus, access_token):
     return out
 
 def _do_fap(campus, access_token, log=print):
-    http, body = fap_login_feid(campus, access_token)
+    # Chốt phiên bản API MỘT lần: dùng nó để đổi token VÀ đóng dấu vào token.json ("api_version") — call() so
+    # dấu này với FAP_API_VERSION; lệch -> bảo `fap refresh` (refresh/watcher/botlogin đều đi qua đây).
+    ver = apiv2.api_version()
+    try:
+        http, body = fap_login_feid(campus, access_token, ver)
+    except SystemExit as e:
+        # v2 thiếu FAP_V2_KEY: TRẢ None (không raise) — _finalize đã ghi oauth_tokens.json, _finish chỉ HOÀN TÁC
+        # khi nhận None; để SystemExit bay qua thì refresh_token (có thể của tài khoản lạ) sẽ nằm lại trên đĩa.
+        log(str(e))
+        return None
     code = body.get("code") if isinstance(body, dict) else None
     msg = body.get("message") if isinstance(body, dict) else str(body)[:90]
+    if ver == "v2":
+        msg = apiv2.scrub(msg, access_token)              # phòng thủ: không để khoá/token FE lọt vào log
     log(f"  AuthenticationByFeId -> HTTP {http} code={code} msg={msg}")
     if http != 200:
         log("  ✗ Server FAP không trả 200 — access_token có thể hết hạn (chạy 'refresh') hoặc sai scope."); return None
@@ -134,9 +169,10 @@ def _do_fap(campus, access_token, log=print):
     fap = {"authenkey": tok, "campus": rd.get("campus") or campus,
            "rollnumber": rd.get("rollnumber") or rd.get("rollNumber"),
            "email": rd.get("email"), "fullname": rd.get("studentName") or rd.get("fullname"),
-           "obtained_at": int(time.time())}
+           "obtained_at": int(time.time()), "api_version": ver}
     _save(TOKEN_JSON, fap)
-    log(f"  ✓ Token FAP -> output/token.json  (roll={fap['rollnumber']} campus={fap['campus']})")
+    log(f"  ✓ Token FAP -> output/token.json  (roll={fap['rollnumber']} campus={fap['campus']})"
+        + (" · API v2" if ver == "v2" else ""))
     return fap
 
 def _finalize(tok, campus, log=print):

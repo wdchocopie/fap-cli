@@ -59,3 +59,17 @@ TOKEN_READONLY = os.environ.get("FAP_TOKEN_READONLY")
 # Lệnh bot /update (`git pull` + tự khởi động lại) chạy trên checkout DÙNG CHUNG cho mọi profile:
 # "1"/"true" -> cho phép. Để trống = CẤM. Chỉ đặt trong unit của CHỦ MÁY, không đặt cho profile khách.
 ALLOW_UPDATE = os.environ.get("FAP_ALLOW_UPDATE")
+
+
+# Phiên bản API FAP (docs/21-api-v2.md): "v1" (MẶC ĐỊNH, đang chạy) · "v2" (OPT-IN, THỬ NGHIỆM, CHƯA kiểm
+# chứng thật). Là HÀM (đọc LÚC GỌI, không chụp lúc import) để test/tiến trình đổi biến là có hiệu lực ngay.
+# Chuẩn hoá + cảnh báo giá trị lạ nằm ở fapc/core/apiv2.py: api_version() (giá trị lạ -> v1).
+def api_version_raw():
+    return os.environ.get("FAP_API_VERSION", "")
+
+
+# Khoá ký HMAC của API v2 — BÍ MẬT: KHÔNG commit, KHÔNG in, KHÔNG đưa vào thông báo lỗi/log.
+# Cố ý KHÔNG chụp vào biến module (tránh lọt vào dump `vars(config)`/traceback); chỉ apiv2.v2_key() đọc khi ký.
+# Lấy từ CHÍNH APK myFAP của bạn: `python analysis/apk_drift.py --write-v2-key <apk>` (ghi thẳng vào .env).
+def v2_key_raw():
+    return os.environ.get("FAP_V2_KEY", "")

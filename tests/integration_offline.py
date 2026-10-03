@@ -14,6 +14,8 @@ import os, sys, io, contextlib, tempfile, importlib
 from urllib.parse import parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["FAP_SEMESTER"] = "Summer2026"; os.environ["FAP_LANG"] = "vi"
+# API v2 OPT-IN: ghim v1 + xoá khoá v2 TRƯỚC import fapc (đặt ở đây THẮNG .env thật). Mục [V2] tự bật bằng khoá GIẢ.
+os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
 
 OK = {"n": 0}; FAIL = {"n": 0}
 def _cap(fn):
@@ -343,6 +345,60 @@ finally:
     os.environ["FAP_SEMESTER"] = _saved_sem
     api._vn_now, sched._vn_now = _saved_vn
     api._CACHE.clear()
+
+# ---- [V2] API v2 OPT-IN (FAP_API_VERSION=v2): vòng tròn THẬT qua fetch_* -> call() -> apiv2.call_v2, mạng giả,
+# khoá GIẢ "test-key", token/roll GIẢ (KHÔNG dùng creds() — trên máy thật nó đọc token.json thật).
+import hmac as _hmac, hashlib as _hashlib, base64 as _b64, json as _json
+import fapc.core.apiv2 as apiv2
+_V2 = {"seen": [], "body": None}
+def _fake_v2(url, **k):
+    _V2["seen"].append((url, k))
+    if not url.startswith("https://fap-proxy.fpt.edu.vn/MyFAP/"):
+        raise api.requests.ConnectionError("v2 bật mà vẫn gọi host khác")
+    if _V2["body"] is not None:
+        return type("R", (), {"status_code": 200, "json": lambda s: _V2["body"]})()
+    return _R(SUCCESS.get(url.split("/MyFAP/")[1].split("?")[0], []))
+_saved_v2 = (api.requests.get, apiv2.TOKEN_JSON, os.environ.get("FAP_API_VERSION"), os.environ.get("FAP_V2_KEY"))
+try:
+    _tj = os.path.join(_tmp, "token_v2.json")
+    with open(_tj, "w", encoding="utf-8") as _f:
+        _json.dump({"authenkey": "SECRETTOKEN123", "campus": "FPTU", "rollnumber": "HE000000", "api_version": "v2"}, _f)
+    apiv2.TOKEN_JSON = _tj; apiv2._SESSION_CACHE.clear()
+    os.environ["FAP_API_VERSION"] = "v2"; os.environ["FAP_V2_KEY"] = "test-key"
+    api.requests.get = _fake_v2; api._CACHE.clear()
+    _e = io.StringIO()
+    with contextlib.redirect_stdout(_e), contextlib.redirect_stderr(_e):
+        _marks = g.fetch_marks("SECRETTOKEN123", "FPTU", "HE000000", "Summer2026")
+        _det = aw._course_detail("SECRETTOKEN123", "FPTU", "HE000000", "Summer2026", "IAP301", "G")
+    check("v2: fetch_marks qua call() -> dữ liệu", [m.get("subjectCode") for m in _marks] == ["EXE101", "IAP301"], str(_marks)[:120])
+    _u, _k = _V2["seen"][0]
+    check("v2: URL proxy + CampusCode, KHÔNG Authen trên query",
+          _u == "https://fap-proxy.fpt.edu.vn/MyFAP/GetStudentMark?CampusCode=FPTU&rollNumber=HE000000&Semester=Summer2026", _u[:120])
+    _h = _k.get("headers") or {}
+    _sig, _ts = (_h.get("Checksum") or ":").rsplit(":", 1)
+    _exp = _b64.b64encode(_hmac.new(b"test-key", ("SECRETTOKEN123MyFAP" + _ts).encode(), _hashlib.sha256).digest()).decode()
+    check("v2: header ký đúng (Bearer + Checksum sig:ts + ClientCode/CampusCode)",
+          _h.get("Authorization") == "Bearer SECRETTOKEN123" and _sig == _exp.replace("=", "%3d")
+          and _h.get("ClientCode") == "MyFAP" and _h.get("CampusCode") == "FPTU" and _h.get("Content-Type") == "application/json")
+    check("v2: timeout 15 + không theo redirect", _k.get("timeout") == 15 and _k.get("allow_redirects") is False)
+    _u2 = _V2["seen"][1][0]
+    check("v2: GetCourseAttendance viết HOA trên proxy", "/MyFAP/GetCourseAttendance?" in _u2 and "getCourseAttendance" not in _u2, _u2[:90])
+    check("v2: watcher nhận list chi tiết (không None)", isinstance(_det, list))
+    check("v2: khoá KHÔNG ở URL/header/log", all("test-key" not in (u + repr(k)) for u, k in _V2["seen"])
+          and "test-key" not in _e.getvalue())
+    # hết phiên KIỂU v2 (code '401' trong HTTP 200) -> check_auth raise như v1, KHÔNG [] im lặng
+    _V2["body"] = {"code": "401", "errorMessage": "Unauthorized", "data": None}; api._CACHE.clear()
+    raises_exit("v2: hết phiên -> grades raise", lambda: g.fetch_marks("SECRETTOKEN123", "FPTU", "HE000000", "Summer2026"))
+    _V2["body"] = None
+    # đổi lại v1 mà token vẫn mang dấu v2 -> bảo `fap refresh`, KHÔNG gọi mạng
+    os.environ["FAP_API_VERSION"] = "v1"; _n = len(_V2["seen"])
+    raises_exit("v2->v1 lệch phiên bản -> SystemExit", lambda: g.fetch_marks("SECRETTOKEN123", "FPTU", "HE000000", "Summer2026"))
+    check("v2->v1 lệch phiên bản: 0 request", len(_V2["seen"]) == _n)
+finally:
+    api.requests.get, apiv2.TOKEN_JSON = _saved_v2[0], _saved_v2[1]
+    os.environ["FAP_API_VERSION"] = _saved_v2[2] if _saved_v2[2] is not None else "v1"
+    os.environ["FAP_V2_KEY"] = _saved_v2[3] if _saved_v2[3] is not None else ""
+    apiv2._SESSION_CACHE.clear(); api._CACHE.clear()
 
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")

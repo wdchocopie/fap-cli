@@ -8,6 +8,7 @@ Cung cấp:
   checksum_auth(a, b)             -> getCheckSumAuthenicated (HMAC-SHA1)
   checksum_login(campus)          -> getCheckSumLogin
   call(endpoint, params, ...)     -> GET, trả (http_status, json_hoặc_text); bắt lỗi mạng
+                                     (FAP_API_VERSION=v2 -> rẽ sang apiv2.call_v2 — opt-in, thử nghiệm)
   check_auth / is_session_expired -> nhận ra token hết hạn (v1 code 201 + thân kiểu v2 code 401/'Unauthorized')
   classify_drift(...)             -> THUẦN: phản hồi trông như v1 đã dời route (30x/410/404 không-JSON)?
   select_semester(sems, now)      -> THUẦN: quy tắc chọn kỳ của màn hình chính myFAP 2.0.5
@@ -188,7 +189,15 @@ def _is_checksum_error(out):
 def call(endpoint, params, roll, campus, base=BASE, secret=SECRET, timeout=25, checksum_value=None):
     """params: list[(key,value)]. checksum_value: override; None = checksum_auth(roll,campus);
     False = không gửi checksum (vd GetSemesterMark). Trả (http_status|None, json|text|thông-báo-lỗi).
-    Tự thử lại ±1h nếu lỗi checksum (chỉ khi dùng checksum mặc định) — chống lệch giờ đầu giờ."""
+    Tự thử lại ±1h nếu lỗi checksum (chỉ khi dùng checksum mặc định) — chống lệch giờ đầu giờ.
+    API v2 (opt-in FAP_API_VERSION=v2, docs/21-api-v2.md): CHỈ rẽ nhánh ở đầu hàm sang apiv2.call_v2 (cùng
+    hợp đồng trả về; base/secret/checksum_value bỏ qua). Token.json lệch phiên bản -> SystemExit 'fap refresh'."""
+    from . import apiv2                                  # import trễ: apiv2 import ngược module này
+    if endpoint not in apiv2.V1_ONLY:                    # GetAllActiveCampus: luôn v1, không token (fap campuses)
+        ver = apiv2.api_version()
+        apiv2.check_session_version(ver)
+        if ver == "v2":
+            return apiv2.call_v2(endpoint, params, roll, campus)
     qs = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params)
     ttl = _cache_ttl()
     key = f"{endpoint}?{qs}" if ttl > 0 else None        # bỏ checksum khỏi key (đổi theo giờ)
@@ -240,7 +249,11 @@ def call(endpoint, params, roll, campus, base=BASE, secret=SECRET, timeout=25, c
 
 def call_login_retry(endpoint, params, roll, campus):
     """call() với checksum_login (override) + TỰ THỬ ±1h. Endpoint ký bằng checksum_login (GetSemester,
-    GetSubjets) là override -> call() KHÔNG tự retry; gom logic retry ở đây để mọi nơi dùng chung."""
+    GetSubjets) là override -> call() KHÔNG tự retry; gom logic retry ở đây để mọi nơi dùng chung.
+    API v2: chữ ký theo epoch giây (không theo giờ) -> gọi ĐÚNG 1 lần, không vòng ±1h."""
+    from . import apiv2
+    if endpoint not in apiv2.V1_ONLY and apiv2.api_version() == "v2":
+        return call(endpoint, params, roll, campus)
     out = (None, None)
     for delta in (0, 1, -1):
         out = call(endpoint, params, roll, campus,
@@ -387,6 +400,6 @@ def current_semester(token, campus, roll):
         name = select_semester(as_list(out[1]))
         if name:
             return name
-    except Exception:
-        pass
+    except (Exception, SystemExit):     # SystemExit: call() v2 (thiếu khoá / token lệch phiên bản) — giữ hợp đồng
+        pass                            # KHÔNG raise; lời gọi dữ liệu kế tiếp sẽ báo đúng lỗi đó cho người dùng
     return default_semester()
