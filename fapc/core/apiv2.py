@@ -231,8 +231,10 @@ def session_version(path=None):
     try:
         with open(p, encoding="utf-8") as f:
             raw = json.load(f).get("api_version")
-    except (OSError, ValueError, AttributeError):
-        raw = None
+    except OSError:
+        return None                                       # lỗi đọc TẠM THỜI (khoá file/AV…): KHÔNG cache, lần sau đọc lại
+    except (ValueError, AttributeError):
+        raw = None                                        # nội dung hỏng: cố định theo chữ ký file -> cache được
     ver = normalize_version(raw)[0]                       # thiếu/lạ -> v1 (mọi token cũ đều là v1)
     _SESSION_CACHE[p] = (sig, ver)
     return ver

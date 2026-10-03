@@ -16,6 +16,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # API v2 là OPT-IN: ghim v1 + XOÁ khoá v2 TRƯỚC khi import fapc (loader .env dùng setdefault -> giá trị đặt ở đây
 # THẮNG .env thật). Test v2 tự bật/tắt qua os.environ với khoá GIẢ "test-key" — khoá thật không bao giờ vào test.
 os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
+# Dấu phiên v1/v2 KHÔNG được đọc từ output/token.json THẬT: người đã bật v2 có dấu 'v2' -> mọi api.call()
+# SystemExit -> selftest hỏng -> tự cập nhật/`/update` bị chặn. Trỏ sang file tạm KHÔNG tồn tại (= không kiểm).
+import tempfile as _tempfile
+import fapc.core.apiv2 as _V2M
+_V2M.TOKEN_JSON = os.path.join(_tempfile.mkdtemp(), "token.json"); _V2M._SESSION_CACHE.clear()
 
 from fapc.core.schedule import parse_session, build_ics
 from fapc.core.grades import _gpa
@@ -3167,6 +3172,45 @@ def test_doctor_never_prints_v2_key():
         for k, v in saved.items():
             os.environ[k] = v if v is not None else ("v1" if k == "FAP_API_VERSION" else "")
 
+def test_conduct_fetch_failure_is_not_no_data():
+    """Mất mạng / 5xx / 404 -> fetch None -> 'không lấy được', KHÔNG phải 'chưa có điểm'."""
+    import fapc.core.conduct as K
+    orig = K.call
+    try:
+        for resp in ((None, "Lỗi mạng (ConnectionError) khi gọi GetDiemphongtrao"),
+                     (500, {"message": "x"}), (404, "<html>not found</html>")):
+            K.call = (lambda r: lambda *a, **k: r)(resp)
+            assert K.fetch("t", "c", "r", "Fall2026") is None, resp
+            txt = K.conduct_text("t", "c", "r", "Fall2026")
+            assert "Không lấy được" in txt or "Couldn't fetch" in txt, txt
+    finally:
+        K.call = orig
+
+def test_drift_ignores_json_null_body():
+    """404 với thân JSON `null` (r.json() -> None) là JSON -> KHÔNG được bật gợi ý 'chuyển v2'."""
+    import fapc.core.api as A
+    class _R:
+        status_code = 404; text = "null"; headers = {"Content-Type": "application/json"}
+        def json(self): return None
+    saved = (A.requests.get, A._DRIFT_WARNED["done"])
+    try:
+        A.requests.get = lambda *a, **k: _R()
+        A._DRIFT_WARNED["done"] = False; A._CACHE.clear()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            A.call("GetStudentMark", [("campusCode", "c"), ("Authen", "t")], "r", "c")
+        assert not A._DRIFT_WARNED["done"] and "v2" not in err.getvalue(), err.getvalue()
+    finally:
+        A.requests.get, A._DRIFT_WARNED["done"] = saved; A._CACHE.clear()
+
+def test_session_version_read_error_not_cached():
+    """Lỗi ĐỌC token.json (khoá file…) -> None và KHÔNG cache: lần sau phải đọc lại, không ghim nhầm 'v1'."""
+    import tempfile
+    from fapc.core import apiv2 as V
+    d = tempfile.mkdtemp()                       # thư mục: stat OK nhưng open() lỗi (OSError)
+    V._SESSION_CACHE.pop(d, None)
+    assert V.session_version(d) is None and d not in V._SESSION_CACHE
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
@@ -3183,7 +3227,7 @@ def _run():
         except AssertionError as e:
             print(f"  FAIL  {fn.__name__}: {e}")
             failed += 1
-        except Exception as e:
+        except (Exception, SystemExit) as e:          # SystemExit lạc: báo ERROR, KHÔNG để nó giết cả bộ test
             print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
             failed += 1
     print(f"\n{passed} passed, {failed} failed (tổng {len(tests)})")

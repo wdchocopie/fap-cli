@@ -33,17 +33,22 @@ def is_no_data(data):
     return any(k in err for k in _NULLREF)
 
 def fetch(token, campus, roll, sem):
-    """GetDiemphongtrao → list (rỗng nếu CHƯA có dữ liệu). Raise (SystemExit) khi token hết hạn, checksum
-    sai, hoặc 201 lạ — qua check_auth, cùng thông điệp với mọi lệnh khác."""
+    """GetDiemphongtrao → list (rỗng nếu CHƯA có dữ liệu), None nếu KHÔNG LẤY ĐƯỢC (mạng/5xx/404). Raise
+    (SystemExit) khi token hết hạn, checksum sai, hoặc 201 lạ — qua check_auth, cùng thông điệp với mọi lệnh khác."""
     http, data = call("GetDiemphongtrao",
         [("campusCode", campus), ("Authen", token), ("rollNumber", roll), ("semester", sem)], roll, campus)
     if http not in (401, 403) and is_no_data(data):
         return []                                      # 201 + NullReference → chưa có điểm
     check_auth(http, data)                             # 401/403/token → hết hạn · checksum → lệch giờ · 201 khác
+    if http != 200:                                    # mất mạng (None) / 5xx / 404… → KHÔNG LẤY ĐƯỢC, khác "chưa có"
+        return None
     return as_list(data)
 
 def conduct_text(token, campus, roll, sem):
     rows = fetch(token, campus, roll, sem)
+    if rows is None:
+        return t("🎖️ Không lấy được điểm rèn luyện lúc này (lỗi mạng/máy chủ FAP) — thử lại sau.",
+                 "🎖️ Couldn't fetch conduct points right now (network/FAP server error) — try again later.")
     if not rows:
         return t("🎖️ Chưa có điểm rèn luyện/phong trào kỳ này (FAP chưa cập nhật hoặc bạn chưa tham gia).",
                  "🎖️ No conduct/movement points this term yet (FAP hasn't posted them, or none earned).")
