@@ -23,6 +23,7 @@ HELP = """fap <command>   ·   fap-cli
   Tổng quan / Overview:
     status | dashboard     hôm nay + điểm + điểm danh · today + grades + attendance
     all                    MỌI thứ trong 1 lần · everything at once
+    todo                   việc cần làm: feedback đang mở / đơn chờ thanh toán (tự làm trong app myFAP) · to-do
     today | tomorrow       lịch hôm nay | lịch ngày mai · today's | tomorrow's schedule
     weekly                 tổng kết tuần: lịch + điểm danh + điểm (gửi kênh) · weekly recap → channels
     week [next|prev|N]     lịch tuần (lọc từ kỳ) · weekly schedule
@@ -219,6 +220,7 @@ def main():
     elif cmd == "notifications":  from ..core.extras import notifications; notifications(" ".join(rest) or None)
     elif cmd == "profile":        from ..core.extras import profile; profile()
     elif cmd == "applications":   from ..core.extras import applications; applications()
+    elif cmd == "todo":           from ..core.extras import todo; todo()     # riêng: khỏi dò học kỳ (handle() có dò)
     elif cmd == "watch-grades":   from .gradewatch import run; run(rest)
     elif cmd == "web":            from .webui import run; run(rest[0] if rest else 8000)
     elif cmd == "telegram-bot":   from .telegrambot import main as m; m()

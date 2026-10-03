@@ -14,7 +14,7 @@ from ..core.courses import courses_text
 from ..core import subjects
 from ..core.attendance import fetch as fetch_att, _at_risk, attendance_lines, recorded_by_subject
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
-from ..core.extras import exams_text, notifications_text, profile_text, applications_text, countdown_text
+from ..core.extras import exams_text, notifications_text, profile_text, applications_text, countdown_text, todo_text
 from ..core.transcript import gpa_text, trend_text, credits_overview, fetch as _fetch_transcript
 from ..core.conduct import conduct_text
 from ..i18n import t
@@ -44,6 +44,7 @@ COMMAND_INFO = [
     ("notifications", "Thông báo của trường",      "School notifications"),
     ("profile",       "Hồ sơ sinh viên",           "Student profile"),
     ("applications",  "Đơn từ + trạng thái xử lý", "Applications + status"),
+    ("todo",          "Việc cần làm (feedback/thanh toán)", "To-do (feedback/payment)"),
     ("all",           "Tất cả trong một tin",      "Everything in one message"),
     ("help",          "Danh sách lệnh",            "List all commands"),
 ]
@@ -62,14 +63,14 @@ _EMOJI = {
     "today": "📅", "tomorrow": "⏭️", "week": "📆", "weekly": "🗓️", "semester": "🎓", "courses": "🏫",
     "grades": "📊", "grades-detail": "🧮", "gpa": "📈", "gpa-trend": "📉", "credits": "🎖️",
     "whatif": "🎯", "conduct": "🏅", "attendance": "🟢", "banrisk": "⚠️",
-    "exams": "📝", "exam-countdown": "⏳", "status": "📋", "all": "📚",
+    "exams": "📝", "exam-countdown": "⏳", "status": "📋", "todo": "📌", "all": "📚",
     "notifications": "🔔", "profile": "👤", "applications": "📄", "help": "❓",
 }
 _ORDER = [
     (("Lịch", "Schedule"),        ["today", "tomorrow", "week", "weekly", "semester", "courses"]),
     (("Điểm", "Grades"),          ["grades", "grades-detail", "gpa", "gpa-trend", "credits", "whatif", "conduct"]),
     (("Chuyên cần & thi", "Attendance & exams"), ["attendance", "banrisk", "exams", "exam-countdown"]),
-    (("Tổng quan", "Overview"),   ["status", "all"]),
+    (("Tổng quan", "Overview"),   ["status", "todo", "all"]),
     (("Khác", "Other"),           ["notifications", "profile", "applications", "help"]),
 ]
 
@@ -230,8 +231,9 @@ def weekly_text(token, campus, roll, sem):
     return ("\n\n" + fmt.RULE + "\n\n").join(parts)
 
 def all_text(token, campus, roll, sem):
-    """Gộp MỌI mục vào 1 tin: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi.
-    Lấy marks/att ĐÚNG 1 LẦN rồi chia sẻ cho các mục con -> không gọi trùng endpoint (nhẹ máy yếu)."""
+    """Gộp MỌI mục vào 1 tin: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi →
+    việc cần làm. Lấy marks/att ĐÚNG 1 LẦN rồi chia sẻ cho các mục con -> không gọi trùng endpoint (nhẹ máy yếu).
+    Khối to-do tự cô lập lỗi từng nguồn (không bao giờ raise) nên không làm sập cả tin."""
     sessions = fetch_sessions(token, campus, roll, sem)
     marks = fetch_marks(token, campus, roll, sem)
     att = fetch_att(token, campus, roll, sem)
@@ -244,6 +246,7 @@ def all_text(token, campus, roll, sem):
         _att_text(token, campus, roll, sem, rows=att, sessions=sessions),
         _banrisk_text(token, campus, roll, sem, rows=att, sessions=sessions),
         exams_text(token, campus, roll, sem),
+        todo_text(token, campus, roll),
     ]
     return ("\n\n" + fmt.RULE + "\n\n").join(parts)
 
@@ -305,6 +308,7 @@ def handle(cmd, arg=None):
         if cmd == "notifications": return notifications_text(token, campus, roll, arg=arg)   # số = toàn văn, chữ = lọc
         if cmd == "profile":       return profile_text(token, campus, roll)
         if cmd == "applications":  return applications_text(token, campus, roll)
+        if cmd == "todo":          return todo_text(token, campus, roll)        # 2 GET, mỗi nguồn cô lập lỗi
         if cmd == "all":           return all_text(token, campus, roll, sem)
     except SystemExit as e:
         return str(e)

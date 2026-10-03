@@ -5,6 +5,7 @@
     fap exams   # GetScheduleExam   (cũng dùng cho `fap notify exams` + bot /exams)
     fap news    # GetTop10News
     fap fees    # GetBalance + GeFeeByRoll
+    fap todo    # CheckOpenFeedBack + GetApplication ('3' chờ thanh toán) — việc phải TỰ làm trong app myFAP
 
 Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa có dữ liệu — xử lý rỗng đàng hoàng.
 """
@@ -229,6 +230,83 @@ def app_changes_text(changes):
         if note:
             out.append(f"   ↳ {note}")
     return "\n".join(out)
+
+# ---------- VIỆC CẦN LÀM · TO-DO (feedback đang mở · đơn chờ thanh toán) ----------
+# fap-cli CHỈ ĐỌC: mỗi mục chỉ NHẮC sinh viên tự làm trong app myFAP chính thức — KHÔNG BAO GIỜ gọi AddRate /
+# SubmitStudentFeedback. GetStudentRate KHÔNG dùng: nghĩa các trường của nó chưa kiểm chứng.
+def _feedback_open(v):
+    """THUẦN: CheckOpenFeedBack.data -> True (đợt feedback đang mở) / False (không) / None (KHÔNG BIẾT).
+    App 2.0.5 (màn Lịch học: `r == 'true' || r == true`) nhận cả boolean lẫn CHUỖI 'true' -> nhận cả hai, không
+    phân biệt hoa/thường. Ngoài đợt server trả false hoặc '' (docs/03-extraction-catalog)."""
+    if v is True:
+        return True
+    if v is False:
+        return False
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s == "true":
+            return True
+        if s in ("false", ""):
+            return False
+    return None
+
+def todo_items(open_feedback, applications):
+    """THUẦN: các việc sinh viên phải TỰ làm — list chuỗi, rỗng = không có việc gì.
+      open_feedback : CheckOpenFeedBack.data thô (None = không lấy được)
+      applications  : các dòng GetApplication (None = không lấy được)"""
+    items = []
+    if _feedback_open(open_feedback):
+        items.append(t("📝 Đang mở đợt feedback giảng dạy — làm trên app myFAP (hoặc fap.fpt.edu.vn).",
+                       "📝 A teaching-feedback round is open — do it in the myFAP app (or fap.fpt.edu.vn)."))
+    for r in applications or []:
+        if _app_code(r) == "3":                           # '3' = Đang chờ thanh toán (getStatusConfig 2.0.5)
+            name = fmt.unescape(r.get("name")) or t("(đơn)", "(application)")
+            date = fmt.unescape(r.get("createDate"))
+            name += f" ({date})" if date else ""
+            items.append(t(f"💳 Đơn chờ thanh toán: {name} — thanh toán trong app myFAP.",
+                           f"💳 Application awaiting payment: {name} — pay in the myFAP app."))
+    return items
+
+def todo_block(open_feedback, applications, err=None):
+    """THUẦN: khối "Việc cần làm · To-do" hoàn chỉnh. Nguồn nào KHÔNG BIẾT (lỗi) thì ghi chú rõ — KHÔNG BAO GIỜ
+    nói "không có việc gì" khi chẳng kiểm tra được gì. `err` = lý do lỗi đầu tiên (vd token hết hạn)."""
+    items = todo_items(open_feedback, applications)
+    checks = [(t("feedback", "feedback"), _feedback_open(open_feedback) is not None),
+              (t("đơn từ", "applications"), applications is not None)]
+    unknown = [lbl for lbl, known in checks if not known]
+    note = (t("❔ Chưa kiểm tra được: ", "❔ Couldn't check: ") + ", ".join(unknown)) if unknown else ""
+    if not items:
+        if len(unknown) == len(checks):
+            head = t("📌 Việc cần làm: ❔ chưa kiểm tra được (mạng/token?).", "📌 To-do: ❔ couldn't check (network/token?).")
+            return "\n".join(x for x in (head, err) if x)
+        return "\n".join(x for x in (t("📌 Việc cần làm: ✅ không có việc gì.", "📌 To-do: ✅ nothing to do."), note) if x)
+    lines = [fmt.header("📌", t("Việc cần làm", "To-do"), str(len(items)))] + items
+    if note:
+        lines.append(note)
+    lines.append(t("ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên trong app myFAP chính thức.",
+                   "ℹ️ fap-cli is read-only — do these yourself in the official myFAP app."))
+    return "\n".join(lines)
+
+def todo_fetch(token, campus, roll):
+    """Dữ liệu cho khối to-do: 2 GET (CheckOpenFeedBack · GetApplication), MỖI cái CÔ LẬP lỗi -> None (không
+    biết), không bao giờ làm sập khối. Trả (open_feedback, applications, err) — err = lý do lỗi ĐẦU TIÊN."""
+    errs = []
+    def _try(fn):
+        try:
+            return fn()
+        except (Exception, SystemExit) as e:      # noqa: BLE001 — 1 nguồn hỏng chỉ thành "không biết"
+            errs.append(str(e) or type(e).__name__)
+            return None
+    fb = _try(lambda: _fetch_ok("CheckOpenFeedBack", token, campus, roll))
+    apps = _try(lambda: fetch_applications_checked(token, campus, roll))
+    return (fb[1] if fb and fb[0] else None), apps, (errs[0] if errs else None)
+
+def todo_text(token, campus, roll):
+    return todo_block(*todo_fetch(token, campus, roll))
+
+def todo():
+    token, campus, roll = creds()
+    print(todo_text(token, campus, roll))
 
 # ---------- DANH SÁCH CAMPUS (giúp người MỚI biết campusCode TRƯỚC khi login) ----------
 def campuses_text():
