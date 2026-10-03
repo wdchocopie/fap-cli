@@ -20,15 +20,20 @@ dạng ĐỊNH DANH. Giá trị khoá/secret KHÔNG BAO GIỜ in ra, kể cả -
 EN — Offline drift check of a myFAP build against the constants/endpoints fap-cli relies on (or a diff of
 two builds). Accepts a base APK (zip with assets/index.android.bundle) or a raw Hermes bundle; stdlib only
 for the report (a small HBC string-table reader for bytecode v96). Every printed string is masked; secret
-values are never printed. Exit 1 when something fap-cli depends on changed; 0 otherwise (cron/CI friendly).
+values are never printed. Exit 1 when something fap-cli depends on changed; 2 on corrupt/unsupported input
+or a --write-v2-key refusal; 0 otherwise (cron/CI friendly).
 """
 import argparse
+import ast
+import errno
 import hashlib
 import os
 import re
 import struct
 import sys
 import zipfile
+import zlib
+from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # safe() — PORT NGUYÊN RULE từ analysis/safe_hasm.py: chỉ in chuỗi an toàn (định danh/nhãn).
@@ -94,7 +99,13 @@ class HBC:
         self._parse()
 
     # --- tiện ích đọc ---
+    def _need(self, end, what):
+        """Vùng [.., end) phải nằm TRONG file — input cắt cụt / số đếm rác -> HBCError (exit 2), không struct.error."""
+        if end > len(self.data):
+            raise HBCError("%s vượt quá cuối file (bị cắt cụt?) · %s past end of file (truncated?)" % (what, what))
+
     def _u32(self):
+        self._need(self.pos + 4, "header")
         v = struct.unpack_from("<I", self.data, self.pos)[0]
         self.pos += 4
         return v
@@ -135,24 +146,31 @@ class HBC:
             self._u32()                       # functionSourceCount
         self._u32()                           # debugInfoOffset
         self.pos += 1                         # 3 bit cờ (staticBuiltins/cjsResolved/hasAsync) gói trong 1 byte
-        # Padding căn 32 trước bảng function headers
+        self._need(self.pos, "header")
+        # Padding căn 32 trước bảng function headers. MỖI bảng phải nằm trọn trong file (_need) — số đếm
+        # rác/cắt cụt báo HBCError NGAY, không nhảy pos ra ngoài rồi vỡ struct.error ở chỗ khác.
         self._align(32)
         # Small function headers: v<98 = 16 byte/function; chỉ cần NHẢY QUA (không parse phần phụ).
         self.pos += function_count * 16
+        self._need(self.pos, "function headers")
         # String kinds (RLE), 4 byte/entry
         self._align(4)
         self.pos += string_kind_count * 4
+        self._need(self.pos, "string kinds")
         # Identifier hashes, 4 byte/entry
         self._align(4)
         self.pos += identifier_count * 4
+        self._need(self.pos, "identifier hashes")
         # Small string table, 4 byte/entry
         self._align(4)
         small_off = self.pos
         self.pos += string_count * 4
+        self._need(self.pos, "small string table")
         # Overflow string table, 8 byte/entry (offset u32 + length u32)
         self._align(4)
         overflow_off = self.pos
         self.pos += overflow_string_count * 8
+        self._need(self.pos, "overflow string table")
         # String storage
         self._align(4)
         storage_off = self.pos
@@ -171,13 +189,20 @@ class HBC:
             offset = (entry >> 1) & 0x7FFFFF
             length = (entry >> 24) & 0xFF
             if length == 0xFF:                      # escape -> tra bảng overflow
+                if offset >= overflow_count:
+                    raise HBCError("chuỗi #%d trỏ ngoài bảng overflow · string #%d points past the overflow table"
+                                   % (i, i))
                 ov = overflow_off + offset * 8
                 offset, length = struct.unpack_from("<II", d, ov)
+            nbytes = length * 2 if is_utf16 else length
+            if offset + nbytes > len(storage):
+                raise HBCError("chuỗi #%d nằm ngoài string storage · string #%d lies outside string storage"
+                               % (i, i))
             if is_utf16:
-                raw = storage[offset:offset + length * 2]
+                raw = storage[offset:offset + nbytes]
                 out.append(raw.decode("utf-16-le", errors="surrogatepass"))
             else:
-                raw = storage[offset:offset + length]
+                raw = storage[offset:offset + nbytes]
                 out.append("".join(chr(b) for b in raw))   # 1 byte = 1 codepoint (giống hermes-dec)
         return out
 
@@ -225,6 +250,36 @@ def _endpoint_name(after):
     return m.group(0) if m and m.group(0) == seg else None
 
 
+def _host_of(s):
+    """CHỈ 'scheme://hostname[:port]' của một literal URL http(s), hoặc None.
+
+    Bỏ path, ;params, ?query, #fragment, user:pass@ — các phần đó có thể mang token/PII và trước đây lọt
+    nguyên vào danh sách Host (regex cũ chỉ dừng ở / ? khoảng trắng). Kết quả VẪN qua safe() khi in."""
+    if not s.startswith(("http://", "https://")):
+        return None
+    tok = s.split(None, 1)[0]                       # literal kiểu 'https://x.y nội dung…' -> chỉ token đầu
+    try:
+        u = urlsplit(tok)
+        host = u.hostname
+        port = u.port                               # cổng rác ('x.y:abc', >65535) -> ValueError
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https") or not host:
+        return None
+    if ":" in host:                                 # IPv6 (chỉ có khi trong [..]) -> hex/:/. , giữ ngoặc vuông
+        if not re.fullmatch(r"[0-9a-f:.]+", host):
+            return None
+        host = "[%s]" % host
+    else:
+        # urlsplit KHÔNG coi ';' là hết netloc: 'https://h;jsessionid=…' cho hostname 'h;jsessionid=…'
+        # -> cắt ở ký tự đầu tiên không thuộc tên host.
+        m = re.match(r"[\w.*-]+", host)
+        if not m:
+            return None
+        host = m.group(0)
+    return "%s://%s%s" % (u.scheme, host, ":%d" % port if port is not None else "")
+
+
 def extract(strings):
     """Trả dict các tập đã rút (toàn chuỗi dạng định danh — an toàn in)."""
     v1 = set()
@@ -243,9 +298,9 @@ def extract(strings):
         m2 = re.fullmatch(r"MyFAP/([A-Za-z][A-Za-z0-9]*)", s)
         if m2:
             v2.add(m2.group(1))
-        m3 = re.match(r"https?://[^/\s?]+", s)
-        if m3:
-            hosts.add(m3.group(0))
+        h = _host_of(s)
+        if h:
+            hosts.add(h)
     markers = {
         "GetApiActive": "GetApiActive" in v2 or any(s == "MyFAP/GetApiActive" for s in strings),
         "sessionApiVersion": "sessionApiVersion" in strings,
@@ -261,21 +316,53 @@ def extract(strings):
 # Hằng số + endpoint fap-cli TỰ KHAI (đọc từ mã nguồn repo, qua ast — KHÔNG import, KHÔNG chạy).
 # ---------------------------------------------------------------------------
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LEGACY_AST = sys.version_info < (3, 8)     # 3.7: literal chuỗi là ast.Str (.s), chưa phải ast.Constant
+
+
+def _str_lit(node):
+    """Giá trị literal chuỗi của 1 node ast, hoặc None. 3.8+: ast.Constant; 3.7: ast.Str (.s).
+
+    Chỉ ĐỌC tên lớp 'Str' trên 3.7 — KHÔNG chạm ast.Str ở 3.8+ (deprecated, bị gỡ ở 3.14). Thiếu nhánh
+    3.7 thì mọi lần chạy báo SECRET/BASE 'thiếu' (đọc không ra hằng nào)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if _LEGACY_AST and type(node).__name__ == "Str":
+        s = getattr(node, "s", None)
+        return s if isinstance(s, str) else None
+    return None
+
+
+def _read_source(py_path):
+    """Mã nguồn 1 file repo, hoặc None nếu không đọc được (thiếu file, không phải UTF-8)."""
+    try:
+        with open(py_path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return None
+
+
+def _parse_source(py_path):
+    src = _read_source(py_path)
+    if src is None:
+        return None
+    try:
+        return ast.parse(src)
+    except (SyntaxError, ValueError):
+        return None
 
 
 def _const_strings(py_path, names):
     """Trả {name: value} cho các gán hằng chuỗi cấp module (ast, không thực thi)."""
-    import ast
     out = {}
-    try:
-        tree = ast.parse(open(py_path, encoding="utf-8").read())
-    except OSError:
+    tree = _parse_source(py_path)
+    if tree is None:
         return out
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             nm = node.targets[0].id
-            if nm in names and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-                out[nm] = node.value.value
+            val = _str_lit(node.value)
+            if nm in names and val is not None:
+                out[nm] = val
     return out
 
 
@@ -290,30 +377,35 @@ def fapcli_constants(root=REPO_ROOT):
 
 
 _CALL = re.compile(r"""call(?:_login_retry)?\(\s*["']([A-Za-z][A-Za-z0-9]*)["']""")
+# Endpoint dựng URL TRỰC TIẾP (không qua call("…")) — vd fapc/core/auth.py:
+#   f"{FAP_BASE}/AuthenticationByFeId?campusCode=…"   (v1)   ·   f"{apiv2.BASE_V2}/AuthenticationByFeId"   (v2)
+# Thiếu regex này thì build BỎ AuthenticationByFeId (đăng nhập!) vẫn ra ✅ + exit 0. Bắt cả dạng nối chuỗi
+# BASE + "/Name". KHÔNG bắt f"{BASE_V2}/{path}" (tên động) hay f"{base}/{endpoint}" (biến thường).
+_URL_EP = re.compile(r"""(?:\{(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:FAP_BASE|BASE|BASE_V2|V2_BASE)\}/"""
+                     r"""|\b(?:FAP_BASE|BASE|BASE_V2|V2_BASE)\s*\+\s*["']/)([A-Za-z][A-Za-z0-9]*)""")
 
 
 def fapcli_endpoints(root=REPO_ROOT):
-    """Tên endpoint fap-cli THỰC SỰ gọi: mọi call("Name" + khoá dict SIMPLE trong extract.py."""
+    """Tên endpoint fap-cli THỰC SỰ gọi: mọi call("Name" + URL dựng từ BASE ("{BASE}/Name") + khoá dict
+    SIMPLE trong extract.py."""
     eps = set()
     fapc_dir = os.path.join(root, "fapc")
     for dirpath, _dirs, files in os.walk(fapc_dir):
         for fn in files:
             if fn.endswith(".py"):
-                try:
-                    txt = open(os.path.join(dirpath, fn), encoding="utf-8").read()
-                except OSError:
+                txt = _read_source(os.path.join(dirpath, fn))
+                if txt is None:
                     continue
                 eps.update(_CALL.findall(txt))
+                eps.update(_URL_EP.findall(txt))
     # Khoá dict SIMPLE trong extract.py (endpoint 'fap extract' quét) — đọc qua ast.
     eps.update(_simple_keys(os.path.join(fapc_dir, "core", "extract.py")))
     return eps
 
 
 def _simple_keys(extract_py):
-    import ast
-    try:
-        tree = ast.parse(open(extract_py, encoding="utf-8").read())
-    except OSError:
+    tree = _parse_source(extract_py)
+    if tree is None:
         return set()
     keys = set()
     for node in ast.walk(tree):
@@ -321,8 +413,9 @@ def _simple_keys(extract_py):
                 isinstance(node.targets[0], ast.Name) and node.targets[0].id == "SIMPLE" and \
                 isinstance(node.value, ast.Dict):
             for k in node.value.keys:
-                if isinstance(k, ast.Constant) and isinstance(k.value, str):
-                    keys.add(k.value)
+                val = _str_lit(k) if k is not None else None     # k None = '**other' trong dict
+                if val is not None:
+                    keys.add(val)
     return keys
 
 
@@ -344,8 +437,23 @@ def _sorted(names):
     return sorted(safe(n) for n in names)
 
 
+# Hằng fap-cli kiểm trong build — thứ tự in. Hằng nào ĐỌC ĐƯỢC từ repo mà THIẾU trong build => exit 1.
+CONST_NAMES = ("SECRET", "LOGIN_PREFIX", "BASE", "CLIENT_ID", "ISSUER", "REDIRECT_URI")
+# Hằng BẮT BUỘC đọc được từ repo: không đọc ra (đổi tên/di chuyển trong api.py) = tool mất khả năng kiểm
+# đúng thứ quan trọng nhất -> vẫn exit 1 (như trước), nhưng báo ĐÚNG lý do thay vì "không thấy trong build".
+REQUIRED_CONSTS = ("SECRET", "BASE")
+
+
+def const_check(consts, strings_set, strings):
+    """THUẦN: (missing, unreadable) — chỉ TÊN hằng, không bao giờ giá trị.
+    missing = đọc được từ repo nhưng THIẾU trong build; unreadable = hằng bắt buộc không đọc được từ repo."""
+    missing = [n for n in CONST_NAMES if n in consts and not _present(consts[n], strings_set, strings)]
+    unreadable = [n for n in REQUIRED_CONSTS if n not in consts]
+    return missing, unreadable
+
+
 def analyze(data, root=REPO_ROOT):
-    """Trả (info, consts, eps, missing_eps, secret_present, base_present) cho 1 build."""
+    """Trả (info, consts, eps, missing_eps, const_missing, const_unreadable) cho 1 build (chỉ TÊN, không giá trị)."""
     hbc = HBC(data)
     info = extract(hbc.strings)
     info["version"] = hbc.version
@@ -357,18 +465,19 @@ def analyze(data, root=REPO_ROOT):
     # getCourseAttendance viết thường ở v1). So case-SENSITIVE với tập v1 ∪ survey của bundle.
     bundle_eps = set(info["v1"]) | set(info["survey"])
     missing = sorted(e for e in eps if e not in bundle_eps)
-    secret_present = ("SECRET" in consts) and _present(consts["SECRET"], ss, hbc.strings)
-    base_present = ("BASE" in consts) and _present(consts["BASE"], ss, hbc.strings)
+    const_missing, const_unreadable = const_check(consts, ss, hbc.strings)
     info["_hbc"] = hbc
-    return info, consts, eps, missing, secret_present, base_present
+    return info, consts, eps, missing, const_missing, const_unreadable
+
+
+def _const_label(name):
+    return {"SECRET": _t("secret HMAC v1", "v1 HMAC secret"),
+            "LOGIN_PREFIX": _t("tiền tố login", "login prefix")}.get(name, name)
 
 
 def _print_const_presence(consts, ss, strings):
-    labels = [("SECRET", _t("secret HMAC v1", "v1 HMAC secret")),
-              ("LOGIN_PREFIX", _t("tiền tố login", "login prefix")),
-              ("BASE", "BASE"),
-              ("CLIENT_ID", "CLIENT_ID"), ("ISSUER", "ISSUER"), ("REDIRECT_URI", "REDIRECT_URI")]
-    for name, lbl in labels:
+    for name in CONST_NAMES:
+        lbl = _const_label(name)
         if name in consts:
             ok = _present(consts[name], ss, strings)
             print("    %-14s %s" % (lbl, _t("CÓ", "present") if ok else _t("THIẾU", "MISSING")))
@@ -376,9 +485,19 @@ def _print_const_presence(consts, ss, strings):
             print("    %-14s %s" % (lbl, _t("(không đọc được từ repo)", "(not readable from repo)")))
 
 
+def _warn_consts(const_missing, const_unreadable, where):
+    """In 1 dòng ⚠️ cho MỖI hằng thiếu / không đọc được — CHỈ TÊN hằng, không bao giờ giá trị."""
+    for n in const_missing:
+        print(_t("  ⚠️ hằng fap-cli %s KHÔNG thấy trong %s", "  ⚠️ fap-cli constant %s not found in %s")
+              % (n, where))
+    for n in const_unreadable:
+        print(_t("  ⚠️ hằng fap-cli %s không đọc được từ repo — không kiểm được",
+                 "  ⚠️ fap-cli constant %s not readable from the repo — cannot check") % n)
+
+
 def report_one(path, root=REPO_ROOT):
     data, src = load_bundle(path)
-    info, consts, eps, missing, secret_present, base_present = analyze(data, root)
+    info, consts, eps, missing, const_missing, const_unreadable = analyze(data, root)
     hbc = info["_hbc"]
     ss = set(hbc.strings)
     print(_t("== Build: %s (%s) ==", "== Build: %s (%s) ==") % (safe(os.path.basename(path)), safe(src)))
@@ -405,19 +524,18 @@ def report_one(path, root=REPO_ROOT):
     else:
         print(_t("  ✅ mọi endpoint fap-cli gọi đều có trong build",
                  "  ✅ every endpoint fap-cli calls is present"))
-    changed = bool(missing) or (not secret_present) or (not base_present)
-    if not secret_present:
-        print(_t("  ⚠️ SECRET (HMAC v1) KHÔNG thấy trong build", "  ⚠️ v1 SECRET not found in build"))
-    if not base_present:
-        print(_t("  ⚠️ BASE KHÔNG thấy trong build", "  ⚠️ BASE not found in build"))
+    # MỌI hằng fap-cli đọc được mà thiếu (không chỉ SECRET/BASE) => exit 1: LOGIN_PREFIX/CLIENT_ID/ISSUER/
+    # REDIRECT_URI đổi là `fap login` hỏng y như đổi SECRET.
+    _warn_consts(const_missing, const_unreadable, "build")
+    changed = bool(missing) or bool(const_missing) or bool(const_unreadable)
     return 1 if changed else 0
 
 
 def report_diff(old_path, new_path, root=REPO_ROOT):
     od, osrc = load_bundle(old_path)
     nd, nsrc = load_bundle(new_path)
-    oi, _c, _e, _m, _s, _b = analyze(od, root)
-    ni, consts, eps, missing, secret_present, base_present = analyze(nd, root)
+    oi = analyze(od, root)[0]
+    ni, consts, eps, missing, const_missing, const_unreadable = analyze(nd, root)
     print(_t("== Diff: %s (%s)  ->  %s (%s) ==", "== Diff: %s (%s)  ->  %s (%s) ==")
           % (safe(os.path.basename(old_path)), safe(osrc), safe(os.path.basename(new_path)), safe(nsrc)))
     print(_t("  version %d -> %d · chuỗi %d -> %d", "  version %d -> %d · strings %d -> %d")
@@ -460,7 +578,8 @@ def report_diff(old_path, new_path, root=REPO_ROOT):
     else:
         print(_t("  ✅ mọi endpoint fap-cli gọi đều có ở build mới",
                  "  ✅ every endpoint fap-cli calls is present in new build"))
-    changed = bool(missing) or (not secret_present) or (not base_present)
+    _warn_consts(const_missing, const_unreadable, _t("build mới", "new build"))
+    changed = bool(missing) or bool(const_missing) or bool(const_unreadable)
     return 1 if changed else 0
 
 
@@ -479,6 +598,10 @@ def find_v2_key(data):
     if funcs is None:
         return None, _t("cần hermes-dec hoặc hbc-disassembler để đọc bytecode",
                         "hermes-dec or hbc-disassembler required to read bytecode")
+    if isinstance(funcs, DecodeFailed):          # công cụ CÓ nhưng decode lỗi — KHÁC "thiếu công cụ"
+        return None, _t("%s không decode được bytecode (%s) — build hỏng/cắt cụt hoặc công cụ chưa hỗ trợ bản này",
+                        "%s failed to decode the bytecode (%s) — corrupt/truncated build or unsupported by the tool") \
+            % (funcs.tool, funcs.error)
     cand_keys = set()
     cand_funcs = 0
     for id_refs, const_strs in funcs:
@@ -496,15 +619,30 @@ def find_v2_key(data):
     return next(iter(cand_keys)), "ok"
 
 
-def _decode_functions(data):
-    """Trả list [(set id_refs, set const_strings)] mỗi function, hoặc None nếu không có công cụ.
+class DecodeFailed(object):
+    """Marker: công cụ decode CÓ nhưng lỗi khi đọc bundle (khác None = KHÔNG có công cụ nào).
 
-    Ưu tiên hermes-dec (thư viện, nhanh, trong bộ nhớ); nếu không có -> hbc-disassembler CLI ra
+    Chỉ giữ TÊN lớp lỗi — message của parser/subprocess có thể chứa byte của input hay đường dẫn tạm."""
+
+    def __init__(self, tool, error):
+        self.tool = tool
+        self.error = error
+
+
+def _decode_functions(data):
+    """Trả list [(set id_refs, set const_strings)] mỗi function; None nếu KHÔNG có công cụ nào;
+    DecodeFailed nếu có công cụ nhưng decode lỗi.
+
+    Ưu tiên hermes-dec (thư viện, nhanh, trong bộ nhớ); không có / lỗi -> hbc-disassembler CLI ra
     thư mục tạm rồi parse text, XOÁ ngay sau đó (không bao giờ giữ lại .hasm chứa PID/PII)."""
     out = _decode_with_hermes_dec(data)
-    if out is not None:
+    if isinstance(out, list):
         return out
-    return _decode_with_cli(data)
+    cli = _decode_with_cli(data)
+    if isinstance(cli, list):
+        return cli
+    # Cả hai không ra kết quả: ưu tiên báo lỗi THẬT của hermes-dec, rồi lỗi CLI, cuối cùng None (thiếu công cụ).
+    return out if out is not None else cli
 
 
 def _decode_with_hermes_dec(data):
@@ -514,29 +652,32 @@ def _decode_with_hermes_dec(data):
         from hermes_dec.parsers.hbc_bytecode_parser import parse_hbc_bytecode
         from hermes_dec.parsers.hbc_opcodes.def_classes import OperandMeaning
     except Exception:
-        return None
-    reader = HBCReader()
-    buf = _io.BytesIO(data)          # giữ buffer MỞ suốt quá trình decode (parser seek lại nhiều lần)
-    reader.read_whole_file(buf)
-    out = []
-    for fh in reader.function_headers:
-        id_refs = set()
-        const_strs = set()
-        for ins in parse_hbc_bytecode(fh, reader):
-            name = ins.inst.name
-            for idx, op in enumerate(ins.inst.operands):
-                if op.operand_meaning == OperandMeaning.string_id:
-                    sid = getattr(ins, "arg%d" % (idx + 1))
-                    try:
-                        val = reader.strings[sid]
-                    except (IndexError, TypeError):
-                        continue
-                    if name.startswith("LoadConstString"):
-                        const_strs.add(val)
-                    elif name.startswith("GetById") or name.startswith("TryGetById") or name == "GetByIdShort":
-                        id_refs.add(val)
-        out.append((id_refs, const_strs))
-    return out
+        return None                  # KHÔNG có thư viện -> None (chỉ trường hợp này)
+    try:
+        reader = HBCReader()
+        buf = _io.BytesIO(data)      # giữ buffer MỞ suốt quá trình decode (parser seek lại nhiều lần)
+        reader.read_whole_file(buf)
+        out = []
+        for fh in reader.function_headers:
+            id_refs = set()
+            const_strs = set()
+            for ins in parse_hbc_bytecode(fh, reader):
+                name = ins.inst.name
+                for idx, op in enumerate(ins.inst.operands):
+                    if op.operand_meaning == OperandMeaning.string_id:
+                        sid = getattr(ins, "arg%d" % (idx + 1))
+                        try:
+                            val = reader.strings[sid]
+                        except (IndexError, TypeError):
+                            continue
+                        if name.startswith("LoadConstString"):
+                            const_strs.add(val)
+                        elif name.startswith("GetById") or name.startswith("TryGetById") or name == "GetByIdShort":
+                            id_refs.add(val)
+            out.append((id_refs, const_strs))
+        return out
+    except Exception as e:           # parser vỡ (assert/struct/index… trên build hỏng) -> marker, KHÔNG traceback
+        return DecodeFailed("hermes-dec", type(e).__name__)
 
 
 def _decode_with_cli(data):
@@ -547,18 +688,18 @@ def _decode_with_cli(data):
     if not exe:
         return None
     tmp = tempfile.mkdtemp(prefix="apk_drift_")
-    bundle_path = os.path.join(tmp, "b.bundle")
-    hasm_path = os.path.join(tmp, "b.hasm")
     try:
+        bundle_path = os.path.join(tmp, "b.bundle")
+        hasm_path = os.path.join(tmp, "b.hasm")
         with open(bundle_path, "wb") as f:
             f.write(data)
         subprocess.run([exe, bundle_path, hasm_path], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return _parse_hasm_functions(hasm_path)
-    except Exception:
-        return None
+    except Exception as e:           # CÓ công cụ nhưng lỗi -> marker (trước đây trả None = báo nhầm "cần công cụ")
+        return DecodeFailed("hbc-disassembler", type(e).__name__)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)   # XOÁ .hasm (chứa PII) ngay
+        shutil.rmtree(tmp, ignore_errors=True)   # XOÁ .hasm (chứa PII) ngay — MỌI đường, kể cả lỗi/Ctrl-C
 
 
 _HASM_STR = re.compile(r"# String: '((?:[^'\\]|\\.)*)' \((Identifier|String)\)")
@@ -594,31 +735,70 @@ def _parse_hasm_functions(hasm_path):
 
 
 # ---------------------------------------------------------------------------
-# Ghi .env: thay/append FAP_V2_KEY, GIỮ NGUYÊN mọi dòng khác, chmod 0600 best-effort, atomic.
+# Ghi .env: thay/append FAP_V2_KEY, GIỮ NGUYÊN từng byte mọi dòng khác, chmod 0600, atomic.
 # KHÔNG in giá trị — chỉ in độ dài + sha256[:8].
 # ---------------------------------------------------------------------------
-def write_v2_key(env_path, key):
-    lines = []
-    if os.path.isfile(env_path):
-        with open(env_path, encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    new_line = "FAP_V2_KEY=" + key
-    replaced = False
-    for i, ln in enumerate(lines):
-        if ln.split("=", 1)[0].strip() == "FAP_V2_KEY":
-            lines[i] = new_line
-            replaced = True
-            break
-    if not replaced:
-        lines.append(new_line)
-    tmp = env_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+# Tách dòng ĐÚNG như loader .env của fapc (đọc text mode = universal newlines: \r\n, \r, \n) và GIỮ dấu
+# xuống dòng. KHÔNG dùng splitlines(): nó tách cả \x0b \x0c \x1c-\x1e \x85     -> cắt giá trị.
+_EOL = re.compile(r"(\r\n|\r|\n)")
+
+
+def _open_private(path):
+    """Mở file tạm để GHI: quyền 0600 ngay lúc tạo (không qua umask rộng), KHÔNG theo symlink (O_NOFOLLOW nếu có).
+
+    FS không có quyền kiểu POSIX làm os.open lỗi -> lùi về open() thường, nhưng KHÔNG BAO GIỜ khi path là
+    symlink (lùi ở đó = đi theo symlink, chính thứ O_NOFOLLOW chặn)."""
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))   # O_BINARY: Windows không đổi \n
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp, env_path)          # atomic
+        fd = os.open(path, flags, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP or os.path.islink(path):
+            raise
+        return open(path, "w", encoding="utf-8", newline="")
+    try:
+        return os.fdopen(fd, "w", encoding="utf-8", newline="")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _env_with_key(text, key):
+    """THUẦN: nội dung .env mới — thay dòng FAP_V2_KEY ĐẦU TIÊN (loader lấy giá trị đầu) hoặc append.
+    Mọi byte khác giữ nguyên; dòng thay giữ đúng kiểu xuống dòng của nó; append theo kiểu của file."""
+    parts = _EOL.split(text)                     # [dòng, eol, dòng, eol, …, dòng_cuối]
+    for i in range(0, len(parts), 2):
+        if parts[i].split("=", 1)[0].strip() == "FAP_V2_KEY":
+            parts[i] = "FAP_V2_KEY=" + key
+            return "".join(parts)
+    eol = "\r\n" if "\r\n" in text else "\n"
+    if text and not text.endswith(("\n", "\r")):
+        text += eol                              # dòng cuối chưa có xuống dòng -> thêm trước khi append
+    return text + "FAP_V2_KEY=" + key + eol
+
+
+def write_v2_key(env_path, key):
+    text = ""
+    if os.path.isfile(env_path):
+        with open(env_path, encoding="utf-8", newline="") as f:     # newline="" = KHÔNG dịch \r\n
+            text = f.read()
+    out = _env_with_key(text, key)
+    # tmp RIÊNG mỗi tiến trình, tạo 0600 + không theo symlink; lỗi giữa chừng -> XOÁ tmp (nó chứa CẢ .env + khoá).
+    tmp = f"{env_path}.{os.getpid()}.tmp"
+    try:
+        with _open_private(tmp) as f:
+            f.write(out)
+        try:
+            os.chmod(tmp, 0o600)                 # nhánh lùi open() thường: siết lại trước khi thay
+        except OSError:
+            pass
+        os.replace(tmp, env_path)                # atomic
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     try:
         os.chmod(env_path, 0o600)
     except OSError:
@@ -627,6 +807,9 @@ def write_v2_key(env_path, key):
 
 def cmd_write_v2_key(path, env_file):
     data, _src = load_bundle(path)
+    # Kiểm magic / version / cắt cụt bằng bộ đọc của CHÍNH tool trước khi đưa cho decoder ngoài:
+    # input hỏng -> HBCError rõ ràng (main -> exit 2), không phải traceback từ sâu trong hermes-dec.
+    HBC(data)
     secret_consts = fapcli_constants()
     key, reason = find_v2_key(data)
     if key is None:
@@ -638,7 +821,12 @@ def cmd_write_v2_key(path, env_file):
                             "Refused: candidate equals v1 secret / login prefix\n"))
         return 2
     env_path = env_file or os.path.join(REPO_ROOT, ".env")
-    write_v2_key(env_path, key)
+    try:
+        write_v2_key(env_path, key)
+    except (OSError, ValueError) as e:           # quyền/khoá file, .env không phải UTF-8… — chỉ TÊN lớp lỗi
+        sys.stderr.write(_t("Lỗi: không ghi được file env (%s)\n", "Error: could not write the env file (%s)\n")
+                         % type(e).__name__)
+        return 2
     sha8 = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
     print(_t("FAP_V2_KEY đã ghi (%d ký tự, sha256 %s)", "FAP_V2_KEY written (%d chars, sha256 %s)")
           % (len(key), sha8))
@@ -675,6 +863,18 @@ def main(argv=None):
     except HBCError as e:
         sys.stderr.write(_t("Lỗi: %s\n", "Error: %s\n") % e)
         return 2
+    except _INPUT_ERRORS as e:
+        # APK/bundle hỏng hoặc cắt cụt: exit 2 (lỗi đầu vào) — KHÔNG để traceback ra exit 1 (= "có drift").
+        # Chỉ in TÊN lớp lỗi: message của zipfile/struct/codec có thể chứa byte của input (bundle có PII).
+        sys.stderr.write(_t("Lỗi: đầu vào hỏng/cắt cụt hoặc không đọc được (%s)\n",
+                            "Error: corrupt/truncated or unreadable input (%s)\n") % type(e).__name__)
+        return 2
+
+
+# Lỗi từ input hỏng: zip hỏng/CRC/deflate (BadZipFile, zlib.error, EOFError), zip mã hoá / nén lạ
+# (RuntimeError, NotImplementedError), bảng HBC lệch (struct.error, IndexError), I/O (OSError), codec.
+_INPUT_ERRORS = (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, struct.error, UnicodeDecodeError,
+                 EOFError, IndexError, OSError, ValueError, RuntimeError)
 
 
 if __name__ == "__main__":
