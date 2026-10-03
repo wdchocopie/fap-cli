@@ -41,4 +41,5 @@ analysis/strings_clean.txt
 .claude/skills/
 # Ghi chú điều phối agent (context pack cho từng lần build) — scratch, không phải sản phẩm.
 .claude/plans/
+.claude/worktrees/
 AGENTS.md
