@@ -366,7 +366,7 @@ fap watch-attendance loop 15 --absent-only
 
 | Đổi sang · Changed to | Tin báo · Alert |
 |---|---|
-| `3` 💳 Đang chờ thanh toán · Pending payment | **đứng đầu**, có `‼️` + dòng *"👉 CẦN THANH TOÁN — thanh toán trong app myFAP"* · **first**, flagged `‼️` + a "pay in the official myFAP app" line |
+| `3` 💳 Đang chờ thanh toán · Pending payment | **đứng đầu**, có `‼️` + dòng *"👉 CẦN THANH TOÁN — xem & thanh toán qua kênh chính thức"* · **first**, flagged `‼️` + a "check and pay via the official channels" line |
 | `1` ✅ Đã được chấp nhận · Approved | ngay sau, có `🎉` · next, flagged `🎉` |
 | `0` ⏳ / `2` 🚫 / mã khác · other | báo bình thường; mã lạ hiện `❔ Khác (mã N)` như app 2.0.5 · plain; unknown codes show `❔ Other (code N)` like app 2.0.5 |
 | đơn **MỚI** · a **new** application | `🆕` + trạng thái hiện tại · `🆕` + its current status |
@@ -375,7 +375,7 @@ fap watch-attendance loop 15 --absent-only
 📄 Đơn từ đổi trạng thái  ·  2
 ━━━━━━━━━━━━━━━━
 ‼️ 📄 Đơn xin … (16/09/2025) · ⏳ Đang xử lý → 💳 Đang chờ thanh toán
-   👉 CẦN THANH TOÁN — thanh toán trong app myFAP chính thức (fap-cli chỉ đọc).
+   👉 CẦN THANH TOÁN — xem & thanh toán qua kênh chính thức (app myFAP / fap.fpt.edu.vn); fap-cli chỉ đọc.
 🎉 📄 Đơn xin … (02/09/2025) · ⏳ Đang xử lý → ✅ Đã được chấp nhận
    👉 Đơn đã được CHẤP NHẬN.
 ```
@@ -401,8 +401,8 @@ fap watch-attendance loop 15 --absent-only
 
 ## 11. Việc cần làm · To-do
 
-**VI —** `fap todo` / `/todo` gom những việc **chỉ bạn làm được** trong **app myFAP chính thức** — fap-cli **chỉ đọc**, không bao giờ nộp feedback hay thanh toán thay bạn (không gọi `AddRate` / `SubmitStudentFeedback`).
-**EN —** `fap todo` / `/todo` lists what **only you can do** in the **official myFAP app** — fap-cli is **read-only** and never submits feedback or pays for you (no `AddRate` / `SubmitStudentFeedback`).
+**VI —** `fap todo` / `/todo` gom những việc **chỉ bạn làm được** qua **kênh chính thức** (app myFAP / fap.fpt.edu.vn) — fap-cli **chỉ đọc**, không bao giờ nộp feedback hay thanh toán thay bạn (không gọi `AddRate` / `SubmitStudentFeedback`).
+**EN —** `fap todo` / `/todo` lists what **only you can do** via the **official channels** (myFAP app / fap.fpt.edu.vn) — fap-cli is **read-only** and never submits feedback or pays for you (no `AddRate` / `SubmitStudentFeedback`).
 
 | Mục · Item | Nguồn · Source | Khi nào hiện · Shown when |
 |---|---|---|
@@ -412,10 +412,13 @@ fap watch-attendance loop 15 --absent-only
 ```
 📌 Việc cần làm  ·  2
 ━━━━━━━━━━━━━━━━
-📝 Đang mở đợt feedback giảng dạy — làm trên app myFAP (hoặc fap.fpt.edu.vn).
-💳 Đơn chờ thanh toán: Đơn xin … (02/10/2026) — thanh toán trong app myFAP.
-ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên trong app myFAP chính thức.
+📝 Đang mở đợt feedback giảng dạy — làm tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).
+💳 Đơn chờ thanh toán: Đơn xin … (02/10/2026) — xem & thanh toán qua app myFAP / fap.fpt.edu.vn.
+ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên qua kênh chính thức (app myFAP / fap.fpt.edu.vn).
 ```
+
+> 🔎 **VI —** Vì sao chỉ dẫn tới `fap.fpt.edu.vn`? Chính app myFAP 2.0.5 khi `CheckOpenFeedBack` mở cũng chỉ hiện *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* kèm nút mở trang đó; màn **Đơn từ** của app **không** có nút thanh toán (chỉ hiện nhãn trạng thái). fap-cli nói đúng như vậy, không hứa thứ app không có.
+> 🔎 **EN —** Why point at `fap.fpt.edu.vn`? When `CheckOpenFeedBack` is open, myFAP 2.0.5 itself only says *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* with a button opening that page; the app's **Applications** screen has **no** pay button (status label only). fap-cli says exactly that and promises nothing the app doesn't have.
 
 **VI —**
 - **Không có việc** → đúng 1 dòng `📌 Việc cần làm: ✅ không có việc gì.`

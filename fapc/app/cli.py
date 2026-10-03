@@ -23,7 +23,7 @@ HELP = """fap <command>   ·   fap-cli
   Tổng quan / Overview:
     status | dashboard     hôm nay + điểm + điểm danh · today + grades + attendance
     all                    MỌI thứ trong 1 lần · everything at once
-    todo                   việc cần làm: feedback đang mở / đơn chờ thanh toán (tự làm trong app myFAP) · to-do
+    todo                   việc cần làm: feedback đang mở / đơn chờ thanh toán (tự làm qua myFAP/fap.fpt.edu.vn) · to-do
     today | tomorrow       lịch hôm nay | lịch ngày mai · today's | tomorrow's schedule
     weekly                 tổng kết tuần: lịch + điểm danh + điểm (gửi kênh) · weekly recap → channels
     week [next|prev|N]     lịch tuần (lọc từ kỳ) · weekly schedule
