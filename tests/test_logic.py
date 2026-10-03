@@ -2955,6 +2955,296 @@ def test_apkdrift_write_v2_key(tmp_path=None):
     assert "FAP_V2_KEY=beef5678feedface" in lines
     assert "FAP_LANG=en" in lines and "TELEGRAM_TOKEN=keepme" in lines
 
+
+def test_apkdrift_env_with_key_preserves_bytes():
+    """Ghép .env THUẦN: chỉ dòng FAP_V2_KEY đổi; CRLF, \\x0c/\\u2028 trong giá trị, dòng cuối không xuống dòng,
+    CR trần (loader đọc universal newlines) đều giữ NGUYÊN từng byte."""
+    f = _ad._env_with_key
+    src = "FAP_LANG=en\r\nA=x\x0cy z\r\nFAP_V2_KEY=old\r\n# FAP_V2_KEY=comment\r\nB=1"
+    assert f(src, "k1") == src.replace("FAP_V2_KEY=old", "FAP_V2_KEY=k1")
+    assert f("FAP_LANG=en\r\nB=1", "k1") == "FAP_LANG=en\r\nB=1\r\nFAP_V2_KEY=k1\r\n"   # append theo CRLF
+    assert f("A=1\nB=2\n", "k1") == "A=1\nB=2\nFAP_V2_KEY=k1\n"
+    assert f("A=1", "k1") == "A=1\nFAP_V2_KEY=k1\n"
+    assert f("", "k1") == "FAP_V2_KEY=k1\n"
+    assert f("FAP_V2_KEY=old\rFAP_LANG=vi\r", "k1") == "FAP_V2_KEY=k1\rFAP_LANG=vi\r"     # CR trần: KHÔNG nuốt dòng sau
+    assert f(" FAP_V2_KEY = old\nX=1\nFAP_V2_KEY=dup\n", "k1") == "FAP_V2_KEY=k1\nX=1\nFAP_V2_KEY=dup\n"  # thay dòng ĐẦU
+
+
+def test_apkdrift_write_v2_key_file_safety():
+    """Ghi .env: byte dòng khác giữ nguyên trên ĐĨA (Windows không đổi \\n), tmp RIÊNG tiến trình không sót;
+    lỗi giữa chừng -> tmp bị xoá, .env cũ nguyên vẹn; POSIX: tmp tạo 0600 (không qua umask), file cuối 0600,
+    tmp là symlink -> KHÔNG ghi xuyên symlink."""
+    import tempfile, stat
+    d = tempfile.mkdtemp()
+    env = os.path.join(d, ".env")
+    src = "FAP_LANG=en\r\nA=x\x0cy z\r\nFAP_V2_KEY=old\r\nB=1"
+    with open(env, "w", encoding="utf-8", newline="") as fh:
+        fh.write(src)
+    modes = []
+    real_open = _ad._open_private
+    def spy(p):
+        fh = real_open(p)
+        modes.append(stat.S_IMODE(os.stat(p).st_mode))
+        return fh
+    old_umask = os.umask(0o022)
+    try:
+        _ad._open_private = spy
+        _ad.write_v2_key(env, "cafe1234deadbeef")
+    finally:
+        _ad._open_private = real_open
+        os.umask(old_umask)
+    with open(env, "rb") as fh:
+        assert fh.read() == src.replace("FAP_V2_KEY=old", "FAP_V2_KEY=cafe1234deadbeef").encode("utf-8")
+    assert os.listdir(d) == [".env"], os.listdir(d)
+    if os.name == "posix":
+        assert modes == [0o600], modes
+        assert stat.S_IMODE(os.stat(env).st_mode) == 0o600
+    # os.replace lỗi -> tmp (chứa CẢ .env + khoá) bị xoá, .env cũ không đổi, lỗi vẫn nổi lên
+    before = open(env, "rb").read()
+    real_replace = _ad.os.replace
+    def boom(a, b):
+        raise OSError("disk full")
+    _ad.os.replace = boom
+    try:
+        _ad.write_v2_key(env, "beef5678feedface")
+        assert False, "phải raise"
+    except OSError:
+        pass
+    finally:
+        _ad.os.replace = real_replace
+    assert os.listdir(d) == [".env"] and open(env, "rb").read() == before
+    if os.name == "posix" and hasattr(os, "O_NOFOLLOW"):
+        victim = os.path.join(d, "victim")
+        with open(victim, "w") as fh:
+            fh.write("V\n")
+        os.symlink(victim, "%s.%d.tmp" % (env, os.getpid()))
+        try:
+            _ad.write_v2_key(env, "beef5678feedface")
+            assert False, "phải từ chối symlink"
+        except OSError:
+            pass
+        assert open(victim).read() == "V\n" and open(env, "rb").read() == before
+        assert sorted(os.listdir(d)) == [".env", "victim"]
+
+
+def test_apkdrift_hosts_only_scheme_host_port():
+    """Danh sách Host chỉ còn scheme://host[:port] — path, ;params, ?query, #fragment, user:pass@ bị bỏ."""
+    strings = ["https://Api.Example.com:8443/p/a;jsessionid=abc?x=1#frag",
+               "http://h.example#tok=zzz", "https://u:pw@h2.example/x", "https://h3.example;sid=999",
+               "https://h4.example:notaport/x", "https://h6.example:99999", "https://[::1]:8080/x",
+               "ftp://f.example", "https:///nohost", "https://h5.example some words", "http://*"]
+    hosts = _ad.extract(strings)["hosts"]
+    assert hosts == {"https://api.example.com:8443", "http://h.example", "https://h2.example",
+                     "https://h3.example", "https://[::1]:8080", "https://h5.example", "http://*"}, hosts
+    for h in hosts:
+        assert not any(c in h for c in ";?#@=") and "/p" not in h
+
+
+def test_apkdrift_hbc_truncated_and_bogus_tables():
+    """MỌI tiền tố cắt cụt + số đếm/offset rác -> HBCError (exit 2), không struct.error/IndexError."""
+    blob = _hbc_blob(["GetStudentMark", "sessionApiVersion"])
+    for cut in range(len(blob)):
+        try:
+            _ad.HBC(blob[:cut])
+            assert False, cut
+        except _ad.HBCError:
+            pass
+    small = 128                      # header 109 byte -> căn 32 -> small table (0 function/kind/identifier)
+    for off, val in ((40, 0xFFFFFFFF),                       # functionCount khổng lồ
+                     (52, 0x10000000),                       # stringCount vượt file
+                     (small, (200 << 24) | (0 << 1)),        # chuỗi #0 dài quá storage
+                     (small, (0xFF << 24) | (5 << 1))):      # escape overflow nhưng bảng overflow rỗng
+        bad = bytearray(blob)
+        _struct.pack_into("<I", bad, off, val)
+        try:
+            _ad.HBC(bytes(bad))
+            assert False, (off, val)
+        except _ad.HBCError:
+            pass
+
+
+def test_apkdrift_main_corrupt_input_exit2():
+    """APK/bundle hỏng -> exit 2 (lỗi đầu vào, KHÔNG phải 1 = drift), stderr chỉ tên lớp lỗi, không byte input."""
+    import tempfile, zipfile as _zip
+    d = tempfile.mkdtemp()
+    marker = "MARKERzz9leak"
+    blob = _hbc_blob(["GetStudentMark", marker] + ["filler%d" % i for i in range(200)])
+    good = os.path.join(d, "good.apk")
+    with _zip.ZipFile(good, "w", _zip.ZIP_DEFLATED) as z:
+        z.writestr("assets/index.android.bundle", blob)
+    raw = open(good, "rb").read()
+    cases = {}
+    cases["badzip.apk"] = b"PK\x03\x04" + b"\x00" * 40                        # magic zip, thân rác
+    cases["trunc.apk"] = raw[: len(raw) // 2]                                  # mất central directory
+    hdr = 30 + len("assets/index.android.bundle")
+    cases["badcrc.apk"] = raw[:hdr + 20] + bytes(b ^ 0x5A for b in raw[hdr + 20:hdr + 60]) + raw[hdr + 60:]
+    cases["trunc.bundle"] = blob[:-7]
+    errs = {}
+    for name, data in cases.items():
+        p = os.path.join(d, name)
+        with open(p, "wb") as fh:
+            fh.write(data)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = _ad.main([p])
+        errs[name] = err.getvalue()
+        assert rc == 2, (name, rc)
+        assert marker not in errs[name] and errs[name].strip(), name
+    assert "BadZipFile" in errs["badzip.apk"]
+    # diff: build MỚI hỏng cũng exit 2 (không phải 1)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        assert _ad.main([good, os.path.join(d, "trunc.apk")]) == 2
+
+
+def test_apkdrift_decoder_failures_are_distinct():
+    """--write-v2-key: công cụ CÓ nhưng decode lỗi -> DecodeFailed (chỉ tên lớp), KHÔNG traceback, KHÁC 'thiếu
+    công cụ'; thư mục tạm (.bundle/.hasm) bị xoá cả khi lỗi; input hỏng -> exit 2, .env không đụng."""
+    import types, shutil, tempfile
+    blob = _hbc_blob(["x"])
+    # hermes-dec GIẢ: import được nhưng parser vỡ
+    names = ["hermes_dec", "hermes_dec.parsers", "hermes_dec.parsers.hbc_file_parser",
+             "hermes_dec.parsers.hbc_bytecode_parser", "hermes_dec.parsers.hbc_opcodes",
+             "hermes_dec.parsers.hbc_opcodes.def_classes"]
+    saved_mods = {n: sys.modules.get(n) for n in names}
+    class _Reader(object):
+        def read_whole_file(self, buf):
+            raise AssertionError("bytes-from-input SHOULD-NOT-LEAK")
+    fake = {n: types.ModuleType(n) for n in names}
+    fake["hermes_dec.parsers.hbc_file_parser"].HBCReader = _Reader
+    fake["hermes_dec.parsers.hbc_bytecode_parser"].parse_hbc_bytecode = lambda fh, r: []
+    fake["hermes_dec.parsers.hbc_opcodes.def_classes"].OperandMeaning = type("OM", (), {"string_id": 1})
+    try:
+        sys.modules.update(fake)
+        r = _ad._decode_with_hermes_dec(blob)
+    finally:
+        for n, m in saved_mods.items():
+            if m is None:
+                sys.modules.pop(n, None)
+            else:
+                sys.modules[n] = m
+    assert isinstance(r, _ad.DecodeFailed) and (r.tool, r.error) == ("hermes-dec", "AssertionError")
+    assert "SHOULD-NOT-LEAK" not in repr(vars(r))
+    # hbc-disassembler "có" nhưng chạy lỗi -> DecodeFailed + thư mục tạm đã xoá
+    made = []
+    real_which, real_mk = shutil.which, tempfile.mkdtemp
+    def mk(*a, **k):
+        p = real_mk(*a, **k)
+        made.append(p)
+        return p
+    shutil.which = lambda name: os.path.join(tempfile.gettempdir(), "apk_drift_no_such_tool_%d" % os.getpid())
+    tempfile.mkdtemp = mk
+    try:
+        r2 = _ad._decode_with_cli(blob)
+    finally:
+        shutil.which, tempfile.mkdtemp = real_which, real_mk
+    assert isinstance(r2, _ad.DecodeFailed) and r2.tool == "hbc-disassembler", vars(r2)
+    assert made and not os.path.exists(made[0])
+    # ghép kết quả 2 decoder
+    df_h, df_c = _ad.DecodeFailed("hermes-dec", "ValueError"), _ad.DecodeFailed("hbc-disassembler", "CalledProcessError")
+    saved = (_ad._decode_with_hermes_dec, _ad._decode_with_cli)
+    try:
+        for h, c, want in (([1], None, [1]), (None, None, None), (df_h, None, df_h), (None, df_c, df_c),
+                           (df_h, df_c, df_h), (df_h, [2], [2])):
+            _ad._decode_with_hermes_dec = lambda data, h=h: h
+            _ad._decode_with_cli = lambda data, c=c: c
+            got = _ad._decode_functions(blob)
+            assert got is want or got == want, (h, c)
+    finally:
+        _ad._decode_with_hermes_dec, _ad._decode_with_cli = saved
+    # thông điệp: thiếu công cụ ≠ công cụ lỗi
+    saved_df = _ad._decode_functions
+    try:
+        _ad._decode_functions = lambda data: None
+        k1, why_none = _ad.find_v2_key(blob)
+        _ad._decode_functions = lambda data: df_h
+        k2, why_fail = _ad.find_v2_key(blob)
+    finally:
+        _ad._decode_functions = saved_df
+    assert k1 is None and k2 is None and why_none != why_fail
+    assert "hermes-dec" in why_fail and "ValueError" in why_fail
+    # qua main: bundle hỏng / decoder lỗi -> exit 2, .env KHÔNG đụng
+    d = tempfile.mkdtemp()
+    env = os.path.join(d, ".env")
+    with open(env, "w", encoding="utf-8") as fh:
+        fh.write("A=1\n")
+    bad = os.path.join(d, "bad.bundle")
+    with open(bad, "wb") as fh:
+        fh.write(b"\x00" * 64)
+    good = os.path.join(d, "good.bundle")
+    with open(good, "wb") as fh:
+        fh.write(blob)
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            assert _ad.main(["--write-v2-key", bad, "--env-file", env]) == 2
+            _ad._decode_functions = lambda data: df_h
+            assert _ad.main(["--write-v2-key", good, "--env-file", env]) == 2
+    finally:
+        _ad._decode_functions = saved_df
+    assert "ValueError" in err.getvalue()
+    assert open(env, encoding="utf-8").read() == "A=1\n" and sorted(os.listdir(d)) == [".env", "bad.bundle", "good.bundle"]
+    # hermes-dec THẬT (nếu cài): bundle tổng hợp không làm nó traceback
+    try:
+        import hermes_dec  # noqa: F401
+        have = True
+    except Exception:
+        have = False
+    if have:
+        assert isinstance(_ad._decode_with_hermes_dec(blob), (list, _ad.DecodeFailed))
+
+
+def test_apkdrift_endpoints_include_url_built():
+    """Endpoint dựng URL trực tiếp (auth.py: f"{FAP_BASE}/AuthenticationByFeId…") phải vào tập fap-cli gọi —
+    nếu không, build bỏ AuthenticationByFeId (đăng nhập) vẫn ra ✅ + exit 0."""
+    import tempfile
+    assert "AuthenticationByFeId" in _ad.fapcli_endpoints()          # repo THẬT
+    d = tempfile.mkdtemp()
+    core = os.path.join(d, "fapc", "core")
+    os.makedirs(core)
+    with open(os.path.join(core, "auth.py"), "w", encoding="utf-8") as fh:
+        fh.write('u1 = f"{FAP_BASE}/AuthenticationByFeId?campusCode={c}"\n'
+                 'u2 = f"{apiv2.BASE_V2}/OnlyV2Name"\n'
+                 'u3 = BASE + "/ConcatName"\n'
+                 'u4 = f"{BASE_V2}/{path}"\n'
+                 'u5 = f"{base}/{endpoint}?{qs}"\n'
+                 'u6 = f"{MY_BASE}/NotThis"\n'
+                 'call("GetSemester", [])\n')
+    eps = _ad.fapcli_endpoints(d)
+    assert eps == {"AuthenticationByFeId", "OnlyV2Name", "ConcatName", "GetSemester"}, eps
+
+
+def test_apkdrift_const_check_any_missing():
+    """MỌI hằng đọc được mà thiếu trong build (không chỉ SECRET/BASE) -> có tên trong 'missing' (=> exit 1)."""
+    consts = {"SECRET": "s3cr3tvalue", "BASE": "https://b.example/api", "LOGIN_PREFIX": "lpfx",
+              "CLIENT_ID": "cid", "ISSUER": "https://iss.example", "REDIRECT_URI": "app:/cb"}
+    strings = ["s3cr3tvalue", "https://b.example/api/X", "lpfx", "cid", "https://iss.example"]
+    assert _ad.const_check(consts, set(strings), strings) == (["REDIRECT_URI"], [])
+    strings2 = ["s3cr3tvalue", "https://b.example/api/X", "app:/cb"]
+    assert _ad.const_check(consts, set(strings2), strings2) == (["LOGIN_PREFIX", "CLIENT_ID", "ISSUER"], [])
+    assert _ad.const_check({"LOGIN_PREFIX": "lpfx"}, {"lpfx"}, ["lpfx"]) == ([], ["SECRET", "BASE"])
+
+
+def test_apkdrift_str_lit_py37_compat():
+    """Literal chuỗi: ast.Constant (3.8+) và ast.Str (.s) trên 3.7 — thiếu nhánh 3.7 thì mọi lần chạy báo
+    SECRET/BASE thiếu. Không chạm ast.Str thật (gỡ ở 3.14): giả lập node 'Str' + cờ _LEGACY_AST."""
+    import ast as _ast
+    assert _ad._str_lit(_ast.parse("x = 'a'").body[0].value) == "a"
+    assert _ad._str_lit(_ast.parse("x = 1").body[0].value) is None
+    assert _ad._str_lit(_ast.parse("x = b'a'").body[0].value) is None
+    Str = type("Str", (), {"s": "legacy"})
+    saved = _ad._LEGACY_AST
+    try:
+        _ad._LEGACY_AST = True
+        assert _ad._str_lit(Str()) == "legacy"
+        _ad._LEGACY_AST = False
+        assert _ad._str_lit(Str()) is None
+    finally:
+        _ad._LEGACY_AST = saved
+    names = set(_ad.fapcli_constants())                                   # repo THẬT — chỉ so TÊN, không giá trị
+    assert set(_ad.CONST_NAMES) <= names, sorted(names)
+    assert {"GetStudentMark", "GetSemester"} <= _ad._simple_keys(
+        os.path.join(_ad.REPO_ROOT, "fapc", "core", "extract.py"))
+
 # ---- link hoá đơn điện tử (CHỈ CLI) · tin hoa/thường · đếm ngược thi · 404 học phí · 201 rèn luyện ----
 # Giá trị GIẢ hết (MSSV HE000000…). Mọi monkeypatch đều KHÔI PHỤC trong finally (runner chạy theo thứ tự tên).
 def test_invoice_url_built_locally():
