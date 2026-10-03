@@ -26,7 +26,7 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | [15-config](15-config.md) | Mọi khóa trong `.env` · Every `.env` key |
 | [16-troubleshooting](16-troubleshooting.md) | Lỗi thường gặp & cách sửa · Common errors & fixes |
 | [17-architecture](17-architecture.md) | **Kiến trúc & logic toàn bộ code** + bảng hiệu năng máy yếu→mạnh · Architecture, full code logic & performance knobs |
-| [18-roadmap](18-roadmap.md) | ✅ Nhật ký 4 quyết định (gộp dòng LAB, 2 bug thật, session 2 máy, nhiều account) — **đã triển khai** + sự thật đã kiểm chứng · decision log, now implemented + verified facts |
+| [18-roadmap](18-roadmap.md) | ✅ Nhật ký 4 quyết định (gộp dòng LAB, 2 bug thật, session 2 máy, nhiều account) — **đã triển khai** + sự thật đã kiểm chứng + nhật ký từng đợt (§6 09–10/2026, §7 2026-10-03: API v2 opt-in, việc cần làm, cảnh báo đơn từ) · decision log, now implemented + verified facts + per-round log (§7: opt-in API v2, to-do, application alerts) |
 | [19-multi-profile](19-multi-profile.md) | **Nhiều tài khoản trên 1 máy**: `FAP_PROFILE`, `.env.<tên>`, onboarding (mỗi người TỰ login), 1 unit systemd/profile · Multi-profile: per-account state, config, consent-first onboarding, per-profile units |
 
 ## 🔬 Nội bộ / Reverse-engineering · Internals
@@ -39,8 +39,8 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | [03-extraction-catalog](03-extraction-catalog.md) | Danh mục dữ liệu trích xuất được · Extractable-data catalog |
 | [04-feid-oauth-tool](04-feid-oauth-tool.md) | Đăng nhập FE Identity (OAuth) · FE Identity (OAuth) login |
 | [05-checksum-map](05-checksum-map.md) | Bản đồ checksum theo endpoint · Per-endpoint checksum map |
-| [20-api-fields](20-api-fields.md) | **Ý nghĩa đã kiểm chứng của từng trường** (vd `meetURL` là mã Meet trần, mã `P/A/N`, `studentStatus 0–3`), trường dùng/chưa dùng, PII giữ nguyên, cách kiểm lại sau khi FAP cập nhật app · Verified field meanings, used vs unused, PII to keep unused, re-audit after an app update |
-| [21-api-v2](21-api-v2.md) | **API v2 của myFAP 2.0.5** (qua `fap-proxy`, chưa dùng): app chọn v1/v2 thế nào, dạng request, chữ ký HMAC-SHA256 (không ghi khoá), endpoint mới, fap-cli cần làm gì nếu v1 bị tắt · myFAP 2.0.5's API v2 (not used yet): selection, request shape, signing, what fap-cli would need |
+| [20-api-fields](20-api-fields.md) | **Ý nghĩa đã kiểm chứng của từng trường** (vd `meetURL` là mã Meet trần, mã `P/A/N`, `studentStatus 0–3`), trường dùng/chưa dùng, PII giữ nguyên, cách kiểm lại sau khi FAP cập nhật app + công cụ so APK offline `analysis/apk_drift.py` (§5.1) · Verified field meanings, used vs unused, PII to keep unused, re-audit after an app update + the offline APK drift checker `analysis/apk_drift.py` (§5.1) |
+| [21-api-v2](21-api-v2.md) | **API v2 của myFAP 2.0.5** (qua `fap-proxy`) — fap-cli có client v2 **opt-in, thử nghiệm, chưa kiểm chứng thật** (`FAP_API_VERSION=v2`, §5); mặc định vẫn v1: app chọn v1/v2 thế nào, dạng request, chữ ký HMAC-SHA256 (không ghi khoá), endpoint mới, cách bật/tắt v2 · myFAP 2.0.5's API v2 — fap-cli ships an **opt-in, experimental, not-live-verified** v2 client (§5), v1 stays the default: selection, request shape, signing, how to switch |
 
 ---
 

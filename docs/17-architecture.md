@@ -17,15 +17,18 @@ người dùng ─► fap <command> (fapc/app/cli.py)
                     │ gọi
    ┌────────────────┴───────────────────────────────────┐
    │  fapc/core/*  — TẦNG DỮ LIỆU (data)                 │  KHÔNG import app
-   │  api (HTTP+checksum+auth) · auth (OAuth)            │
-   │  schedule · grades · attendance · transcript ·      │
-   │  whatif · extras · extract                          │
+   │  api (HTTP+checksum+auth) · apiv2 (v2 opt-in)       │
+   │  auth (OAuth) · schedule · grades · attendance ·    │
+   │  transcript · whatif · extras · extract · conduct   │
    └────────────────┬───────────────────────────────────┘
                     │
    fapc/  (shared): config (.env) · i18n (song ngữ) · fmt (định dạng)
                     │
-            https://api.fpt.edu.vn/fap/api/MyFAP/<endpoint>
+            https://api.fpt.edu.vn/fap/api/MyFAP/<endpoint>        ← v1 (mặc định)
+            https://fap-proxy.fpt.edu.vn/MyFAP/<endpoint>          ← v2 (FAP_API_VERSION=v2, thử nghiệm)
 ```
+
+`analysis/` (ngoài package, không được `fapc` import): `keys_schema.py` (sơ đồ khoá của dump, chỉ tên khoá) và `apk_drift.py` (so APK/bundle myFAP với hằng số + endpoint fap-cli, **offline**, thư viện chuẩn; exit `0/1/2` cho cron/CI; `--write-v2-key` ghi `FAP_V2_KEY` vào `.env` mà không in giá trị) — xem [20-api-fields](20-api-fields.md) §5.1.
 
 **Quy tắc bất biến:** `core/` không bao giờ import `app/` (kiểm bằng test). Mọi lệnh CLI/bot/web cuối cùng đều gọi cùng các hàm `fetch_*` trong `core/`, nên hành vi nhất quán.
 
@@ -41,15 +44,30 @@ người dùng ─► fap <command> (fapc/app/cli.py)
 | `creds()` | Đọc `output/token.json` (do login/refresh tạo) → `(token, campus, roll)`. Thiếu token → `SystemExit("… fap login")`. Fallback RKStorage chỉ cho hướng máy ảo legacy. |
 | `checksum_auth(a,b)` | `base64(HMAC_SHA1(SECRET, a + "MYFAP" + b + "DD/MM/YYYY HH:00"))` rồi `=`→`%3d`, space→`+`. **HH = giờ Việt Nam (UTC+7)** — checksum đổi theo từng giờ. |
 | `checksum_login(campus)` | Như trên nhưng message = `LOGIN_PREFIX + campus + giờ`. Dùng cho GetSemester/GetSubjets/login. |
-| `call(endpoint, params, roll, campus, checksum_value=None)` | Dựng URL, gắn checksum, GET. **`checksum_value`**: `None`=mặc định `cs12(roll,campus)`; `False`=không gửi; chuỗi=override. Trả `(http_status\|None, json\|text)`. |
-| `check_auth(http, data)` | Phát hiện token hết hạn (đã probe live): HTTP 401/403 **hoặc** HTTP 200 + `code="201"` với message chứa "token" → raise `SystemExit("… fap refresh")`; message chứa "checksum" → báo lệch giờ. Nhờ vậy `fetch_*` không trả `[]` im lặng. |
+| `call(endpoint, params, roll, campus, checksum_value=None)` | Dựng URL, gắn checksum, GET. **`checksum_value`**: `None`=mặc định `cs12(roll,campus)`; `False`=không gửi; chuỗi=override. Trả `(http_status\|None, json\|text)`. **Đầu hàm:** so dấu `api_version` trong `token.json` với `FAP_API_VERSION` (lệch → `SystemExit` "chạy `fap refresh`"); `FAP_API_VERSION=v2` → rẽ sang `apiv2.call_v2` (cùng hợp đồng trả về). `GetAllActiveCampus` (`fap campuses`) luôn đi v1, không cần token. |
+| `check_auth(http, data)` | Phát hiện token hết hạn (đã probe live): HTTP 401/403, HTTP 200 + `code="201"` với message chứa "token", **hoặc thân lỗi phiên kiểu v2** (`code` = `401` chuỗi/số, hoặc `errorMessage` = `Unauthorized`) → raise `SystemExit("… fap refresh")`; message chứa "checksum" → báo lệch giờ. **HTTP 500 không tính** là hết phiên (tránh vòng refresh). Nhờ vậy `fetch_*` không trả `[]` im lặng. Bản THUẦN không raise: `is_session_expired(http, data)` cho watcher/`courses`/`grades`. |
+| `classify_drift(http, body, content_type)` | THUẦN, **0 request thêm**: phản hồi v1 trông như route đã dời/tắt? 301/302/303/307/308 → `redirect`, 410 → `gone`, 404 **thân không phải JSON** → `not_found`; 404 có JSON và 404 của endpoint vốn đã 404 (`GetSemesterMark`, `GetVersion`, `GetCourseOfSemester`) không tính. Tín hiệu đầu tiên mỗi tiến trình in **1** gợi ý song ngữ ra `stderr` (chỉ tên endpoint + mã HTTP, không URL/token). |
 | `default_semester(when)` | Đoán kỳ theo **ngày VN**: Spring (T1–4) / Summer (T5–8) / Fall (T9–12) + năm. Fallback đúng cho **mọi sinh viên, mọi kỳ** (không hardcode). |
-| `current_semester()` | `FAP_SEMESTER` (env) > tự dò qua `GetSemester` (so ngày trong khoảng start/end, **parse an toàn từng mục** để 1 ngày-lỗi không kéo sập) > `default_semester()`. **LUÔN trả 1 chuỗi, không raise.** |
+| `select_semester(semesters, now)` | THUẦN — **một** quy tắc chọn kỳ cho cả `current_semester` lẫn `schedule.pick_semester`: kỳ **đầu tiên** (theo thứ tự server) chứa hôm nay, so theo **ngày** — **ngày cuối kỳ vẫn trong kỳ** (cố ý lệch app myFAP 2.0.5 vốn so thời điểm với `endDate` 00:00); không có → kỳ có `startDate` **gần nhất** (hai phía, hoà giữ kỳ đứng trước, như app); mục lỗi/thiếu tên bị bỏ qua. Trả `None` nếu không kỳ nào dùng được. |
+| `current_semester()` | `FAP_SEMESTER` (env) > tự dò qua `GetSemester` + `select_semester` (**parse an toàn từng mục** để 1 ngày-lỗi không kéo sập) > `default_semester()`. **LUÔN trả 1 chuỗi, không raise** (kể cả `SystemExit` của v2 thiếu khoá / token lệch phiên bản). |
 
 **3 cơ chế chống lỗi trong `call()`:**
 1. **Cache trong-bộ-nhớ** (opt-in `FAP_CACHE_MIN` phút): key = endpoint+params (KHÔNG gồm checksum vì đổi theo giờ); chỉ cache HTTP 200 + code≠201; tự hết hạn.
 2. **Retry checksum ±1h**: nếu lỗi checksum (lệch giờ ngay đầu giờ), tự thử lại với giờ `{now, now+1, now−1}` (chỉ khi dùng checksum mặc định).
 3. **`allow_redirects=False`**: token nằm trong query string → KHÔNG đi theo 30x sang host khác (chống rò token). Lỗi mạng trả chuỗi **không chứa URL/token**.
+
+### 2.1 API v2 opt-in · `core/apiv2.py`
+
+**OPT-IN, THỬ NGHIỆM, CHƯA kiểm chứng với server thật** — chỉ chạy khi `FAP_API_VERSION=v2`; mặc định v1 và `call()` không bao giờ rẽ vào đây. Đặc tả + cách bật: [21-api-v2](21-api-v2.md) §5.
+
+| Hàm | Logic |
+|---|---|
+| `normalize_version()` / `api_version()` | `FAP_API_VERSION` → `v1`/`v2` (không phân biệt hoa/thường); giá trị lạ → `v1` + **1** cảnh báo song ngữ (không in lại giá trị). Đọc **lúc gọi** qua `config.api_version_raw()`. |
+| `v2_key()` | Đọc `FAP_V2_KEY` qua `config.v2_key_raw()` ngay lúc ký; thiếu → `SystemExit` hướng dẫn trích khoá (**0 request**). Khoá không bao giờ vào biến module, URL, log, lỗi hay `token.json`. |
+| `checksum_v2()` / `build_headers_v2()` | THUẦN: chữ ký HMAC-SHA256 theo **epoch giây** + header kiểu app (Bearer + `Checksum: <sig>:<epoch>`) — không cần thử ±1h. Luôn ký bằng **token của chính người dùng**. |
+| `v2_request()` / `call_v2()` | Bảng `ENDPOINTS` (tên v1 → đường dẫn + tham số v2) → GET `fap-proxy`, timeout 15 s, không theo redirect; cùng hợp đồng `(http, body)`, cùng cache `FAP_CACHE_MIN` (khoá tách riêng). Endpoint GHI + `GetApiActive` nằm trong `DENY` → từ chối **trước khi** chạm mạng; `GetStudentRate` không có trên v2 (`fap extract` bỏ qua). |
+| `session_version()` / `check_session_version()` | Đọc dấu `api_version` trong `token.json` (thiếu = `v1`); lệch `FAP_API_VERSION` → `SystemExit` "chạy `fap refresh`". |
+| `scrub()` | Che khoá v2 (+ token) nếu lỡ lọt vào một chuỗi log. |
 
 ---
 
@@ -58,9 +76,9 @@ người dùng ─► fap <command> (fapc/app/cli.py)
 OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end` (PKCE, không secret):
 - `cmd_login()`: thử **device flow** trước; không được thì **Authorization Code + PKCE** (mở browser; URL redirect `io.identityserver.demo:/oauthredirect?code=…` báo "scheme not registered" là đúng → copy/paste).
 - `exchange_code(url)`: đổi `code` → `access_token` (+ `refresh_token`).
-- bước cuối `AuthenticationByFeId` (checksum login) đổi `access_token` → **token FAP** (`authenKey`) → lưu `output/token.json` (chmod 0600 trên POSIX).
+- bước cuối `AuthenticationByFeId` (checksum login) đổi `access_token` → **token FAP** (`authenKey`) → lưu `output/token.json` (chmod 0600 trên POSIX). `_do_fap` chốt phiên bản API **một lần** rồi **đóng dấu** `"api_version"` vào `token.json` (v1 lẫn v2); với `FAP_API_VERSION=v2` bước này là POST `fap-proxy …/AuthenticationByFeId` body `{token}` ký bằng chính access token FE (thiếu `FAP_V2_KEY` → log hướng dẫn, trả `None`, 0 request).
 - `refresh_tokens()`: làm mới headless qua `refresh_token` (đến khi nó hết hạn thì login lại).
-- `_redact()`: che token/PII khi dump debug; lỗi mạng không in URL.
+- `_redact()`: che token/PII khi dump debug (kể cả `authorization`, `checksum`, `v2_key` của v2); lỗi mạng không in URL.
 
 ---
 
@@ -80,17 +98,21 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 **whatif.py** — `_split()` tách môn đã/chưa có điểm. `needed_average(target,…)` cho mô phỏng GPA cả kỳ. `predict_course(components,target)` THUẦN: từ trọng số+giá trị các đầu điểm 1 môn → "cần TB bao nhiêu ở phần còn lại để **qua môn**" (trọng số tự triệt tiêu nên không cần biết %/phân số); `predict_line()` render 1 dòng. `run()` in bảng dự kiến (5–10) hoặc điểm-cần.
 
-**extras.py** — `campuses()` (GetAllActiveCampus, KHÔNG cần token — chọn campus trước login), `exams_text()`/`exams_ics()` (lịch thi → `.ics` + nhắc trước 1 ngày, parse ngày/giờ generic), `notifications_text()` (GetNotificationByRoll, mới nhất trước), `news()`, `fees()`.
+**extras.py** — `campuses()` (GetAllActiveCampus, KHÔNG cần token — chọn campus trước login), `exams_text()`/`exams_ics()` (lịch thi → `.ics` + nhắc trước 1 ngày, parse ngày/giờ generic; `exam_countdown()` dùng **chung** danh sách khoá `_EX_SUBJ`/`_EX_ROOM`/`_EX_TYPE`, không phân biệt hoa/thường, gồm cả khoá thẻ thi của app 2.0.5), `notifications_text()` (GetNotificationByRoll, mới nhất trước), `news()` (`_news_get` so khoá không phân biệt hoa/thường: `tittle`/`content`/`createDate` lẫn `Title`/`Contents`/`EntryDate`/`EntryBy`), `fees()` (`fee_details_text()` THUẦN xét HTTP trước: 404 `GeFeeByRoll` = "không dùng được với tài khoản này"; `invoice_text()` in link hoá đơn điện tử `dng.fpt.edu.vn` — **chỉ CLI**, vì link chứa MSSV). `profile_text(full=False)`: bot/web **ẩn** ngày sinh/SĐT/CCCD; chỉ `fap profile` (CLI) truyền `full=True`.
+- **Việc cần làm (to-do):** `todo_fetch()` gọi 3 GET (`CheckOpenFeedBack`, `CheckUpdateProfile`, `GetApplication`), **mỗi nguồn cô lập lỗi** → `None` = "không biết"; `todo_items()`/`todo_block()` THUẦN (không bao giờ nói "không có việc" khi chưa kiểm được). `_profile_flag_v2()` quy `CheckUpdateProfile` kiểu v2 (khác rỗng = phải cập nhật) về boolean kiểu v1. Chỉ **nhắc** dùng kênh chính thức — không gọi `AddRate`/`SubmitStudentFeedback`; `GetStudentRate` không dùng.
+- **Đơn đổi trạng thái:** `fetch_applications_checked()` (list khi lấy được, `None` khi không biết) + `app_changes(prev, rows)` THUẦN (khoá theo `w_APP_ID` không phân biệt hoa/thường; lần đầu ghi mốc im lặng; đơn biến mất bỏ khỏi mốc; danh sách rỗng khi mốc có đơn = giữ mốc; `3`/`1` xếp đầu) + `app_changes_text()`.
 
-**extract.py** — `fap extract` dump A) RKStorage (nếu có) B) ~21 endpoint read-only C) `getCourseAttendance` từng môn D) `GetMarkByCourse` từng môn E) `GetWeekByDate`→`GetActivityStudentByWeek`. Giãn cách `FAP_EXTRACT_DELAY` giây giữa lượt.
+**conduct.py** — `GetDiemphongtrao`. `is_no_data()` THUẦN: chỉ `code 201` + `errorMessage` NullReference (và `message` **không** nhắc token/checksum) mới là "chưa có điểm"; mọi `201` khác đi qua `check_auth` (token hết hạn / lệch giờ được **báo**, không bị giấu).
+
+**extract.py** — `fap extract` dump A) RKStorage (nếu có) B) ~21 endpoint read-only C) `getCourseAttendance` từng môn D) `GetMarkByCourse` từng môn E) `GetWeekByDate`→`GetActivityStudentByWeek`. Giãn cách `FAP_EXTRACT_DELAY` giây giữa lượt. Trên v2 bỏ qua `GetStudentRate` (không có trên v2) và ghi chú "API v2 (thử nghiệm)" ở dòng đầu.
 
 ---
 
 ## 5. Logic tầng giao tiếp · `app/`
 
-**bot_core.py** — `handle(cmd, arg)` là **lõi chung của bot + web + notify**: chuẩn hoá lệnh (gồm `_`→`-`, để tên menu `grades_detail` khớp `grades-detail`), `creds()`+`current_semester()` một lần, route tới `_*_text()`. Bọc `try/except SystemExit` → token hết hạn trả **lời nhắn** thay vì sập bot/web. `all_text()` lấy marks/att **đúng 1 lần** rồi chia sẻ (không gọi trùng endpoint). `COMMAND_INFO` là **nguồn lệnh duy nhất** → suy ra `COMMANDS` + `menu_commands()` (cấp cho menu gợi ý Telegram & slash Discord) + `command_groups()` (cấp cho `help_text()` **và** nút bấm `webui`, thay 2 danh sách chép tay từng lệch mất 6 lệnh; lệnh chưa xếp nhóm tự rơi vào nhóm cuối "Lệnh khác" nên **không thể sót**) + allowlist của `notify` + **nhánh dự phòng của CLI** (`cli._core_cmd()` → lệnh nào chưa có nhánh CLI riêng vẫn chạy qua `handle()`; trước đây `fap today`/`fap tomorrow` in nhầm HELP). `semester_arg(arg, sem)` là hàm THUẦN tách `"FALL2025 weeks"` → `(view, kỳ)` cho `/semester`.
+**bot_core.py** — `handle(cmd, arg)` là **lõi chung của bot + web + notify**: chuẩn hoá lệnh (gồm `_`→`-`, để tên menu `grades_detail` khớp `grades-detail`), `creds()`+`current_semester()` một lần, route tới `_*_text()`. Bọc `try/except SystemExit` → token hết hạn trả **lời nhắn** thay vì sập bot/web. `all_text()` lấy marks/att **đúng 1 lần** rồi chia sẻ (không gọi trùng endpoint), cuối tin là khối **việc cần làm** (`todo_text`, tự cô lập lỗi từng nguồn nên không làm sập cả tin); `/todo` là lệnh riêng trong `COMMAND_INFO` (24 lệnh). `COMMAND_INFO` là **nguồn lệnh duy nhất** → suy ra `COMMANDS` + `menu_commands()` (cấp cho menu gợi ý Telegram & slash Discord) + `command_groups()` (cấp cho `help_text()` **và** nút bấm `webui`, thay 2 danh sách chép tay từng lệch mất 6 lệnh; lệnh chưa xếp nhóm tự rơi vào nhóm cuối "Lệnh khác" nên **không thể sót**) + allowlist của `notify` + **nhánh dự phòng của CLI** (`cli._core_cmd()` → lệnh nào chưa có nhánh CLI riêng vẫn chạy qua `handle()`; trước đây `fap today`/`fap tomorrow` in nhầm HELP). `semester_arg(arg, sem)` là hàm THUẦN tách `"FALL2025 weeks"` → `(view, kỳ)` cho `/semester`.
 
-**notify.py** — `push()` gửi Telegram + Discord (kiểm HTTP status — `requests.post` không raise với 4xx; xử lý 429 Retry-After). `push_new_notifications()` chỉ đẩy thông báo MỚI (dedupe theo `id`, sentinel `None`=chưa baseline; bỏ qua khi fetch rỗng; file hỏng → cô lập `.corrupt` + rebaseline).
+**notify.py** — `push()` gửi Telegram + Discord (kiểm HTTP status — `requests.post` không raise với 4xx; xử lý 429 Retry-After). `fap notify notifications` chạy **hai việc cô lập lỗi trong cùng một lượt** (lỗi vẫn ném lại sau cùng → exit ≠ 0 cho cron/systemd): `push_new_notifications()` chỉ đẩy thông báo MỚI (dedupe theo `id`, sentinel `None`=chưa baseline; bỏ qua khi fetch rỗng; file hỏng → cô lập `.corrupt` + rebaseline) và `push_application_changes()` báo **đơn đổi trạng thái** (mốc `output/applications_state.json`, ghi atomic tmp-theo-PID + `0600`, file hỏng → `.corrupt` + ghi mốc lại; lấy đơn thất bại → bỏ lượt, giữ mốc). `fap notify today` gắn khối **việc cần làm** (`_todo_tail()`) **chỉ khi có ≥1 việc**; lỗi gì ở đó cũng không làm mất digest lịch học.
 
 **dashboard.py** — `status()` (hôm nay + GPA tạm tính + điểm danh + cảnh báo cấm thi), `week()` (lọc từ kỳ; header kèm `· Tuần N/M` khi tra được mốc kỳ, im lặng bỏ qua nếu không), `week_exact()` (GetActivityStudentByWeek — chuẩn cho tuần nghỉ lễ; render generic, group theo ngày), `semester_text()`/`semester_view_text()` (**lịch CẢ KỲ**, 3 view `pattern|weeks|list`). `GetActivityStudent` vốn trả **trọn kỳ** nên view cả kỳ **không tốn request thêm**; `_resolve_sem()` dùng CHUNG 1 lời gọi `GetSemester` cho cả việc chọn kỳ lẫn tra mốc ngày (giữ `fap week` ở đúng 2 request). `semester_view_text()` là **hàm THUẦN** (nhận list buổi → chuỗi, test offline được) và **luôn in ghi chú**: mẫu suy từ lịch xếp, KHÔNG phản ánh buổi huỷ/nghỉ lễ → tuần nghi ngờ dùng `fap week-exact`.
 
@@ -108,7 +130,7 @@ OAuth **FE Identity (IdentityServer)**, client công khai `fap-mobile-front-end`
 
 ## 6. Shared
 
-- **config.py** — nạp `.env` (strip quote, không hỗ trợ comment cuối dòng), phơi `TELEGRAM_*`, `DISCORD_*`, `GCAL_*`, `FAP_*`.
+- **config.py** — nạp `.env` (strip quote, không hỗ trợ comment cuối dòng), phơi `TELEGRAM_*`, `DISCORD_*`, `GCAL_*`, `FAP_*`. `api_version_raw()` / `v2_key_raw()` là **hàm** (đọc lúc gọi, không chụp lúc import) — `FAP_V2_KEY` cố ý **không** nằm trong biến module nào.
 - **i18n.py** — `t(vi, en)` chọn theo `FAP_LANG`.
 - **fmt.py** — định dạng THUẦN dùng chung: `weekday`, `room` (💻/📍), `header` (tiêu đề + đường kẻ), `fmt_date`, `status_label`, `safe_float`, `has_mark`, `gpa_val`, `table` (bảng generic theo đúng field server).
 
@@ -130,5 +152,5 @@ Hồ sơ máy yếu→mạnh chi tiết (cron/systemd/Docker/at-logon): xem [14-
 
 ## 8. Kiểm thử & bảo mật
 
-- **Test**: `python tests/test_logic.py` (50 unit, logic thuần) + `python tests/integration_offline.py` (77 integration, mock mạng) — hoặc gói gọn: **`fap selftest`**. Cả hai KHÔNG cần token/mạng.
-- **Bảo mật**: token nằm trong query `Authen` (lỗi mạng không in URL); `output/`, `.env`, `credentials.json`, `device-data/` đều `.gitignore`; web chỉ localhost; bot khoá theo chủ tài khoản; chỉ thao tác tài khoản của chính bạn (xem [SECURITY.md](../SECURITY.md)).
+- **Test**: `python tests/test_logic.py` (~180 unit, logic thuần) + `python tests/integration_offline.py` (~195 integration, mock mạng — gồm vòng tròn v2 với mạng giả) — hoặc gói gọn: **`fap selftest`**. Cả hai KHÔNG cần token/mạng; test nào thử gọi mạng thật là FAIL.
+- **Bảo mật**: token nằm trong query `Authen` (lỗi mạng không in URL); `output/`, `.env`, `credentials.json`, `device-data/` đều `.gitignore`; `FAP_V2_KEY` chỉ ở `.env`/biến môi trường, không bao giờ in (kể cả `fap doctor`, chỉ báo có/thiếu); web chỉ localhost; bot khoá theo chủ tài khoản; chỉ thao tác tài khoản của chính bạn (xem [SECURITY.md](../SECURITY.md)).

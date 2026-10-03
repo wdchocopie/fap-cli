@@ -42,7 +42,7 @@ bash deploy/setup-server.sh                       # job hằng ngày + 2 watcher
 EXTRAS='[gcal,bot]' bash deploy/setup-server.sh   # + bot Telegram thường trú
 # Gỡ sạch:  bash deploy/setup-server.sh --remove
 ```
-> ⚠️ **VI —** `scp -r output/` ở trên chỉ dành cho **lần dựng đầu tiên** (server chưa có gì). Nếu **máy nguồn đã từng chạy watcher**, đừng copy cả thư mục: nó mang theo `grade_state.json` / `attendance_state.json` / `seen_notifications.json` (baseline **riêng từng máy**) và `.pkce_state.json` (dùng 1 lần) ⇒ báo trùng/báo sót. Chỉ copy **2 file token** — xem [§ Một session, hai máy](#-một-session-hai-máy--one-session-two-machines).
+> ⚠️ **VI —** `scp -r output/` ở trên chỉ dành cho **lần dựng đầu tiên** (server chưa có gì). Nếu **máy nguồn đã từng chạy watcher**, đừng copy cả thư mục: nó mang theo `grade_state.json` / `attendance_state.json` / `seen_notifications.json` / `applications_state.json` (baseline **riêng từng máy**) và `.pkce_state.json` (dùng 1 lần) ⇒ báo trùng/báo sót. Chỉ copy **2 file token** — xem [§ Một session, hai máy](#-một-session-hai-máy--one-session-two-machines).
 > ⚠️ **EN —** The `scp -r output/` above is for a **first-time** setup only. If the source machine has ever run a watcher, don't copy the whole folder — it carries the **per-machine** baselines and the single-use `.pkce_state.json`, causing duplicate/missed alerts. Copy **only the 2 token files** — see [§ One session, two machines](#-một-session-hai-máy--one-session-two-machines).
 ## 🔄 Cập nhật · Update — mọi trường hợp
 
@@ -61,6 +61,7 @@ EXTRAS='[gcal,bot]' bash deploy/update.sh   # khớp extras lúc setup (chỉ c�
 ```
 > **`fap update`** (mọi nền) tự bắt: bản ZIP/không-git, **thay đổi cục bộ chưa commit** (nhắc `git stash`), **diverged/mất mạng** (nhắc `--rebase`), **deps đổi** (nhắc cài lại), **đã mới nhất**. Nó KHÔNG tự restart service (không đoán được bạn chạy kiểu gì) — `update.sh`/`update.ps1` mới tự restart.
 > ⚠️ Auto-update tiện nhưng bản mới lỗi sẽ restart theo. Muốn chắc thì update **thủ công** + xem `fap selftest`.
+> 🧪 **API v2 (opt-in, thử nghiệm):** đổi `FAP_API_VERSION` trong `.env` **không** phải update code — sau khi đổi phải `fap refresh` rồi **restart** bot/watcher (token mang dấu phiên bản). `FAP_V2_KEY` là bí mật, chỉ ở `.env`. Xem [../docs/21-api-v2.md](../docs/21-api-v2.md) §5. · **Switching `FAP_API_VERSION`** isn't a code update: run `fap refresh`, then restart bots/watchers; `FAP_V2_KEY` is a secret that lives only in `.env`.
 > 🔑 **Lệnh `/update` trong bot giờ TẮT mặc định** — nó `git pull` + khởi động lại **checkout dùng chung của mọi profile**. Muốn dùng: thêm `FAP_ALLOW_UPDATE=1` vào `.env` (hoặc `Environment=FAP_ALLOW_UPDATE=1` trong unit) của **chủ máy**, rồi restart bot. Kiểm tra chủ sở hữu bot vẫn chạy trước như cũ. · **The bot's `/update` is now off by default**; enable it with `FAP_ALLOW_UPDATE=1` in the **owner's** `.env`/unit only.
 > Script tự: tạo `.venv`, `pip install -e .`, kiểm `fap refresh`, cài systemd `--user` units (đường dẫn thật), bật `enable-linger` (chạy cả khi logout). **Bước login phải làm trên máy có trình duyệt** (OAuth Google) rồi copy `output/` lên — server headless không tự login được.
 
@@ -99,7 +100,7 @@ ssh user@pc 'chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens
 |---|---|
 | ✅ | `output/token.json`, `output/oauth_tokens.json` |
 | ❌ | `output/.pkce_state.json` *(dùng 1 lần · single-use)* |
-| ❌ | `output/grade_state.json`, `output/attendance_state.json`, `output/seen_notifications.json` *(baseline riêng từng máy — copy = báo trùng/báo sót · per-machine baselines; copying causes duplicate/missed alerts)* |
+| ❌ | `output/grade_state.json`, `output/attendance_state.json`, `output/seen_notifications.json`, `output/applications_state.json` *(baseline riêng từng máy — copy = báo trùng/báo sót · per-machine baselines; copying causes duplicate/missed alerts)* |
 
 > 🔴 **VI —** `refresh_token` **XOAY VÒNG** ⇒ **chỉ MỘT máy được refresh**: VPS. Trên PC đặt `FAP_TOKEN_READONLY=1` và **để trống** `TELEGRAM_*`/`DISCORD_*`. **ĐỪNG** đặt cờ này trên VPS — token sẽ hết hạn và mọi watcher chết lặng.
 > 🔴 **EN —** The `refresh_token` **rotates** ⇒ **only ONE machine may refresh**: the VPS. On the PC set `FAP_TOKEN_READONLY=1` and leave `TELEGRAM_*`/`DISCORD_*` empty. **Never** set that flag on the VPS — the token expires and every watcher silently dies.

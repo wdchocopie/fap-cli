@@ -17,10 +17,14 @@ Read this before running, sharing, or publishing the source.
 | `output/gcal_token.json` | Token OAuth Google Calendar · Google Calendar OAuth token |
 | `credentials.json` | OAuth client "Desktop app" của Google (bạn tải về) · your Google OAuth client |
 | `output/api/*.json` | Dữ liệu cá nhân: điểm, điểm danh, học phí, CCCD, thông tin phụ huynh... · grades, attendance, fees, national ID, parent info |
-| `.env` | Token Telegram, webhook Discord, cấu hình · bot token, webhook, config |
+| `output/applications_state.json` | Trạng thái cá nhân: mã đơn từ + mã trạng thái xử lý (mốc cảnh báo của `fap notify notifications`, ghi `0600`, riêng từng máy — không chia sẻ/copy) · personal state: application ids + status codes (alert baseline, written `0600`, per-machine — don't share or copy) |
+| `.env` | Token Telegram, webhook Discord, cấu hình — và **`FAP_V2_KEY`** nếu bạn bật API v2 (opt-in) · bot token, webhook, config — and **`FAP_V2_KEY`** if you opted into API v2 |
 
 > **VI —** Bất kỳ ai có `output/oauth_tokens.json` hoặc `output/token.json` đều có thể truy cập dữ liệu FAP của bạn.
 > **EN —** Anyone holding those token files can access your FAP data. Treat them like passwords.
+
+> 🔑 **VI —** **`FAP_V2_KEY` là BÍ MẬT** (khoá ký của API v2, chỉ dùng khi `FAP_API_VERSION=v2`). fap-cli **không nhúng** nó: bạn tự trích từ **APK myFAP của chính bạn** bằng `python analysis/apk_drift.py --write-v2-key <apk>` — lệnh ghi thẳng vào `.env` và **không in giá trị**. Chỉ để trong `.env` (đã gitignore) hoặc biến môi trường; **không commit, không in ra, không dán vào chat/issue**. fap-cli chỉ dùng khoá để tính chữ ký — khoá không nằm trong URL, header, log, thông báo lỗi hay `token.json`; `fap doctor` chỉ báo **có/thiếu**.
+> 🔑 **EN —** **`FAP_V2_KEY` is a SECRET** (the API v2 signing key, used only when `FAP_API_VERSION=v2`). fap-cli does **not** ship it: extract it from **your own myFAP APK** with `python analysis/apk_drift.py --write-v2-key <apk>`, which writes `.env` directly and **never prints the value**. Keep it in `.env` (gitignored) or the environment only; **never commit, print, or paste it** into chats/issues. fap-cli uses it only to compute the signature — it never appears in URLs, headers, logs, error messages or `token.json`; `fap doctor` only reports **set/missing**.
 
 ## 2. Lá chắn sẵn có · Built-in guardrails
 
@@ -43,6 +47,8 @@ Read this before running, sharing, or publishing the source.
 > ⚠️ `SECRET` và `client_id` trong mã được trích từ **APK công khai** (ai giải nén cũng thấy). Chúng KHÔNG phải
 > bí mật của riêng bạn, nhưng việc public chúng kèm hướng dẫn là phần bạn nên cân nhắc và ghi chú minh bạch. ·
 > The embedded `SECRET`/`client_id` come from the public APK; publishing them is your call — be transparent.
+> Riêng khoá ký API v2 (`FAP_V2_KEY`) thì **không** nhúng vào mã — chỉ nằm trong `.env` của từng người (xem §1). ·
+> The API v2 signing key (`FAP_V2_KEY`) is deliberately **not** embedded — it lives only in each user's `.env` (see §1).
 
 ## 4. Khi token bị lộ · If a token leaks
 

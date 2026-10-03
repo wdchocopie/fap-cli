@@ -41,6 +41,8 @@ fap refresh      # các lần sau: làm mới token (không cần browser) · he
 - Hiện **tên môn** thay vì mã trơ: chạy `fap subjects` **một lần** → tên + tín chỉ xuất hiện ở grades/điểm danh/lịch/bot/web (và GPA kỳ tính **theo tín chỉ**). · run `fap subjects` once → names + credits everywhere.
 - Tổng kết tuần 1 tin · weekly recap: `fap weekly` (lịch + điểm danh + điểm → kênh chat).
 - Lớp đang học · my classes: `fap courses` (môn / lớp / giảng viên / phòng — `GetCourseOfSemester`, fallback từ TKB).
+- Việc cần làm · to-do: `fap todo` (cũng là `/todo` trong bot) — đợt feedback đang mở, FAP yêu cầu cập nhật hồ sơ, đơn chờ thanh toán; fap-cli **chỉ đọc**, bạn tự làm qua app myFAP / fap.fpt.edu.vn. · open feedback round, profile update, applications awaiting payment — read-only.
+- API v2 của myFAP (**opt-in, thử nghiệm**, mặc định vẫn v1): `FAP_API_VERSION=v2` + `FAP_V2_KEY` trích từ APK của chính bạn — xem [docs/21-api-v2.md](docs/21-api-v2.md) §5. · opt-in, experimental API v2 client.
 
 Mọi lệnh · all commands: `fap` (không tham số). Cơ chế OAuth: [docs/04-feid-oauth-tool.md](docs/04-feid-oauth-tool.md).
 
@@ -60,6 +62,7 @@ Mục lục đầy đủ · full index: **[docs/README.md](docs/README.md)**.
 | `FAP_LANG` | `vi` (mặc định) \| `en` — ngôn ngữ thông báo · notification language |
 | `FAP_SEMESTER` | để trống = tự dò · empty = auto-detect; ép · force: `Spring2026` |
 | `TELEGRAM_TOKEN` / `TELEGRAM_CHAT` / `DISCORD_WEBHOOK_URL` | kênh notify · notify channels |
+| `FAP_API_VERSION` / `FAP_V2_KEY` | trống = v1 (mặc định); `v2` = opt-in, thử nghiệm — `FAP_V2_KEY` là **bí mật**, không commit · empty = v1; `v2` = opt-in, experimental; the key is a **secret** ([docs/21](docs/21-api-v2.md) §5) |
 | Console Windows lỗi font | `chcp 65001` hoặc · or `PYTHONUTF8=1` (package cũng tự `reconfigure utf-8`) |
 
 ## Cấu trúc · Structure
@@ -70,6 +73,7 @@ fap-cli/
 │   ├── __init__.py · config.py · i18n.py · fmt.py   ← shared (nạp .env, cấu hình, song ngữ, định dạng)
 │   ├── core/                ← LÕI: truy cập dữ liệu — KHÔNG phụ thuộc app
 │   │   ├── api.py           ← creds + checksum + call + auto học kỳ
+│   │   ├── apiv2.py         ← API v2 opt-in, thử nghiệm (FAP_API_VERSION=v2)
 │   │   ├── auth.py          ← đăng nhập OAuth (login/refresh/exchange/whoami)
 │   │   └── schedule.py · grades.py · attendance.py · transcript.py · whatif.py · subjects.py · courses.py · extras.py · extract.py
 │   └── app/                 ← APP: kết nối người dùng — phụ thuộc core
@@ -88,7 +92,7 @@ fap-cli/
 ```
 
 ## ✅ Kiểm thử & CI · Tests & CI
-- **Chạy toàn bộ test offline** (không cần token/mạng): **`fap selftest`** — hoặc `python tests/test_logic.py` + `python tests/integration_offline.py` (**53 unit + 79 integration**, mọi lời gọi API đều mock).
+- **Chạy toàn bộ test offline** (không cần token/mạng): **`fap selftest`** — hoặc `python tests/test_logic.py` + `python tests/integration_offline.py` (**~180 unit + ~195 integration**, mọi lời gọi API đều mock).
 - Repo kèm sẵn **GitHub Actions** ([.github/workflows/tests.yml](.github/workflows/tests.yml)): tự chạy 2 bộ test trên **Python 3.8–3.13** mỗi khi `push`/PR. Sau khi đẩy repo lên GitHub, gắn badge (thay `OWNER/REPO` bằng repo của bạn):
   ```
   [![tests](https://github.com/OWNER/REPO/actions/workflows/tests.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/tests.yml)
