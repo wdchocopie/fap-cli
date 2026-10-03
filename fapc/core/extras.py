@@ -222,8 +222,9 @@ def app_changes_text(changes):
         else:
             out.append(f"{lead}📄 {name} · {_code_label(c['old'])} → {new}")
         if c.get("new") == "3":
-            out.append("   " + t("👉 CẦN THANH TOÁN — thanh toán trong app myFAP chính thức (fap-cli chỉ đọc).",
-                                "👉 PAYMENT NEEDED — pay in the official myFAP app (fap-cli is read-only)."))
+            # Màn đơn từ của app 2.0.5 KHÔNG có nút thanh toán (chỉ hiện nhãn) -> chỉ nêu kênh chính thức, không bịa
+            out.append("   " + t("👉 CẦN THANH TOÁN — xem & thanh toán qua kênh chính thức (app myFAP / fap.fpt.edu.vn); fap-cli chỉ đọc.",
+                                "👉 PAYMENT NEEDED — check and pay via the official channels (myFAP app / fap.fpt.edu.vn); fap-cli is read-only."))
         elif c.get("new") == "1":
             out.append("   " + t("👉 Đơn đã được CHẤP NHẬN.", "👉 Application APPROVED."))
         note = _preview(c.get("note") or "")              # phản hồi của phòng ban (1 dòng trích)
@@ -256,15 +257,16 @@ def todo_items(open_feedback, applications):
       applications  : các dòng GetApplication (None = không lấy được)"""
     items = []
     if _feedback_open(open_feedback):
-        items.append(t("📝 Đang mở đợt feedback giảng dạy — làm trên app myFAP (hoặc fap.fpt.edu.vn).",
-                       "📝 A teaching-feedback round is open — do it in the myFAP app (or fap.fpt.edu.vn)."))
+        # App 2.0.5: "You need to do a teaching survey. Please access https://fap.fpt.edu.vn" + nút mở đúng trang đó
+        items.append(t("📝 Đang mở đợt feedback giảng dạy — làm tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).",
+                       "📝 A teaching-feedback round is open — complete it at fap.fpt.edu.vn (where the myFAP app sends you)."))
     for r in applications or []:
         if _app_code(r) == "3":                           # '3' = Đang chờ thanh toán (getStatusConfig 2.0.5)
             name = fmt.unescape(r.get("name")) or t("(đơn)", "(application)")
             date = fmt.unescape(r.get("createDate"))
             name += f" ({date})" if date else ""
-            items.append(t(f"💳 Đơn chờ thanh toán: {name} — thanh toán trong app myFAP.",
-                           f"💳 Application awaiting payment: {name} — pay in the myFAP app."))
+            items.append(t(f"💳 Đơn chờ thanh toán: {name} — xem & thanh toán qua app myFAP / fap.fpt.edu.vn.",
+                           f"💳 Application awaiting payment: {name} — check and pay via the myFAP app / fap.fpt.edu.vn."))
     return items
 
 def todo_block(open_feedback, applications, err=None):
@@ -283,8 +285,8 @@ def todo_block(open_feedback, applications, err=None):
     lines = [fmt.header("📌", t("Việc cần làm", "To-do"), str(len(items)))] + items
     if note:
         lines.append(note)
-    lines.append(t("ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên trong app myFAP chính thức.",
-                   "ℹ️ fap-cli is read-only — do these yourself in the official myFAP app."))
+    lines.append(t("ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên qua kênh chính thức (app myFAP / fap.fpt.edu.vn).",
+                   "ℹ️ fap-cli is read-only — do these yourself via the official channels (myFAP app / fap.fpt.edu.vn)."))
     return "\n".join(lines)
 
 def todo_fetch(token, campus, roll):
