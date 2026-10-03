@@ -12,7 +12,7 @@ Chạy (từ thư mục gốc repo):
 """
 import os, re, datetime
 from .api import (creds, call, call_login_retry, as_list, unwrap,
-                  current_semester, check_auth, _vn_now)
+                  current_semester, check_auth, select_semester, _vn_now)
 from . import paths
 from ..fmt import is_online, meet_url
 
@@ -163,18 +163,13 @@ def canonical_semester(semesters, sem):
     return sem
 
 def pick_semester(semesters, when=None):
-    """THUẦN: tên kỳ ĐANG diễn ra vào ngày `when` (mặc định hôm nay giờ VN), None nếu không kỳ nào chứa.
-    Cùng quy tắc với api.current_semester (kỳ khớp CUỐI CÙNG thắng) nhưng KHÔNG gọi lại mạng —
-    nhờ vậy caller đã có sẵn danh sách kỳ thì không tốn thêm request."""
-    day = _as_date(when) or _vn_now().date()
-    hit = None
-    for s in semesters or []:
-        if not isinstance(s, dict):
-            continue
-        a, b = parse_date(s.get("startDate")), parse_date(s.get("endDate"))
-        if a and b and a <= day <= b:
-            hit = s.get("semesterName") or hit
-    return hit or None
+    """THUẦN: tên kỳ 'hiện tại' vào thời điểm `when` (mặc định bây giờ giờ VN). CHUNG MỘT quy tắc với
+    api.current_semester — api.select_semester, đúng màn hình chính myFAP 2.0.5: kỳ ĐẦU TIÊN chứa `when`,
+    không có thì kỳ có ngày bắt đầu GẦN nhất (xem docstring ở đó, kể cả ngày cuối kỳ) — nhưng KHÔNG gọi
+    lại mạng: caller đã có sẵn danh sách kỳ thì không tốn thêm request.
+    `when`: datetime | date (= 00:00 ngày đó) | None. None chỉ khi không kỳ nào dùng được (danh sách
+    rỗng / ngày lỗi hết) -> caller tự fallback (vd dashboard rơi về current_semester)."""
+    return select_semester(semesters, when if when is not None else _vn_now())
 
 # Từ khoá chọn KIỂU XEM của `fap semester` — BẢNG DUY NHẤT, dùng chung cho cả CLI lẫn bot.
 # (Trước đây bot_core giữ một bộ riêng chỉ có 3 từ tiếng Anh nên mọi bí danh tiếng Việt bị hiểu

@@ -37,8 +37,8 @@
 
 App coi là **hết phiên** khi body `code == '401'` **hoặc** `errorMessage === 'Unauthorized'` **hoặc** HTTP 401/500 (chỉ khi call có token và không phải bước đăng nhập) → xoá token, đăng xuất. Lỗi khác: GET trả `[]`, POST trả `null`.
 
-> ⚠️ **VI — Lỗ hổng im lặng của fap-cli nếu gặp v2:** `check_auth` hiện chỉ nhận HTTP 401/403 và `code '201'`. Một phản hồi kiểu v2 (`code '401'` / `'Unauthorized'` trong HTTP 200) sẽ thành **danh sách rỗng, không báo lỗi**.
-> ⚠️ **EN — fap-cli silent gap:** `check_auth` only recognises HTTP 401/403 and `code '201'`; a v2-style body inside HTTP 200 would become an empty list with no error.
+> ✅ **VI — Đã vá lỗ hổng im lặng:** trước đây `check_auth` chỉ nhận HTTP 401/403 và `code '201'`, nên phản hồi kiểu v2 (`code '401'` / `'Unauthorized'` trong HTTP 200) thành **danh sách rỗng, không báo lỗi**. Giờ `check_auth` (và hàm thuần `is_session_expired` cho watcher) nhận cả hai dấu hiệu đó → cùng thông điệp "token hết hạn → `fap refresh` / `/login`". **HTTP 500 cố ý KHÔNG tính** là hết phiên (khác app) để không tạo vòng refresh khi server trục trặc. Xem [16-troubleshooting](16-troubleshooting.md).
+> ✅ **EN — Silent gap closed:** `check_auth` used to recognise only HTTP 401/403 and `code '201'`, so a v2-style body inside HTTP 200 became an empty list with no error. It (and the pure `is_session_expired` for watchers) now also recognises both v2 markers → the same "token expired → `fap refresh` / `/login`" message. **HTTP 500 is deliberately NOT** treated as expired (unlike the app) to avoid refresh loops while the server is unhealthy.
 
 ---
 
@@ -63,8 +63,8 @@ Bộ **feedback** chỉ có trên v2 và **chưa màn hình nào gọi** ⇒ ch�
 |---|---|
 | **Hôm nay** (v1 chạy) · Today | Không phải sửa gì — mọi hằng số fap-cli dựa vào (SECRET, BASE, CLIENT_ID, ISSUER, REDIRECT_URI) **giữ nguyên** ở 2.0.5 |
 | FPT bật v2 nhưng v1 vẫn phục vụ · v2 on, v1 still served | fap-cli vẫn chạy. Người dùng app bị đá ra một lần (không liên quan fap-cli) |
-| **v1 bị tắt** · v1 turned off | Cần client v2: host mới, header ký HMAC-SHA256 theo epoch giây, bảng tham số §2, `GetCourseAttendance` hoa, đăng nhập POST `{token}`, lưu `api_version` trong `token.json` (lệch thì bắt đăng nhập lại), `check_auth` hiểu lỗi v2, và nhúng khoá v2 (quyết định của người bảo trì) |
-| Phát hiện sớm · Early warning | Một bộ phân loại THUẦN trên phản hồi v1 (404/410/30x/HTML/thân kiểu v2) → gợi ý "FAP có thể đã chuyển sang API v2" — **không thêm request nào** |
+| **v1 bị tắt** · v1 turned off | Cần client v2: host mới, header ký HMAC-SHA256 theo epoch giây, bảng tham số §2, `GetCourseAttendance` hoa, đăng nhập POST `{token}`, lưu `api_version` trong `token.json` (lệch thì bắt đăng nhập lại), ~~`check_auth` hiểu lỗi v2~~ ✅ **đã làm** (xem §2 "Lỗi phiên"), và nhúng khoá v2 (quyết định của người bảo trì) |
+| Phát hiện sớm · Early warning | ✅ **Đã làm · Done.** Hàm THUẦN `classify_drift(http, body, content_type)` trong `fapc/core/api.py` soi chính phản hồi v1 (**không thêm request nào**): 301/302/303/307/308 → `redirect`, 410 → `gone`, 404 mà thân **không phải JSON** → `not_found`. 404 kèm JSON (`GeFeeByRoll`…) và 404 của endpoint vốn đã 404 (`GetSemesterMark`, `GetVersion`, `GetCourseOfSemester`) **không** tính. Tín hiệu đầu tiên của mỗi tiến trình in **một** gợi ý song ngữ ra `stderr` ("FAP có thể đã chuyển sang API v2 — xem tài liệu này và `FAP_API_VERSION`"), chỉ ghi tên endpoint + mã HTTP, **không** URL/token. Thân lỗi phiên kiểu v2 thì do `check_auth` lo (báo "token hết hạn"). · Pure classifier on the v1 reply, zero extra requests; first signal per process prints one bilingual stderr hint (endpoint + HTTP code only). Troubleshooting: [16-troubleshooting](16-troubleshooting.md) |
 
 > 🧭 **VI —** Từ 2.0.5 app tự cập nhật **JS qua OTA** (máy chủ của bên phát triển app, không phải `fpt.edu.vn`), có cả bản **bắt buộc**. Endpoint, trường và ánh xạ có thể đổi **mà không tăng versionCode** — xem cách theo dõi ở [20-api-fields](20-api-fields.md) §5.
 > 🧭 **EN —** Since 2.0.5 the app updates its **JS over the air** (the app vendor's server, not `fpt.edu.vn`), including **mandatory** updates. Endpoints, fields and mappings can change **without a new versionCode** — see [20-api-fields](20-api-fields.md) §5.

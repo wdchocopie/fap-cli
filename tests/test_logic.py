@@ -357,6 +357,207 @@ def test_check_auth_expired_vs_checksum_vs_ok():
     assert not _raises_exit(lambda: check_auth(200, {"code": "200", "data": []}))      # rỗng HỢP LỆ
     assert not _raises_exit(lambda: check_auth(200, {"data": []}))                     # không có code -> bỏ qua
 
+# ---- B1: lõi API cứng hơn — lỗi phiên kiểu v2 · cảnh báo v1 dời route · một bộ chọn học kỳ ----
+def test_check_auth_v2_style_session_errors():
+    """Thân kiểu API v2 (myFAP 2.0.5 `_isSessionExpired`) BỌC trong HTTP 200 -> hết phiên, KHÔNG thành [] im lặng."""
+    from fapc.core.api import check_auth, _EXPIRED_MSG
+    def _msg(fn):
+        try: fn()
+        except SystemExit as e: return str(e)
+        return None
+    assert _msg(lambda: check_auth(200, {"code": "401", "data": None})) == _EXPIRED_MSG          # code chuỗi
+    assert _msg(lambda: check_auth(200, {"code": 401, "data": None})) == _EXPIRED_MSG            # code số (app so lỏng ==)
+    assert _msg(lambda: check_auth(200, {"code": "200", "errorMessage": "Unauthorized"})) == _EXPIRED_MSG
+    assert _msg(lambda: check_auth(200, {"errorMessage": "  unauthorized \n"})) == _EXPIRED_MSG   # strip + hoa/thường
+    # HTTP 500 KHÔNG phải hết phiên (app đăng xuất khi 500; fap-cli làm vậy = vòng refresh vô ích)
+    assert not _raises_exit(lambda: check_auth(500, "<html>Server Error</html>"))
+    assert not _raises_exit(lambda: check_auth(500, {"message": "Internal error"}))
+    # thân BÌNH THƯỜNG giữ nguyên hành vi (shape thật v1: code chuỗi '200', errorMessage None)
+    assert not _raises_exit(lambda: check_auth(200, {"message": "ok", "code": "200", "errorMessage": None, "data": []}))
+    assert not _raises_exit(lambda: check_auth(200, {"code": "200", "errorMessage": "Unauthorized access log"}))
+    assert not _raises_exit(lambda: check_auth(200, {"code": True, "data": []}))       # bool KHÔNG phải 401
+    assert not _raises_exit(lambda: check_auth(200, [{"code": "401"}]))                 # list dữ liệu, không phải envelope
+    assert not _raises_exit(lambda: check_auth(None, "Lỗi mạng (ConnectionError) khi gọi X"))
+    # code '201' GIỮ NGUYÊN ngữ nghĩa: token -> hết phiên; checksum -> thông điệp checksum; khác -> từ chối chung
+    assert _msg(lambda: check_auth(200, {"code": "201", "message": "Token invalid"})) == _EXPIRED_MSG
+    assert "checksum" in _msg(lambda: check_auth(200, {"code": "201", "message": "Thông tin checksum không chính xác"}))
+    assert "code 201" in _msg(lambda: check_auth(200, {"code": "201", "message": "Thành công"}))
+
+def test_is_session_expired_table():
+    """Luật hết-phiên DÙNG CHUNG (cho nơi không muốn raise: watcher, conduct) khớp đúng các ca check_auth raise _EXPIRED_MSG."""
+    from fapc.core.api import is_session_expired as X
+    assert X(401, {}) and X(403, "") and X(200, {"code": "401"}) and X(200, {"errorMessage": "Unauthorized"})
+    assert X(200, {"code": "201", "message": "Token invalid"})
+    assert not X(200, {"code": "201", "message": "Thông tin checksum không chính xác"})   # checksum ≠ hết phiên
+    assert not X(200, {"code": "201", "message": "Thành công", "data": None})             # conduct 201-null ≠ hết phiên
+    assert not X(500, {}) and not X(500, "<html/>") and not X(None, "Lỗi mạng")
+    assert not X(200, {"code": "200", "data": []}) and not X(404, {"Message": "No HTTP resource"})
+
+def test_classify_drift_table():
+    """Bảng phân loại THUẦN: chỉ tín hiệu mức route. 404 CÓ thân JSON (GeFeeByRoll/GetCourseOfSemester) KHÔNG phải drift."""
+    from fapc.core.api import classify_drift as C
+    for code in (301, 302, 303, 307, 308):
+        assert C(code, "") == "redirect", code
+    assert C("302", None) == "redirect"                                       # mã dạng chuỗi vẫn đọc được
+    assert C(410, '{"Message": "gone"}') == "gone"
+    assert C(404, "<!DOCTYPE html><html><body>404 - File or directory not found.</body></html>") == "not_found"
+    assert C(404, "") == "not_found" and C(404, "   ") == "not_found" and C(404, None) == "not_found"
+    assert C(404, '{"Message": "x"}', "text/html; charset=utf-8") == "not_found"   # server tự nhận là HTML
+    # 404 + JSON = lỗi dữ liệu của endpoint, KHÔNG phải route biến mất
+    assert C(404, {"Message": "No fee"}) is None                              # call() đã parse JSON
+    assert C(404, '{"Message": "No fee"}', "application/json; charset=utf-8") is None
+    assert C(404, b'{"Message": "No fee"}') is None
+    for code in (200, 201, 400, 401, 403, 500, 502, 503):
+        assert C(code, "<html>whatever</html>") is None, code
+    assert C(None, "Lỗi mạng (ConnectionError) khi gọi X") is None and C("abc", "") is None
+
+def test_drift_hint_once_per_process_no_token_leak():
+    """call() soi CHÍNH phản hồi nhận được (0 request thêm): tín hiệu đầu tiên -> ĐÚNG 1 gợi ý song ngữ ra stderr;
+    không bao giờ in URL/token; 404-HTML của endpoint vốn đã 404 (GetSemesterMark) không báo động giả."""
+    import fapc.core.api as A
+    class _R:
+        def __init__(self, code, text, js=None, ctype="text/html"):
+            self.status_code, self.text, self._js, self.headers = code, text, js, {"Content-Type": ctype}
+        def json(self):
+            if self._js is None: raise ValueError("not json")
+            return self._js
+    seq, n = [], {"c": 0}
+    def fake_get(url, **k):
+        n["c"] += 1
+        return seq.pop(0)
+    orig, saved = A.requests.get, dict(A._DRIFT_WARNED)
+    err = io.StringIO()
+    try:
+        A._CACHE.clear(); A._DRIFT_WARNED["done"] = False
+        A.requests.get = fake_get
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            seq[:] = [_R(404, "", js={"Message": "No fee"}, ctype="application/json")]      # 404 + JSON -> im
+            A.call("GeFeeByRoll", [("Authen", "SECRETTOKEN123")], "HE000000", "FPTU")
+            seq[:] = [_R(404, "<html>404</html>")]                                         # đã-biết-404 -> im
+            A.call("GetSemesterMark", [("Authen", "SECRETTOKEN123")], "HE000000", "FPTU", checksum_value=False)
+            assert err.getvalue() == "" and not A._DRIFT_WARNED["done"], err.getvalue()
+            seq[:] = [_R(302, "")]                                                         # tín hiệu thật -> in 1 lần
+            http, _ = A.call("GetStudentMark", [("Authen", "SECRETTOKEN123")], "HE000000", "FPTU")
+            seq[:] = [_R(410, ""), _R(404, "<html/>")]
+            A.call("GetActivityStudent", [("Authen", "SECRETTOKEN123")], "HE000000", "FPTU")
+            A.call("GetStudentMark", [("Authen", "SECRETTOKEN123")], "HE000000", "FPTU")
+        out = err.getvalue()
+        assert http == 302 and n["c"] == 5                   # 0 request thêm (302 không retry, không theo redirect)
+        assert out.count("docs/21-api-v2.md") == 2 and out.count("⚠️") == 2, out   # 1 gợi ý = 1 dòng VI + 1 dòng EN
+        assert "GetStudentMark" in out and "302" in out and "FAP_API_VERSION" in out
+        assert "API v2" in out and "chuyển sang" in out and "moved to" in out           # song ngữ
+        assert "SECRETTOKEN123" not in out and "Authen" not in out and "://" not in out and "checksum=" not in out
+        assert not seq                                        # đã dùng đúng 5 phản hồi giả
+    finally:
+        A.requests.get = orig; A._CACHE.clear(); A._DRIFT_WARNED.update(saved)
+
+def test_warn_drift_pure_once():
+    """_warn_drift: lý do None -> không in; lần ĐẦU có lý do -> in; mọi lần sau -> im; 30x trên endpoint đã-biết-404 VẪN tính."""
+    import fapc.core.api as A
+    saved = dict(A._DRIFT_WARNED)
+    try:
+        A._DRIFT_WARNED["done"] = False
+        with contextlib.redirect_stderr(io.StringIO()) as e:
+            assert A._warn_drift("X", 200, None) is False
+            assert A._warn_drift("GetSemesterMark", 404, "not_found") is False
+            assert A._warn_drift("GetSemesterMark", 301, "redirect") is True
+            assert A._warn_drift("Y", 410, "gone") is False
+        assert e.getvalue().count("GetSemesterMark") == 2       # dòng VI + dòng EN của CÙNG 1 gợi ý
+    finally:
+        A._DRIFT_WARNED.update(saved)
+
+def _sems(*rows):
+    """GetSemester giả, shape THẬT ('YYYY-MM-DDT00:00:00', tăng dần theo startDate như server trả)."""
+    return [{"semesterName": n, "termID": str(i), "campusID": "1", "startDate": a + "T00:00:00", "endDate": b + "T00:00:00"}
+            for i, (n, a, b) in enumerate(rows)]
+
+_YEAR = _sems(("Spring2026", "2026-01-05", "2026-04-25"), ("Summer2026", "2026-05-04", "2026-08-29"),
+              ("Fall2026", "2026-09-07", "2026-12-26"), ("Spring2027", "2027-01-04", "2027-04-24"))
+
+def test_select_semester_in_term_and_gaps():
+    """Đúng màn hình chính myFAP 2.0.5: trong kỳ -> kỳ đó; khe giữa 2 kỳ -> kỳ có ngày BẮT ĐẦU gần nhất (2 phía)."""
+    from fapc.core.api import select_semester as S
+    dt = datetime.datetime
+    assert S(_YEAR, dt(2026, 10, 3, 9, 0)) == "Fall2026"
+    assert S(_YEAR, dt(2026, 9, 7, 0, 0)) == "Fall2026"                     # 00:00 ngày đầu kỳ: trong kỳ
+    # khe cuối tháng 8 (29/08 → 07/09): kỳ sau bắt đầu gần hơn HẲN kỳ trước (04/05) -> Fall
+    assert S(_YEAR, dt(2026, 8, 31, 12, 0)) == "Fall2026"
+    assert S(_YEAR, dt(2026, 9, 6, 23, 59)) == "Fall2026"
+    # khe cuối tháng 12 (26/12 → 04/01): Spring năm SAU, KHÔNG phải Fall theo tháng như default_semester
+    assert S(_YEAR, dt(2026, 12, 30, 8, 0)) == "Spring2027"
+    assert S(_YEAR, datetime.date(2027, 1, 2)) == "Spring2027"
+    # trước kỳ đầu tiên / sau kỳ cuối cùng -> vẫn ra kỳ gần nhất (không None)
+    assert S(_YEAR, dt(2025, 11, 1)) == "Spring2026" and S(_YEAR, dt(2028, 1, 1)) == "Spring2027"
+
+def test_select_semester_last_day_of_term_like_app():
+    """Ngày CUỐI kỳ: app so THỜI ĐIỂM `new Date()` với `new Date('…T00:00:00')` -> từ sau 00:00 ngày cuối đã
+    KHÔNG còn 'trong kỳ' -> kỳ bắt đầu gần nhất (kỳ sau). Đúng 00:00 (hoặc truyền date) vẫn là kỳ cũ."""
+    from fapc.core.api import select_semester as S
+    from fapc.core.schedule import pick_semester as P
+    assert S(_YEAR, datetime.datetime(2026, 8, 29, 0, 0)) == "Summer2026"   # đúng mốc endDate: còn trong kỳ
+    assert S(_YEAR, datetime.date(2026, 8, 29)) == "Summer2026"             # date = 00:00 ngày đó
+    assert S(_YEAR, datetime.datetime(2026, 8, 29, 10, 0)) == "Fall2026"    # sau 00:00 ngày cuối -> như app
+    # pick_semester (dashboard) và current_semester GIỜ CÙNG MỘT luật — trước đây lệch đúng ở ngày này
+    for when in (datetime.datetime(2026, 8, 29, 10, 0), datetime.date(2026, 8, 29), datetime.datetime(2026, 12, 30)):
+        assert P(_YEAR, when) == S(_YEAR, when), when
+
+def test_select_semester_overlap_ties_and_order():
+    """Chồng lấn -> kỳ ĐẦU TIÊN theo thứ tự server (app dùng find). Hoà khoảng cách -> giữ kỳ đứng TRƯỚC (reduce '<' hẳn)."""
+    from fapc.core.api import select_semester as S
+    ov = _sems(("Summer2026", "2026-05-04", "2026-08-29"), ("Bridge2026", "2026-08-01", "2026-09-30"))
+    assert S(ov, datetime.datetime(2026, 8, 10)) == "Summer2026"                  # cả 2 chứa -> kỳ đứng trước
+    assert S(list(reversed(ov)), datetime.datetime(2026, 8, 10)) == "Bridge2026"
+    assert S(ov, datetime.datetime(2026, 9, 15)) == "Bridge2026"                  # chỉ 1 kỳ chứa
+    tie = _sems(("A2026", "2026-01-01", "2026-01-10"), ("B2026", "2026-03-01", "2026-03-31"))
+    mid = datetime.datetime(2026, 1, 1) + (datetime.datetime(2026, 3, 1) - datetime.datetime(2026, 1, 1)) / 2
+    assert S(tie, mid) == "A2026" and S(list(reversed(tie)), mid) == "B2026"      # hoà (ở khe) -> phần tử đứng trước
+
+def test_select_semester_empty_and_malformed():
+    """Rỗng / toàn ngày lỗi -> None (caller tự fallback). 1 kỳ ngày lỗi KHÔNG kéo sập cả lượt dò."""
+    from fapc.core.api import select_semester as S
+    now = datetime.datetime(2026, 10, 3)
+    assert S([], now) is None and S(None, now) is None
+    assert S([None, "x", 3, {"semesterName": ""}, {"startDate": "2026-09-07"}], now) is None
+    bad = {"semesterName": "Bad", "startDate": "NOT-A-DATE", "endDate": None}
+    assert S([bad], now) is None
+    half = {"semesterName": "Half", "startDate": "2026-09-07T00:00:00", "endDate": "??"}   # end lỗi: không 'trong kỳ'
+    assert S([bad, half], now) == "Half"                                            # nhưng vẫn dự thi 'gần nhất'
+    assert S([bad] + _YEAR, now) == "Fall2026"
+    # các shape ngày khác vẫn đọc được (cùng thứ tự format với schedule.parse_date)
+    alt = [{"semesterName": "Fall2026", "startDate": "09/07/2026", "endDate": "2026-12-26"}]
+    assert S(alt, now) == "Fall2026"
+
+def test_current_semester_uses_shared_picker_and_contract():
+    """current_semester: FAP_SEMESTER > GetSemester (select_semester) > default_semester; LUÔN chuỗi, KHÔNG raise."""
+    import fapc.core.api as A
+    class _R:
+        status_code = 200
+        def __init__(s, js): s._js = js
+        def json(s): return s._js
+    orig_sem = os.environ.get("FAP_SEMESTER"); orig_get, orig_now = A.requests.get, A._vn_now
+    try:
+        os.environ.pop("FAP_SEMESTER", None); A._CACHE.clear()
+        A._vn_now = lambda: datetime.datetime(2026, 12, 30, 9, 0, tzinfo=datetime.timezone.utc)   # khe cuối năm
+        A.requests.get = lambda url, **k: _R({"code": "200", "errorMessage": None, "data": _YEAR})
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert A.current_semester("tok", "FPTU", "HE000000") == "Spring2027"    # cũ: default -> 'Fall2026'
+        A.requests.get = lambda url, **k: _R({"code": "200", "data": []})           # rỗng -> đoán theo ngày
+        assert A.current_semester("tok", "FPTU", "HE000000") == "Fall2026"
+        err = io.StringIO()
+        A.requests.get = lambda url, **k: _R({"code": "401", "errorMessage": "Unauthorized", "data": None})
+        with contextlib.redirect_stderr(err):                                       # hết phiên kiểu v2 -> cảnh báo + default
+            assert A.current_semester("tok", "FPTU", "HE000000") == "Fall2026"
+        assert "FAP_SEMESTER" in err.getvalue()
+        def boom(url, **k): raise RuntimeError("weird")
+        A.requests.get = boom                                                       # lỗi lạ -> vẫn chuỗi, không raise
+        assert A.current_semester("tok", "FPTU", "HE000000") == "Fall2026"
+        os.environ["FAP_SEMESTER"] = "Summer2030"
+        assert A.current_semester("tok", "FPTU", "HE000000") == "Summer2030"
+    finally:
+        A.requests.get, A._vn_now = orig_get, orig_now; A._CACHE.clear()
+        if orig_sem is None: os.environ.pop("FAP_SEMESTER", None)
+        else: os.environ["FAP_SEMESTER"] = orig_sem
+
 def test_is_checksum_error():
     from fapc.core.api import _is_checksum_error
     assert _is_checksum_error((200, {"code": "201", "message": "Thông tin checksum không chính xác"})) is True
