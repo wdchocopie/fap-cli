@@ -5,7 +5,7 @@
     fap exams   # GetScheduleExam   (cũng dùng cho `fap notify exams` + bot /exams)
     fap news    # GetTop10News
     fap fees    # GetBalance + GeFeeByRoll
-    fap todo    # CheckOpenFeedBack + GetApplication ('3' chờ thanh toán) — việc phải TỰ làm trong app myFAP
+    fap todo    # CheckOpenFeedBack + CheckUpdateProfile + GetApplication ('3' chờ thanh toán) — việc phải TỰ làm
 
 Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa có dữ liệu — xử lý rỗng đàng hoàng.
 """
@@ -232,8 +232,8 @@ def app_changes_text(changes):
             out.append(f"   ↳ {note}")
     return "\n".join(out)
 
-# ---------- VIỆC CẦN LÀM · TO-DO (feedback đang mở · đơn chờ thanh toán) ----------
-# fap-cli CHỈ ĐỌC: mỗi mục chỉ NHẮC sinh viên tự làm trong app myFAP chính thức — KHÔNG BAO GIỜ gọi AddRate /
+# ---------- VIỆC CẦN LÀM · TO-DO (feedback đang mở · cập nhật hồ sơ · đơn chờ thanh toán) ----------
+# fap-cli CHỈ ĐỌC: mỗi mục chỉ NHẮC sinh viên tự làm qua kênh chính thức — KHÔNG BAO GIỜ gọi AddRate /
 # SubmitStudentFeedback. GetStudentRate KHÔNG dùng: nghĩa các trường của nó chưa kiểm chứng.
 def _feedback_open(v):
     """THUẦN: CheckOpenFeedBack.data -> True (đợt feedback đang mở) / False (không) / None (KHÔNG BIẾT).
@@ -251,15 +251,30 @@ def _feedback_open(v):
             return False
     return None
 
-def todo_items(open_feedback, applications):
+def _profile_needs_update(v):
+    """THUẦN: CheckUpdateProfile.data -> True (PHẢI cập nhật hồ sơ) / False / None (KHÔNG BIẾT).
+    Theo myFAP 2.0.5 (4 màn Lịch học · Lịch tuần · Điểm · Điểm danh): `hasUpdateProfile = (data == false)` rồi hiện
+    "You need to update your profile at FAP. Please access https://fap.fpt.edu.vn". Khi lỗi, lớp API của app trả ''
+    (mà '' == false trong JS ⇒ app có thể nhắc NHẦM) — ở đây CHỈ boolean false mới tính; rỗng/lỗi/lạ = không biết."""
+    if v is False:
+        return True
+    if v is True:
+        return False
+    return None
+
+def todo_items(open_feedback, update_profile, applications):
     """THUẦN: các việc sinh viên phải TỰ làm — list chuỗi, rỗng = không có việc gì.
-      open_feedback : CheckOpenFeedBack.data thô (None = không lấy được)
-      applications  : các dòng GetApplication (None = không lấy được)"""
+      open_feedback  : CheckOpenFeedBack.data thô (None = không lấy được)
+      update_profile : CheckUpdateProfile.data thô (None = không lấy được)
+      applications   : các dòng GetApplication (None = không lấy được)"""
     items = []
     if _feedback_open(open_feedback):
         # App 2.0.5: "You need to do a teaching survey. Please access https://fap.fpt.edu.vn" + nút mở đúng trang đó
         items.append(t("📝 Đang mở đợt feedback giảng dạy — làm tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).",
                        "📝 A teaching-feedback round is open — complete it at fap.fpt.edu.vn (where the myFAP app sends you)."))
+    if _profile_needs_update(update_profile):
+        items.append(t("👤 FAP yêu cầu cập nhật hồ sơ sinh viên — cập nhật tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).",
+                       "👤 FAP asks you to update your student profile — do it at fap.fpt.edu.vn (where the myFAP app sends you)."))
     for r in applications or []:
         if _app_code(r) == "3":                           # '3' = Đang chờ thanh toán (getStatusConfig 2.0.5)
             name = fmt.unescape(r.get("name")) or t("(đơn)", "(application)")
@@ -269,11 +284,12 @@ def todo_items(open_feedback, applications):
                            f"💳 Application awaiting payment: {name} — check and pay via the myFAP app / fap.fpt.edu.vn."))
     return items
 
-def todo_block(open_feedback, applications, err=None):
+def todo_block(open_feedback, update_profile, applications, err=None):
     """THUẦN: khối "Việc cần làm · To-do" hoàn chỉnh. Nguồn nào KHÔNG BIẾT (lỗi) thì ghi chú rõ — KHÔNG BAO GIỜ
     nói "không có việc gì" khi chẳng kiểm tra được gì. `err` = lý do lỗi đầu tiên (vd token hết hạn)."""
-    items = todo_items(open_feedback, applications)
+    items = todo_items(open_feedback, update_profile, applications)
     checks = [(t("feedback", "feedback"), _feedback_open(open_feedback) is not None),
+              (t("hồ sơ", "profile"), _profile_needs_update(update_profile) is not None),
               (t("đơn từ", "applications"), applications is not None)]
     unknown = [lbl for lbl, known in checks if not known]
     note = (t("❔ Chưa kiểm tra được: ", "❔ Couldn't check: ") + ", ".join(unknown)) if unknown else ""
@@ -290,8 +306,9 @@ def todo_block(open_feedback, applications, err=None):
     return "\n".join(lines)
 
 def todo_fetch(token, campus, roll):
-    """Dữ liệu cho khối to-do: 2 GET (CheckOpenFeedBack · GetApplication), MỖI cái CÔ LẬP lỗi -> None (không
-    biết), không bao giờ làm sập khối. Trả (open_feedback, applications, err) — err = lý do lỗi ĐẦU TIÊN."""
+    """Dữ liệu cho khối to-do: 3 GET (CheckOpenFeedBack · CheckUpdateProfile · GetApplication), MỖI cái CÔ LẬP
+    lỗi -> None (không biết), không bao giờ làm sập khối.
+    Trả (open_feedback, update_profile, applications, err) — err = lý do lỗi ĐẦU TIÊN."""
     errs = []
     def _try(fn):
         try:
@@ -300,8 +317,10 @@ def todo_fetch(token, campus, roll):
             errs.append(str(e) or type(e).__name__)
             return None
     fb = _try(lambda: _fetch_ok("CheckOpenFeedBack", token, campus, roll))
+    up = _try(lambda: _fetch_ok("CheckUpdateProfile", token, campus, roll))
     apps = _try(lambda: fetch_applications_checked(token, campus, roll))
-    return (fb[1] if fb and fb[0] else None), apps, (errs[0] if errs else None)
+    data = lambda res: res[1] if res and res[0] else None
+    return data(fb), data(up), apps, (errs[0] if errs else None)
 
 def todo_text(token, campus, roll):
     return todo_block(*todo_fetch(token, campus, roll))

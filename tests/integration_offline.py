@@ -540,7 +540,7 @@ finally:
 
 # [M] B4a: khối "Việc cần làm" — ĐƯỜNG THẬT: requests (mock) -> api.call -> todo_fetch -> /todo, /all và
 #     digest `notify.run("today")` (chỉ gắn khi CÓ việc). Không endpoint GHI nào được gọi.
-_saved_m = {k: SUCCESS.get(k) for k in ("CheckOpenFeedBack", "GetApplication")}
+_saved_m = {k: SUCCESS.get(k) for k in ("CheckOpenFeedBack", "CheckUpdateProfile", "GetApplication")}
 _saved_tg = notify._telegram
 _pushed_m, _urls = [], []
 notify._telegram = lambda t: (_pushed_m.append(t), True)[1]
@@ -549,14 +549,17 @@ api.requests.get = lambda url, **k: (_urls.append(url.split("/MyFAP/")[1].split(
 MODE["v"] = "success"
 try:
     SUCCESS["CheckOpenFeedBack"] = "true"                       # app 2.0.5 nhận cả CHUỖI 'true'
+    SUCCESS["CheckUpdateProfile"] = False                       # app 2.0.5: data == false -> phải cập nhật hồ sơ
     SUCCESS["GetApplication"] = [{"w_APP_ID": "601", "name": "Đơn xin Z", "createDate": "01/10/2026", "studentStatus": "3"}]
     api._CACHE.clear()
     _todo = _cap(lambda: handle("todo"))
-    check("todo: feedback mở + đơn chờ thanh toán", "📝" in _todo and "💳" in _todo and "Đơn xin Z" in _todo, _todo[:200])
+    check("todo: feedback mở + hồ sơ + đơn chờ thanh toán",
+          "📝" in _todo and "👤" in _todo and "💳" in _todo and "Đơn xin Z" in _todo, _todo[:200])
     check("todo: /all có khối việc cần làm", "Đơn xin Z" in _cap(lambda: handle("all")))
     _cap(lambda: notify.run("today"))
     check("todo: digest hôm nay gắn khối to-do khi CÓ việc", _pushed_m and "💳" in _pushed_m[-1])
     SUCCESS["CheckOpenFeedBack"] = False
+    SUCCESS["CheckUpdateProfile"] = True
     SUCCESS["GetApplication"] = [dict(SUCCESS["GetApplication"][0], studentStatus="1")]
     api._CACHE.clear()
     _cap(lambda: notify.run("today"))
