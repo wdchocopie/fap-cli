@@ -198,5 +198,26 @@ Ghi lại để mai khỏi điều tra lại. Đã đo/đọc code thật:
 
 ---
 
+## 6. Đợt 09–10/2026 · Sep–Oct 2026
+
+**VI —** Nhật ký các thay đổi + quyết định của đợt này. Chi tiết trường API: [20-api-fields](20-api-fields.md).
+**EN —** Changes and decisions from this round. Field details: [20-api-fields](20-api-fields.md).
+
+| Thay đổi · Change | Quyết định chính · Key decision | Trạng thái · Status |
+|---|---|---|
+| Google Calendar **ngay trong chat** + **nhiều đích Google** (`40c783d`) | OAuth kiểu **loopback-paste** (chạy được trên VPS không màn hình); mỗi đích một nhãn; **từ chối** 2 nhãn trỏ cùng một `calendar_id` cụ thể (prune xoá chéo) | ✅ `main` |
+| **Link Meet** cho buổi online trong nhắc tiết + lịch (PR #1, `a834324`) | `meetURL` là **mã Meet trần** → ghép URL; buổi thiếu mã **mượn** mã của lớp chỉ khi lớp có đúng 1 mã cả kỳ; Discord không bao giờ ping (`allowed_mentions`) | ✅ `main` |
+| 4 trường API chưa dùng: điểm danh từng buổi, trạng thái đơn, nội dung thông báo, giai đoạn môn (PR #2) | Mã trạng thái lấy từ **hàm của app chính thức**; mã lạ hiện ❔; sửa **báo nhầm nguy cơ cấm thi** đầu kỳ bằng 2 điều kiện tuỳ chọn, fail-safe; thông báo khoá theo `#id` | 🔄 PR #2 (CI xanh) |
+| **Bẫy mạng** trong test offline (`tests/test_logic.py`) | Test nào thử gọi mạng thật là FAIL — kể cả khi code nuốt lỗi; chỉ ghi host (token bot Telegram nằm trong path) | 🔄 PR #2 |
+| `docs/20-api-fields.md` + `analysis/keys_schema.py` | Ghi lại sự thật đã đo để khỏi điều tra lại; sơ đồ trường **chỉ tên khoá**, không bao giờ in giá trị | 🔄 PR #2 |
+
+**Còn mở · Open:**
+- `/profile` gửi CCCD / SĐT / ngày sinh / email qua bot → nên chỉ hiện ở CLI ([20](20-api-fields.md) §4).
+- Ứng viên còn lại: [20](20-api-fields.md) §3 (tài liệu môn, cờ qua/trượt transcript, điểm chính thức từ `GetMarkByCourse`, đợt feedback…).
+- Lỗi phụ từ audit: `_news_get` phân biệt hoa thường; `exam_countdown` không nhận `examSubject`; `fees()` báo "chưa có chi tiết" khi thật ra 404; `conduct.fetch` coi mọi code 201 là "chưa có dữ liệu".
+- Kiểm bản app mới **versionCode 29** (đang làm).
+
+---
+
 > ⚠️ **VI —** Dự án KHÔNG chính thức, chỉ dùng cho dữ liệu của chính bạn. Đọc [../SECURITY.md](../SECURITY.md).
 > **EN —** Unofficial project, your own data only. Read [../SECURITY.md](../SECURITY.md).

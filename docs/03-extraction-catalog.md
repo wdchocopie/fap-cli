@@ -23,7 +23,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 |---|---|---|---|---|
 | `GetStudentById` | Hồ sơ chi tiết sinh viên (cá nhân, ngành, học vụ, liên hệ phụ huynh) | `campusCode`, `rollNumber`, `Authen`, `checksum` | `rollNumber`, `fullname`, `firstName`, `lastName`, `middleName`, `dateOfBirth`, `gender`, `email`, `mobilePhone`, `address`, `major`, `nganh`, `chuyenNganh`, `batch`, `lopchinh`, `currentTermNo`, `statusCode`, `memberCode`, `iDCard`, `parentName`, `parentPhone`, `parentEmail`, `parentAddress` | high |
 | `RetriveImage` *(sai chính tả "Retrive")* | Ảnh thẻ/avatar sinh viên (base64 hoặc URL) | `campusCode`, `rollNumber`, `Authen`, `checksum` | `image` / `imageBase64` / `url` (data vô hướng) | high |
-| `CheckUpdateProfile` | Cờ kiểm tra sinh viên có phải cập nhật hồ sơ tại fap.fpt.edu.vn không | `campusCode`, `rollNumber`, `Authen`, `checksum` | `hasUpdateProfile` / `isUpdate`, `message` | high |
+| `CheckUpdateProfile` | Cờ kiểm tra sinh viên có phải cập nhật hồ sơ tại fap.fpt.edu.vn không | `campusCode`, `rollNumber`, `Authen`, `checksum` | `data` = **boolean trần** (không có `hasUpdateProfile`/`isUpdate`) · bare boolean — [20](20-api-fields.md) | high |
 | `GetCampusInfo` | Thông tin/liên hệ một campus | `campusCode`, `Authen`, `checksum`, `rollNumber` | `campusName`, `campusCode`, `address`, `phone`, `email` | medium |
 
 ### A.3. Học tập & Điểm
@@ -42,7 +42,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | Endpoint | Lấy gì | Tham số | Trường trả về | Độ tin |
 |---|---|---|---|---|
 | `GetCourseOfSemester` | Danh sách môn/lớp đăng ký trong kỳ (kèm CourseId) | `campusCode`, `Authen`, `checksum`, `rollNumber`, `semester` | `courseId`, `subjectCode`, `subjectName`, `groupName`, `slot`, `room`, `lecturer`, `sessionNo` | high |
-| `GetActivityStudent` | Lịch học theo kỳ (xem theo ngày, đếm buổi/ngày) | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `date`, `slot`, `subjectCode`, `room`, `lecturer`, `sessionNo`, `groupName`, `status` | high |
+| `GetActivityStudent` | Lịch học theo kỳ (xem theo ngày, đếm buổi/ngày) | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `date` (`M/D/YYYY 12:00:00 AM`), `slot`, `slotTime`, `subjectCode`, `roomNo`, `isOnline` (`"true"`/`"false"`), `meetURL` (**mã Meet trần**, không phải URL), `attendanceStatus` (`P`/`A`/`N`), `material` (URL), `lecturer`, `sessionNo`, `groupName` — ý nghĩa: [20](20-api-fields.md) §1 | high |
 | `GetActivityStudentByWeek` | Thời khóa biểu theo tuần | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber`, `week`, `year` | `date`, `slot`, `subjectCode`, `room`, `lecturer`, `sessionNo`, `groupName`, `dayOfWeek` | high |
 | `GetScheduleExam` | Lịch thi trong một kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `examSubject`, `examDate`, `examTime`, `examRoom`, `examType`, `examForm` | high |
 | `GetStudentAttendances` | Tổng hợp điểm danh theo kỳ (số buổi, % chuyên cần) | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `groupName`, `subjectCode`, `rollNumber`, `numberOfTakenAttendances`, `numberOfAttendances`, `attendance`, `startDate`, `endDate` | **confirmed** |
@@ -57,7 +57,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | `GetDiemphongtrao` | Điểm phong trào / rèn luyện theo kỳ | `campusCode`, `rollNumber`, `semester`, `Authen`, `checksum` | `semester`, `activityName`, `point`, `totalPoint`, `PhongTrao`, `joinMovement` | high |
 | `GetActivityStudent` *(nhánh hoạt động)* | Hoạt động ngoại khóa đã/đang tham gia trong kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `eventName`, `activityDate`, `point`, `status` | low |
 | `GetStudentRate` | Các mục đánh giá/feedback giảng viên-môn của sinh viên | `campusCode`, `rollNumber`, `Authen`, `checksum` | `rateId`, `rateValue`, `rateComment`, `hasStudentRated`, `subjectCode`, `subjectName`, `lecturer` | high |
-| `CheckOpenFeedBack` | Cờ kiểm tra có đợt feedback/khảo sát đang mở không | `campusCode`, `rollNumber`, `Authen`, `checksum` | `isOpen`, `hasFeedback`, `message` | high |
+| `CheckOpenFeedBack` | Cờ kiểm tra có đợt feedback/khảo sát đang mở không | `campusCode`, `rollNumber`, `Authen`, `checksum` | `data` = **boolean trần** (không có `isOpen`/`hasFeedback`) · bare boolean — [20](20-api-fields.md) | high |
 
 ### A.6. Tài chính
 
@@ -73,9 +73,9 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 |---|---|---|---|---|
 | `GetTop10News` | 10 tin tức mới nhất của campus theo loại | `campusCode`, `Authen`, `checksum`, `type` | `Title`, `Contents`, `EntryDate`, `EntryBy` *(có thể `Url`/`Image`)* | medium |
 | `SearchNews` | Tìm tin tức theo từ khóa + loại | `campusCode`, `Authen`, `checksum`, `keysearch`, `type` | `Title`, `Contents`, `EntryDate`, `EntryBy` | medium |
-| `GetNotificationByRoll` | Thông báo cá nhân gửi tới sinh viên | `campusCode`, `Authen`, `checksum`, `rollNumber` | `Title`, `Contents`, `EntryBy`, `EntryDate` | high |
+| `GetNotificationByRoll` | Thông báo cá nhân gửi tới sinh viên | `campusCode`, `Authen`, `checksum`, `rollNumber` | `id` (số nhỏ, ổn định), `title`, `contents` (**text thuần**), `entryBy`, `entryDate`, `pType`, `topic`, `uRL`, `campusId`, `rollnumbers` (⚠️ có thể là mã SV **người khác** — không hiển thị) — [20](20-api-fields.md) | high |
 | `GetNotificationByDonor` | Thông báo cho phụ huynh/người bảo trợ | `CampusCode` *(C hoa)*, `Authen`, `rollNumber` *(không có checksum)* | `Title`, `Contents`, `EntryBy`, `EntryDate` | high |
-| `GetApplication` | Danh sách đơn từ + trạng thái xử lý | `campusCode`, `Authen`, `checksum`, `rollNumber` | `w_app_id`, `name`, `description`, `processNote`, `createDate`, `studentStatus` | high |
+| `GetApplication` | Danh sách đơn từ + trạng thái xử lý | `campusCode`, `Authen`, `checksum`, `rollNumber` | `w_APP_ID`, `name`, `description`, `processNote`, `createDate` (`dd/mm/yyyy`), `studentStatus` (`0` xử lý / `1` chấp nhận / khác = từ chối), `fileUpLoad` (⚠️ tệp đính kèm), `amount` — [20](20-api-fields.md) | high |
 
 > `keysearch` được `encodeURIComponent` + trim trước khi gọi. News và Notification dùng chung hạ tầng (state `dataNotifi`), tên trường gốc từ FAP là `Title`, `Contents` (có "s"), `EntryDate`, `EntryBy`.
 
@@ -138,7 +138,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 - `GetStudentAttendances` / `GetStudentMark` — môn chưa bắt đầu → số buổi `0` hoặc cột điểm `null`.
 - `GetDiemphongtrao` / `GetActivityStudent` — chưa tham gia hoạt động → mảng rỗng (`code` khác 200 trả `[]`).
 - `GetActivityStudentByWeek` — tuần nghỉ lễ/giữa kỳ → `data` rỗng.
-- `CheckOpenFeedBack` — ngoài đợt khảo sát → chuỗi rỗng `''` / `isOpen=false`.
+- `CheckOpenFeedBack` — ngoài đợt khảo sát → chuỗi rỗng `''` / `false` (boolean trần).
 - `GetCourseOfSemester` — khi gọi thật bằng URL trong dump trả **HTTP 404** (có thể phân biệt hoa/thường hoặc đã đổi path). fap-cli **vẫn dùng** nó (lệnh `fap courses` + vá `courseID` cho `grades-detail`) nhưng **degrade êm**: `fetch_courses()` trả `None` khi 404/lỗi và mọi nơi gọi đều có fallback (gộp từ `GetActivityStudent` / giữ hành vi cũ) — không phụ thuộc cứng.
 
 ---
