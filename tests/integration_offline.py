@@ -272,7 +272,7 @@ finally:
         else: SUCCESS[_k] = _v
     api._CACHE.clear()
 
-# [L] B1 — lõi API cứng hơn, ĐƯỜNG THẬT: requests (mock) -> api.call -> check_auth/drift -> fetch -> handle.
+# [L] lõi API cứng hơn, ĐƯỜNG THẬT: requests (mock) -> api.call -> check_auth/drift -> fetch -> handle.
 #     Phản hồi giả có `.text` + `.headers` như requests thật. Cờ drift là 1-lần/process -> reset trước, trả lại sau.
 check("drift: lưu lượng bình thường (A–K) KHÔNG bật gợi ý v2", not api._DRIFT_WARNED["done"])
 class _Raw:
@@ -338,8 +338,10 @@ try:
         _cur = _cap(lambda: api.current_semester("SECRETTOKEN123", "FPTU", "HE190000"))
         _pk = sched.pick_semester(SUCCESS["GetSemester"])
         check(f"semester: current_semester == pick_semester @ {_when:%d/%m %H:%M}", _cur == _pk, f"{_cur} vs {_pk}")
-    check("semester: ngày cuối Summer (30/08 10:00) -> Fall như app",
-          sched.pick_semester(SUCCESS["GetSemester"], datetime.datetime(2026, 8, 30, 10, 0)) == "Fall2026")
+    check("semester: ngày cuối Summer (30/08 10:00) VẪN là Summer (cả ngày cuối)",
+          sched.pick_semester(SUCCESS["GetSemester"], datetime.datetime(2026, 8, 30, 10, 0)) == "Summer2026")
+    check("semester: hôm sau ngày cuối (31/08) -> Fall (kỳ bắt đầu gần nhất)",
+          sched.pick_semester(SUCCESS["GetSemester"], datetime.datetime(2026, 8, 31, 10, 0)) == "Fall2026")
     check("semester: khe cuối năm -> Fall2026 (kỳ cuối trong list, gần nhất)", _cur == "Fall2026", _cur)
 finally:
     os.environ["FAP_SEMESTER"] = _saved_sem
@@ -399,7 +401,7 @@ finally:
     os.environ["FAP_API_VERSION"] = _saved_v2[2] if _saved_v2[2] is not None else "v1"
     os.environ["FAP_V2_KEY"] = _saved_v2[3] if _saved_v2[3] is not None else ""
     apiv2._SESSION_CACHE.clear(); api._CACHE.clear()
-# [L] analysis/apk_drift.py — báo cáo drift + ghi .env CHẠY TRỌN ĐƯỜNG trên bundle TỔNG HỢP + repo giả.
+# [M] analysis/apk_drift.py — báo cáo drift + ghi .env CHẠY TRỌN ĐƯỜNG trên bundle TỔNG HỢP + repo giả.
 #     Không mạng (apk_drift không gọi mạng); kiểm MÃ THOÁT (cron/CI) + CHE (secret không lọt ra stdout).
 import struct as _struct
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
@@ -499,7 +501,7 @@ try:
 finally:
     _ad._decode_functions = _saved_decode
 
-# [L] B4a: đơn từ ĐỔI trạng thái — ĐƯỜNG THẬT: requests (mock) -> api.call -> fetch_applications_checked
+# [N] đơn từ ĐỔI trạng thái — ĐƯỜNG THẬT: requests (mock) -> api.call -> fetch_applications_checked
 #     -> app_changes -> mốc applications_state.json (thư mục tạm) -> push, qua lối vào THẬT `notify.run("notifications")`
 #     (cùng nhịp với thông báo mới — không cần job/lịch mới).
 _saved_app = SUCCESS.get("GetApplication")
@@ -538,7 +540,7 @@ finally:
     else: SUCCESS["GetApplication"] = _saved_app
     api._CACHE.clear()
 
-# [M] B4a: khối "Việc cần làm" — ĐƯỜNG THẬT: requests (mock) -> api.call -> todo_fetch -> /todo, /all và
+# [O] khối "Việc cần làm" — ĐƯỜNG THẬT: requests (mock) -> api.call -> todo_fetch -> /todo, /all và
 #     digest `notify.run("today")` (chỉ gắn khi CÓ việc). Không endpoint GHI nào được gọi.
 _saved_m = {k: SUCCESS.get(k) for k in ("CheckOpenFeedBack", "CheckUpdateProfile", "GetApplication")}
 _saved_tg = notify._telegram
@@ -583,7 +585,7 @@ finally:
         else: SUCCESS[_k] = _v
     api._CACHE.clear()
 
-# [L] B4b — ĐƯỜNG THẬT requests (mock) -> api.call -> extras/conduct: GeFeeByRoll 404 · link hoá đơn CHỈ ở CLI ·
+# [P] ĐƯỜNG THẬT requests (mock) -> api.call -> extras/conduct: GeFeeByRoll 404 · link hoá đơn CHỈ ở CLI ·
 #     tin khoá hoa · đếm ngược thi 'examSubject'/hoa · GetDiemphongtrao 201 NullReference vs checksum.
 #     ⚠️ Không đưa output vào `info` của check(): `fap selftest` ở máy thật dùng token.json THẬT -> output có MSSV.
 class _RespL:

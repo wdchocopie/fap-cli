@@ -360,7 +360,7 @@ def test_check_auth_expired_vs_checksum_vs_ok():
     assert not _raises_exit(lambda: check_auth(200, {"code": "200", "data": []}))      # rỗng HỢP LỆ
     assert not _raises_exit(lambda: check_auth(200, {"data": []}))                     # không có code -> bỏ qua
 
-# ---- B1: lõi API cứng hơn — lỗi phiên kiểu v2 · cảnh báo v1 dời route · một bộ chọn học kỳ ----
+# ---- lõi API cứng hơn — lỗi phiên kiểu v2 · cảnh báo v1 dời route · một bộ chọn học kỳ ----
 def test_check_auth_v2_style_session_errors():
     """Thân kiểu API v2 (myFAP 2.0.5 `_isSessionExpired`) BỌC trong HTTP 200 -> hết phiên, KHÔNG thành [] im lặng."""
     from fapc.core.api import check_auth, _EXPIRED_MSG
@@ -492,14 +492,15 @@ def test_select_semester_in_term_and_gaps():
     # trước kỳ đầu tiên / sau kỳ cuối cùng -> vẫn ra kỳ gần nhất (không None)
     assert S(_YEAR, dt(2025, 11, 1)) == "Spring2026" and S(_YEAR, dt(2028, 1, 1)) == "Spring2027"
 
-def test_select_semester_last_day_of_term_like_app():
-    """Ngày CUỐI kỳ: app so THỜI ĐIỂM `new Date()` với `new Date('…T00:00:00')` -> từ sau 00:00 ngày cuối đã
-    KHÔNG còn 'trong kỳ' -> kỳ bắt đầu gần nhất (kỳ sau). Đúng 00:00 (hoặc truyền date) vẫn là kỳ cũ."""
+def test_select_semester_last_day_of_term_inclusive():
+    """Ngày CUỐI kỳ VẪN là kỳ đó cả ngày (cố ý lệch app: app so thời điểm nên từ 00:00 ngày cuối đã nhảy sang
+    kỳ sau -> /today mất lịch học/thi ngày cuối). Ngày KẾ TIẾP mới rơi xuống luật 'startDate gần nhất'."""
     from fapc.core.api import select_semester as S
     from fapc.core.schedule import pick_semester as P
-    assert S(_YEAR, datetime.datetime(2026, 8, 29, 0, 0)) == "Summer2026"   # đúng mốc endDate: còn trong kỳ
-    assert S(_YEAR, datetime.date(2026, 8, 29)) == "Summer2026"             # date = 00:00 ngày đó
-    assert S(_YEAR, datetime.datetime(2026, 8, 29, 10, 0)) == "Fall2026"    # sau 00:00 ngày cuối -> như app
+    assert S(_YEAR, datetime.datetime(2026, 8, 29, 0, 0)) == "Summer2026"
+    assert S(_YEAR, datetime.date(2026, 8, 29)) == "Summer2026"
+    assert S(_YEAR, datetime.datetime(2026, 8, 29, 23, 59)) == "Summer2026"   # cả ngày cuối
+    assert S(_YEAR, datetime.datetime(2026, 8, 30, 0, 1)) == "Fall2026"      # hôm sau -> kỳ bắt đầu gần nhất
     # pick_semester (dashboard) và current_semester GIỜ CÙNG MỘT luật — trước đây lệch đúng ở ngày này
     for when in (datetime.datetime(2026, 8, 29, 10, 0), datetime.date(2026, 8, 29), datetime.datetime(2026, 12, 30)):
         assert P(_YEAR, when) == S(_YEAR, when), when
@@ -1175,7 +1176,7 @@ def test_login_refuses_different_account():
     A, saved = _login_sandbox()
     try:
         with open(A.TOKEN_JSON, "w", encoding="utf-8") as f:
-            _json.dump({"rollnumber": "HE191048", "campus": "APHL"}, f)
+            _json.dump({"rollnumber": "HE100001", "campus": "APHL"}, f)
         with open(A.OAUTH_JSON, "w", encoding="utf-8") as f:
             _json.dump({"refresh_token": "MINE"}, f)
 
@@ -1186,19 +1187,19 @@ def test_login_refuses_different_account():
         A.device_poll = lambda *a, **k: {"access_token": "x"}
         A._finalize = _fin_foreign
         ok, msg = A.login_finish_device({"device_code": "DC", "campus": "APHL"}, A.current_roll())
-        assert ok is False and "HE999999" in msg and "HE191048" in msg
+        assert ok is False and "HE999999" in msg and "HE100001" in msg
         with open(A.TOKEN_JSON, encoding="utf-8") as f:
-            assert _json.load(f)["rollnumber"] == "HE191048"        # token CŨ còn nguyên
+            assert _json.load(f)["rollnumber"] == "HE100001"        # token CŨ còn nguyên
         with open(A.OAUTH_JSON, encoding="utf-8") as f:
             assert _json.load(f)["refresh_token"] == "MINE"         # refresh_token lạ ĐÃ bị gỡ
 
         # roll RỖNG (FAP trả data dạng chuỗi trần) cũng phải bị coi là KHÁC — không định danh được thì cấm
         A._finalize = lambda tok, campus, log=print: {"rollnumber": None, "campus": "APHL"}
-        assert A.login_finish_device({"device_code": "DC", "campus": "APHL"}, "HE191048")[0] is False
+        assert A.login_finish_device({"device_code": "DC", "campus": "APHL"}, "HE100001")[0] is False
 
-        A._finalize = lambda tok, campus, log=print: {"rollnumber": "HE191048", "campus": "APHL"}
+        A._finalize = lambda tok, campus, log=print: {"rollnumber": "HE100001", "campus": "APHL"}
         ok2, msg2 = A.login_finish_device({"device_code": "DC", "campus": "APHL"}, A.current_roll())
-        assert ok2 is True and "HE191048" in msg2                   # đúng tài khoản -> cho qua
+        assert ok2 is True and "HE100001" in msg2                   # đúng tài khoản -> cho qua
     finally:
         _login_restore(A, saved)
 
@@ -1216,9 +1217,9 @@ def test_login_pkce_paste_detection_and_ttl():
         ok, text, mode = s.start("APHL")
         assert ok and mode == "pkce" and s.waiting_paste()
         assert not s.waiting_paste(now=s.started + BL.PASTE_TTL + 1)  # quá hạn -> không nhận dán nữa
-        A.exchange_code = lambda pasted, log=print: {"rollnumber": "HE191048", "campus": "APHL"}
+        A.exchange_code = lambda pasted, log=print: {"rollnumber": "HE100001", "campus": "APHL"}
         ok2, msg2 = BL.finish_paste(s, "io.identityserver.demo:/oauthredirect?code=Z9")
-        assert ok2 is True and "HE191048" in msg2                   # dán hợp lệ -> đổi được token
+        assert ok2 is True and "HE100001" in msg2                   # dán hợp lệ -> đổi được token
         assert BL.finish_paste(s, "x")[0] is False                  # phiên đã đóng -> từ chối, không nổ
     finally:
         _login_restore(A, saved)
@@ -2139,7 +2140,7 @@ def test_application_status_badges():
     finally:
         E.fetch_applications = orig
 
-# ---- B4a: cảnh báo ĐƠN TỪ đổi trạng thái (app_changes thuần + mốc applications_state.json) ----
+# ---- cảnh báo ĐƠN TỪ đổi trạng thái (app_changes thuần + mốc applications_state.json) ----
 def _appl(aid, code, name="Đơn X", **kw):
     r = {"w_APP_ID": aid, "name": name, "createDate": "16/09/2025", "studentStatus": code, "processNote": ""}
     r.update(kw)
@@ -2265,7 +2266,7 @@ def test_notify_notifications_also_checks_applications_isolated():
     finally:
         N.push_new_notifications, N.push_application_changes = saved
 
-# ---- B4a: khối "Việc cần làm · To-do" (CheckOpenFeedBack · đơn '3' chờ thanh toán) ----
+# ---- khối "Việc cần làm · To-do" (CheckOpenFeedBack · đơn '3' chờ thanh toán) ----
 def _fake_call(table, log=None):
     """call() giả theo endpoint: giá trị là (http, data) hoặc Exception để ném. Ghi lại (endpoint, params)."""
     def _c(endpoint, params, *a, **k):
@@ -2468,7 +2469,7 @@ def test_banrisk_skips_schedule_request_when_nothing_below_threshold():
     finally:
         B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now = saved
 
-# ---- B2: API v2 OPT-IN (FAP_API_VERSION=v2) — khoá GIẢ "test-key", token/roll giả, 0 mạng thật ----
+# ---- API v2 OPT-IN (FAP_API_VERSION=v2) — khoá GIẢ "test-key", token/roll giả, 0 mạng thật ----
 _V2_KEY = "test-key"
 
 def _env_set(saved):
@@ -2949,7 +2950,7 @@ def test_apkdrift_write_v2_key(tmp_path=None):
     assert "FAP_V2_KEY=beef5678feedface" in lines
     assert "FAP_LANG=en" in lines and "TELEGRAM_TOKEN=keepme" in lines
 
-# ---- B4b: link hoá đơn điện tử (CHỈ CLI) · tin hoa/thường · đếm ngược thi · 404 học phí · 201 rèn luyện ----
+# ---- link hoá đơn điện tử (CHỈ CLI) · tin hoa/thường · đếm ngược thi · 404 học phí · 201 rèn luyện ----
 # Giá trị GIẢ hết (MSSV HE000000…). Mọi monkeypatch đều KHÔI PHỤC trong finally (runner chạy theo thứ tự tên).
 def test_invoice_url_built_locally():
     """Link hoá đơn dựng TẠI CHỖ từ MSSV (không request). Rỗng khi thiếu MSSV; MSSV được quote -> không
@@ -3087,6 +3088,84 @@ def test_conduct_no_data_vs_checksum_and_auth():
         assert K.fetch("t", "c", "r", "Summer2026") == [{"activityName": "A", "point": 5}]
     finally:
         K.call = orig
+
+# ---- tích hợp các phần: phiên hết hạn KIỂU v2 ở watcher/fetcher · CheckUpdateProfile dạng v2 · doctor ----
+def test_v2_style_expiry_is_failure_not_empty():
+    """Thân kiểu v2 (code 401 / Unauthorized trong HTTP 200) phải là THẤT BẠI (None) ở mọi fetcher 'phân biệt
+    lỗi' — nếu thành [] thì watch-attendance xoá mốc 'đã thấy' rồi báo lại buổi CŨ như buổi mới."""
+    import importlib.util
+    def _fresh(name):          # bản module MỚI, độc lập: vài test cũ vá fetch_courses… mà không trả lại
+        spec = importlib.util.find_spec(name)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        return mod
+    AW, G, C = _fresh("fapc.app.attendwatch"), _fresh("fapc.core.grades"), _fresh("fapc.core.courses")
+    saved = (AW.call, G.call, C.call)
+    try:
+        for body in ({"code": "401", "data": []}, {"code": 401, "data": None},
+                     {"code": "200", "errorMessage": "Unauthorized", "data": []}):
+            fake = (lambda b: lambda *a, **k: (200, b))(body)
+            AW.call = G.call = C.call = fake
+            assert AW._course_detail("t", "c", "r", "Fall2026", "SUB101", "G1") is None, body
+            assert G.fetch_components("t", "c", "r", "123") is None, body
+            assert C.fetch_courses("t", "c", "r", "Fall2026") is None, body
+        ok = lambda *a, **k: (200, {"code": "200", "data": []})
+        AW.call = G.call = C.call = ok
+        assert AW._course_detail("t", "c", "r", "Fall2026", "SUB101", "G1") == []   # rỗng THẬT vẫn là []
+        assert C.fetch_courses("t", "c", "r", "Fall2026") == []
+    finally:
+        AW.call, G.call, C.call = saved
+
+def test_fetch_semesters_swallows_systemexit():
+    """v2 thiếu khoá / lệch phiên bản token -> call raise SystemExit; fetch_semesters vẫn trả [] (như lỗi mạng)."""
+    import fapc.core.schedule as S
+    saved = S.call_login_retry
+    try:
+        def boom(*a, **k): raise SystemExit("v2 key missing")
+        S.call_login_retry = boom
+        assert S.fetch_semesters("t", "c", "r") == []
+    finally:
+        S.call_login_retry = saved
+
+def test_profile_update_flag_v2_shape():
+    """v1: data là bool (false = PHẢI cập nhật). v2 (adapter app 2.0.5): data KHÁC RỖNG = phải cập nhật."""
+    import fapc.core.extras as E
+    f = E._profile_flag_v2
+    assert E._profile_needs_update(f(["email"])) is True
+    assert E._profile_needs_update(f("x")) is True
+    assert E._profile_needs_update(f([])) is False and E._profile_needs_update(f("")) is False
+    assert E._profile_needs_update(f(False)) is True and E._profile_needs_update(f(None)) is None
+    saved = (E._fetch_ok, E.fetch_applications_checked, os.environ.get("FAP_API_VERSION"))
+    try:
+        E._fetch_ok = lambda ep, *a, **k: (True, ["phone"] if ep == "CheckUpdateProfile" else False)
+        E.fetch_applications_checked = lambda *a, **k: []
+        os.environ["FAP_API_VERSION"] = "v1"
+        assert E.todo_fetch("t", "c", "r")[1] == ["phone"]          # v1: KHÔNG đổi dạng -> 'không biết'
+        os.environ["FAP_API_VERSION"] = "v2"
+        assert E.todo_fetch("t", "c", "r")[1] is False               # v2: khác rỗng -> False kiểu v1 = phải cập nhật
+    finally:
+        E._fetch_ok, E.fetch_applications_checked = saved[0], saved[1]
+        os.environ["FAP_API_VERSION"] = saved[2] if saved[2] is not None else "v1"
+
+def test_doctor_never_prints_v2_key():
+    """`fap doctor` chỉ in có/thiếu khoá v2, KHÔNG BAO GIỜ in giá trị."""
+    import io, contextlib
+    from fapc.app import cli
+    saved = {k: os.environ.get(k) for k in ("FAP_API_VERSION", "FAP_V2_KEY")}
+    try:
+        os.environ["FAP_API_VERSION"] = "v2"; os.environ["FAP_V2_KEY"] = "zz-test-key-SHOULD-NOT-PRINT"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            cli.doctor()
+        out = buf.getvalue()
+        assert "v2" in out and "FAP_V2_KEY" in out and "SHOULD-NOT-PRINT" not in out, out
+        os.environ["FAP_V2_KEY"] = ""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            cli.doctor()
+        assert "--write-v2-key" in buf.getvalue()
+    finally:
+        for k, v in saved.items():
+            os.environ[k] = v if v is not None else ("v1" if k == "FAP_API_VERSION" else "")
 
 # ---- runner không cần pytest ----
 def _run():
