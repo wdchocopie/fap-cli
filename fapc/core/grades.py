@@ -7,7 +7,7 @@
 Vì thế điểm thành phần lấy được HEADLESS qua mobile API (không cần browser/Cloudflare) — chỉ cần PARSE HTML.
 """
 from html.parser import HTMLParser
-from .api import creds, call, as_list, unwrap, current_semester, check_auth, _err_code
+from .api import creds, call, as_list, unwrap, current_semester, check_auth, _err_code, is_session_expired
 from . import subjects
 from ..i18n import t
 from .. import fmt
@@ -128,7 +128,7 @@ def fetch_components(token, campus, roll, cid, subj=None):
     if not cid:
         return []
     http, data = call("GetMarkByCourse", _mark_params(campus, token, cid, roll, subj), roll, campus)
-    if http is None or _err_code(data) == "201":
+    if http is None or _err_code(data) == "201" or is_session_expired(http, data):
         return None
     return _normalize_components(data)
 

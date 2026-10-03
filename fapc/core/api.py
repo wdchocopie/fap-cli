@@ -321,8 +321,11 @@ def check_auth(http, data):
             raise SystemExit(_EXPIRED_MSG)
         if "checksum" in low:                  # call() đã retry ±1h mà vẫn lỗi -> đồng hồ máy lệch nhiều
             raise SystemExit("⚠️ Lỗi checksum — đồng hồ máy bạn có thể lệch giờ Việt Nam (UTC+7). "
-                             "Chỉnh lại giờ hệ thống rồi thử lại.")
-        raise SystemExit(f"⚠️ FAP từ chối yêu cầu (code 201): {data.get('message')}")
+                             "Chỉnh lại giờ hệ thống rồi thử lại.\n"
+                             "⚠️ Checksum error — your clock may be off from Vietnam time (UTC+7). "
+                             "Fix the system time and retry.")
+        raise SystemExit(f"⚠️ FAP từ chối yêu cầu (code 201): {data.get('message')}\n"
+                         f"⚠️ FAP rejected the request (code 201): {data.get('message')}")
 
 
 # ---------- học kỳ ----------
@@ -361,9 +364,10 @@ def select_semester(semesters, now=None):
       1) kỳ ĐẦU TIÊN theo thứ tự server trả có  startDate <= now <= endDate;
       2) không kỳ nào chứa `now` -> kỳ có startDate GẦN `now` nhất (|start − now|, CẢ HAI phía);
          hoà -> giữ kỳ đứng TRƯỚC trong danh sách (reduce chỉ thay khi gần hơn HẲN).
-    So ở mức THỜI ĐIỂM như app (`new Date()` vs `new Date('…T00:00:00')`): endDate = 00:00 của ngày cuối
-    ⇒ từ sau 00:00 NGÀY CUỐI kỳ đã KHÔNG còn 'trong kỳ' và rơi xuống bước 2 (thực tế ra kỳ kế tiếp —
-    kỳ sau bắt đầu 2–3 ngày sau). Truyền `date` = mốc 00:00 của ngày đó.
+    CỐ Ý LỆCH APP ở bước 1: so theo NGÀY, NGÀY CUỐI kỳ VẪN tính là trong kỳ. App so THỜI ĐIỂM
+    (`new Date()` vs `new Date('…T00:00:00')`) nên từ 00:00 ngày cuối nó đã nhảy sang kỳ sau (bắt đầu 2–3
+    ngày sau) — với fap-cli điều đó làm MẤT lịch học/thi của chính ngày cuối trong /today. Bước 2 giữ như app.
+    Truyền `date` = mốc 00:00 của ngày đó.
     Bỏ qua mục không phải dict / thiếu semesterName / ngày lỗi (app sẽ kẹt ở mục NaN — ở đây bền hơn).
     Trả tên kỳ (đúng chính tả server), hoặc None nếu không kỳ nào dùng được -> caller tự fallback."""
     cur = _as_naive_now(now)
@@ -372,7 +376,7 @@ def select_semester(semesters, now=None):
         if isinstance(s, dict) and str(s.get("semesterName") or "").strip():
             rows.append((str(s.get("semesterName")), _sem_dt(s.get("startDate")), _sem_dt(s.get("endDate"))))
     for name, start, end in rows:
-        if start and end and start <= cur <= end:
+        if start and end and start.date() <= cur.date() <= end.date():   # ngày cuối kỳ VẪN trong kỳ
             return name
     best = None
     for name, start, _end in rows:

@@ -11,7 +11,7 @@ Endpoint có thể RỖNG/404 với tài khoản chưa tới kỳ thi / chưa c�
 """
 import os, re, datetime, urllib.parse
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, check_auth, _vn_now
-from . import subjects, paths
+from . import subjects, paths, apiv2
 from ..i18n import t
 from .. import fmt
 
@@ -262,6 +262,14 @@ def _profile_needs_update(v):
         return False
     return None
 
+def _profile_flag_v2(v):
+    """THUẦN: API v2 trả CheckUpdateProfile khác v1 — adapter v2 của app 2.0.5 đổi `data` thành
+    `data.length > 0 ? false : true` (data KHÁC RỖNG = phải cập nhật). Quy về boolean kiểu v1 cho
+    _profile_needs_update; dạng khác giữ nguyên (-> 'không biết' nếu không phải bool)."""
+    if isinstance(v, (list, str)):
+        return len(v) == 0
+    return v
+
 def todo_items(open_feedback, update_profile, applications):
     """THUẦN: các việc sinh viên phải TỰ làm — list chuỗi, rỗng = không có việc gì.
       open_feedback  : CheckOpenFeedBack.data thô (None = không lấy được)
@@ -320,7 +328,10 @@ def todo_fetch(token, campus, roll):
     up = _try(lambda: _fetch_ok("CheckUpdateProfile", token, campus, roll))
     apps = _try(lambda: fetch_applications_checked(token, campus, roll))
     data = lambda res: res[1] if res and res[0] else None
-    return data(fb), data(up), apps, (errs[0] if errs else None)
+    up_data = data(up)
+    if up_data is not None and apiv2.api_version() == "v2":
+        up_data = _profile_flag_v2(up_data)
+    return data(fb), up_data, apps, (errs[0] if errs else None)
 
 def todo_text(token, campus, roll):
     return todo_block(*todo_fetch(token, campus, roll))

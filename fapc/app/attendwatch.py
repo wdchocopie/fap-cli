@@ -18,7 +18,7 @@ RẺ với server: dò GetStudentAttendances (1 lời gọi); chỉ tải chi ti
 Trạng thái lưu ở output/attendance_state.json (đã .gitignore).
 """
 import os, sys, json, time, random
-from ..core.api import creds, current_semester, call, as_list, _vn_now, _err_code
+from ..core.api import creds, current_semester, call, as_list, _vn_now, _err_code, is_session_expired
 from ..core.attendance import fetch as fetch_agg          # GetStudentAttendances
 from ..core import paths
 from .notify import push
@@ -59,7 +59,8 @@ def _course_detail(token, campus, roll, sem, subj, group):
     http, data = call("getCourseAttendance",
         [("campusCode", campus), ("rollNumber", roll), ("Semester", sem),
          ("ClassName", group), ("SubjectCode", subj), ("Authen", token)], roll, campus)
-    if http is None or _err_code(data) == "201":   # blip / token hết hạn / lệch checksum -> THẤT BẠI, khác "rỗng"
+    # blip / token hết hạn (cả thân kiểu v2: code 401 / Unauthorized) / lệch checksum -> THẤT BẠI, khác "rỗng"
+    if http is None or _err_code(data) == "201" or is_session_expired(http, data):
         return None
     return as_list(data)
 

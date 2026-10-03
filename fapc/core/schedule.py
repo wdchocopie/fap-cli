@@ -139,7 +139,7 @@ def fetch_semesters(token, campus, roll):
         _http, data = call_login_retry("GetSemester",
             [("campusCode", campus), ("Authen", token)], roll, campus)
         return [s for s in as_list(data) if isinstance(s, dict)]
-    except Exception:
+    except (Exception, SystemExit):                 # v2: thiếu khoá / lệch phiên bản token -> SystemExit
         return []
 
 def semester_bounds(semesters, sem):

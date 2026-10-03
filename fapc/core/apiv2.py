@@ -159,10 +159,7 @@ ENDPOINTS = {
     "GetNotificationByRoll":    ("GetNotificationByRoll",    "GET", ("CampusCode", "rollNumber", "Authen")),
     "GetCampusInfo":            ("GetCampusInfo",            "GET", ("CampusCode", "rollNumber")),
 }
-# App 2.0.5 gọi 3 endpoint này mà KHÔNG truyền token người dùng vào _buildHeaders (=> app ký bằng hằng nhúng).
-# fap-cli không mang hằng đó nên LUÔN gửi Bearer + Checksum của CHÍNH token bạn — LỆCH app, CHƯA kiểm chứng
-# server chấp nhận (docs/21-api-v2.md §5).
-APP_NO_BEARER = frozenset({"AcademicTranscript", "GetDiemphongtrao", "GetSemesterMark"})
+# fap-cli ký MỌI request v2 bằng Bearer + Checksum của CHÍNH token bạn (không mang hằng nào của app).
 # Luôn đi v1, không cần token: app gọi bản v2 bằng BEARER TĨNH nhúng trong app (danh tính của app, không phải
 # của bạn) — fap-cli không mượn. `fap campuses` vì vậy vẫn chạy trước khi đăng nhập.
 V1_ONLY = frozenset({"GetAllActiveCampus"})
