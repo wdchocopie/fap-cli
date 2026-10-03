@@ -230,8 +230,8 @@ def _todo_tail():
         from ..core.api import creds
         from ..core.extras import todo_fetch, todo_items, todo_block
         token, campus, roll = creds()
-        fb, apps, err = todo_fetch(token, campus, roll)
-        return todo_block(fb, apps, err) if todo_items(fb, apps) else ""
+        fb, up, apps, err = todo_fetch(token, campus, roll)
+        return todo_block(fb, up, apps, err) if todo_items(fb, up, apps) else ""
     except (Exception, SystemExit):                 # noqa: BLE001
         return ""
 

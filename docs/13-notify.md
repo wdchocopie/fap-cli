@@ -13,7 +13,7 @@
 | Lệnh · Command | Tác dụng · What it does |
 |---|---|
 | `fap notify test` | vi · gửi tin nhắn thử "kênh hoạt động" tới mọi kênh đã cấu hình — kiểm tra dây nối. en · send a "channels work" sanity ping to every configured channel. |
-| `fap notify today` | vi · gửi lịch **HÔM NAY** (theo giờ VN); **có việc cần làm** (feedback đang mở / đơn chờ thanh toán) thì gắn thêm khối **📌 Việc cần làm** ở cuối — xem [§11](#11-việc-cần-làm--to-do). en · push **TODAY's** schedule (VN time); when there is **something to do** a **📌 To-do** block is appended (see §11). |
+| `fap notify today` | vi · gửi lịch **HÔM NAY** (theo giờ VN); **có việc cần làm** (feedback đang mở / cập nhật hồ sơ / đơn chờ thanh toán) thì gắn thêm khối **📌 Việc cần làm** ở cuối — xem [§11](#11-việc-cần-làm--to-do). en · push **TODAY's** schedule (VN time); when there is **something to do** a **📌 To-do** block is appended (see §11). |
 | `fap notify tomorrow` | vi · gửi lịch **NGÀY MAI**. en · push **TOMORROW's** schedule. |
 | `fap notify weekly` | vi · gửi lịch **CẢ TUẦN** (T2–CN). en · push the **WHOLE WEEK** (Mon–Sun). |
 | `fap notify semester [pattern\|weeks\|list] [<kỳ>]` | vi · gửi lịch **CẢ KỲ**: mẫu lặp hằng tuần (mặc định) / mỗi tuần 1 dòng / liệt kê từng ngày. en · push the **WHOLE TERM**: weekly pattern (default) / one line per week / day-by-day list. |
@@ -407,27 +407,29 @@ fap watch-attendance loop 15 --absent-only
 | Mục · Item | Nguồn · Source | Khi nào hiện · Shown when |
 |---|---|---|
 | 📝 Đợt feedback giảng dạy đang mở · teaching-feedback round open | `CheckOpenFeedBack` | `data` là `true` — boolean **hoặc chuỗi** `'true'` (app 2.0.5 nhận cả hai) · `data` is `true`, boolean **or the string** `'true'` (app 2.0.5 accepts both) |
+| 👤 FAP yêu cầu cập nhật hồ sơ · profile update required | `CheckUpdateProfile` | `data` là boolean `false` — đúng điều kiện app 2.0.5 hiện *"You need to update your profile at FAP"*. Rỗng / lỗi / giá trị lạ = **không biết** → không hiện gì · `data` is boolean `false`, the exact condition under which app 2.0.5 shows that prompt; empty / error / odd = **unknown** → nothing shown |
 | 💳 Đơn chờ thanh toán · application awaiting payment | `GetApplication` | `studentStatus` = `3` (mỗi đơn 1 dòng) · one line per application |
 
 ```
-📌 Việc cần làm  ·  2
+📌 Việc cần làm  ·  3
 ━━━━━━━━━━━━━━━━
 📝 Đang mở đợt feedback giảng dạy — làm tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).
+👤 FAP yêu cầu cập nhật hồ sơ sinh viên — cập nhật tại fap.fpt.edu.vn (app myFAP cũng dẫn tới đó).
 💳 Đơn chờ thanh toán: Đơn xin … (02/10/2026) — xem & thanh toán qua app myFAP / fap.fpt.edu.vn.
 ℹ️ fap-cli chỉ ĐỌC — tự làm các việc trên qua kênh chính thức (app myFAP / fap.fpt.edu.vn).
 ```
 
-> 🔎 **VI —** Vì sao chỉ dẫn tới `fap.fpt.edu.vn`? Chính app myFAP 2.0.5 khi `CheckOpenFeedBack` mở cũng chỉ hiện *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* kèm nút mở trang đó; màn **Đơn từ** của app **không** có nút thanh toán (chỉ hiện nhãn trạng thái). fap-cli nói đúng như vậy, không hứa thứ app không có.
-> 🔎 **EN —** Why point at `fap.fpt.edu.vn`? When `CheckOpenFeedBack` is open, myFAP 2.0.5 itself only says *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* with a button opening that page; the app's **Applications** screen has **no** pay button (status label only). fap-cli says exactly that and promises nothing the app doesn't have.
+> 🔎 **VI —** Vì sao chỉ dẫn tới `fap.fpt.edu.vn`? Chính app myFAP 2.0.5 khi `CheckOpenFeedBack` mở cũng chỉ hiện *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* kèm nút mở trang đó; màn **Đơn từ** của app **không** có nút thanh toán (chỉ hiện nhãn trạng thái). fap-cli nói đúng như vậy, không hứa thứ app không có. Hồ sơ cũng vậy: 4 màn của app (Lịch học, Lịch tuần, Điểm, Điểm danh) đặt `hasUpdateProfile = (CheckUpdateProfile == false)` rồi hiện *"You need to update your profile at FAP. Please access https://fap.fpt.edu.vn"*. App so sánh lỏng (`==`) nên khi lỗi nó trả `''` cũng bị coi là `false` — fap-cli **cố ý chặt hơn**: chỉ boolean `false` mới nhắc.
+> 🔎 **EN —** Why point at `fap.fpt.edu.vn`? When `CheckOpenFeedBack` is open, myFAP 2.0.5 itself only says *"You need to do a teaching survey. Please access https://fap.fpt.edu.vn"* with a button opening that page; the app's **Applications** screen has **no** pay button (status label only). fap-cli says exactly that and promises nothing the app doesn't have. Same for the profile: four app screens (Schedule, Week, Marks, Attendance) set `hasUpdateProfile = (CheckUpdateProfile == false)` and show *"You need to update your profile at FAP. Please access https://fap.fpt.edu.vn"*. The app compares loosely (`==`), so its error value `''` also counts as `false` — fap-cli is **deliberately stricter**: only a boolean `false` triggers the item.
 
 **VI —**
 - **Không có việc** → đúng 1 dòng `📌 Việc cần làm: ✅ không có việc gì.`
 - Mỗi nguồn **cô lập lỗi**: nguồn nào hỏng (mạng / token) thì ghi `❔ Chưa kiểm tra được: …` — **không bao giờ** báo "không có việc" khi chưa kiểm được gì.
-- Có mặt ở: `fap todo`, `/todo` (menu + slash), cuối `/all`, và **gắn vào cuối `fap notify today` CHỈ KHI có ≥1 việc** (ngày không có việc thì digest y như cũ). Tốn **2 request**; đặt `FAP_CACHE_MIN` nếu muốn dùng chung cache theo giờ.
+- Có mặt ở: `fap todo`, `/todo` (menu + slash), cuối `/all`, và **gắn vào cuối `fap notify today` CHỈ KHI có ≥1 việc** (ngày không có việc thì digest y như cũ). Tốn **3 request**; đặt `FAP_CACHE_MIN` nếu muốn dùng chung cache theo giờ.
 - `GetStudentRate` **không** dùng: nghĩa các trường của nó chưa kiểm chứng.
 
 **EN —**
 - **Nothing to do** → a single line `📌 To-do: ✅ nothing to do.`
 - Each source is **failure-isolated**: a failed source (network / token) prints `❔ Couldn't check: …` — it **never** claims "nothing to do" when nothing could be checked.
-- Available as `fap todo`, `/todo` (menu + slash), at the end of `/all`, and **appended to `fap notify today` ONLY when there is at least one item** (on a clear day the digest is unchanged). Costs **2 requests**; set `FAP_CACHE_MIN` to share the per-hour cache.
+- Available as `fap todo`, `/todo` (menu + slash), at the end of `/all`, and **appended to `fap notify today` ONLY when there is at least one item** (on a clear day the digest is unchanged). Costs **3 requests**; set `FAP_CACHE_MIN` to share the per-hour cache.
 - `GetStudentRate` is **not** used: its field meanings are unverified.

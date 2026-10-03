@@ -44,7 +44,7 @@ COMMAND_INFO = [
     ("notifications", "Thông báo của trường",      "School notifications"),
     ("profile",       "Hồ sơ sinh viên",           "Student profile"),
     ("applications",  "Đơn từ + trạng thái xử lý", "Applications + status"),
-    ("todo",          "Việc cần làm (feedback/thanh toán)", "To-do (feedback/payment)"),
+    ("todo",          "Việc cần làm (feedback/hồ sơ/thanh toán)", "To-do (feedback/profile/payment)"),
     ("all",           "Tất cả trong một tin",      "Everything in one message"),
     ("help",          "Danh sách lệnh",            "List all commands"),
 ]
@@ -308,7 +308,7 @@ def handle(cmd, arg=None):
         if cmd == "notifications": return notifications_text(token, campus, roll, arg=arg)   # số = toàn văn, chữ = lọc
         if cmd == "profile":       return profile_text(token, campus, roll)
         if cmd == "applications":  return applications_text(token, campus, roll)
-        if cmd == "todo":          return todo_text(token, campus, roll)        # 2 GET, mỗi nguồn cô lập lỗi
+        if cmd == "todo":          return todo_text(token, campus, roll)        # 3 GET, mỗi nguồn cô lập lỗi
         if cmd == "all":           return all_text(token, campus, roll, sem)
     except SystemExit as e:
         return str(e)
