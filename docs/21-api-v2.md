@@ -142,7 +142,7 @@ Bộ **feedback** chỉ có trên v2 và **chưa màn hình nào gọi** ⇒ ch�
 ### 5.4 Chưa kiểm chứng / lệch app · Unverified / deviations
 
 - **VI —** Toàn bộ v2 **chưa gọi thật**: chưa biết server có chấp nhận chữ ký/tham số đúng như trên, token v1 có dùng được cho v2 không, hay phản hồi đăng nhập v2 có cùng dạng `{code, data:{authenKey, rollnumber, …}}` như v1 (fap-cli giả định giống — app đọc cùng tên trường). · **EN —** Nothing on v2 has been called for real: unknown whether the server accepts the signature/params above, whether v1 tokens work on v2, or whether the v2 login reply has v1's `{code, data:{authenKey, rollnumber, …}}` shape (assumed — the app reads the same field names).
-- **VI —** `AcademicTranscript`, `GetDiemphongtrao`, `GetSemesterMark`: app 2.0.5 ký header của 3 endpoint này **khác** các endpoint còn lại (không dùng token người dùng). fap-cli **thống nhất** ký bằng Bearer + Checksum của **chính token bạn** — lệch app, chưa kiểm chứng. · **EN —** The app signs these three differently from the rest (not with the user's token); fap-cli uniformly signs with **your own** token's Bearer + Checksum — a deviation, unverified.
+- **VI —** fap-cli ký **mọi** request v2 bằng Bearer + Checksum của **chính token bạn**; chưa kiểm chứng server chấp nhận đúng như vậy cho từng endpoint. · **EN —** fap-cli signs **every** v2 request with **your own** token's Bearer + Checksum; whether the server accepts that for every endpoint is unverified.
 - **VI —** fap-cli thêm `User-Agent: okhttp/4.9.2` (như v1; app React Native trên Android cũng chạy qua OkHttp). · **EN —** fap-cli adds `User-Agent: okhttp/4.9.2` (as on v1; the RN app on Android also goes through OkHttp).
 
 ---

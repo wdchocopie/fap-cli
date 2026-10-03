@@ -9,7 +9,7 @@ Hai việc:
 
 GetCourseOfSemester từng trả 404 ở 1 URL dump (docs/03) → mọi nơi degrade ÊM: None/rỗng = giữ hành vi cũ.
 """
-from .api import creds, call, as_list, current_semester, _err_code
+from .api import creds, call, as_list, current_semester, _err_code, is_session_expired
 from . import subjects
 from ..i18n import t
 from .. import fmt
@@ -32,7 +32,7 @@ def fetch_courses(token, campus, roll, sem):
     để bên gọi degrade về hành vi cũ thay vì tưởng 'không có lớp'."""
     http, data = call("GetCourseOfSemester",
         [("campusCode", campus), ("Authen", token), ("rollNumber", roll), ("semester", sem)], roll, campus)
-    if http is None or http == 404 or _err_code(data) == "201":
+    if http is None or http == 404 or _err_code(data) == "201" or is_session_expired(http, data):
         return None
     return as_list(data)
 

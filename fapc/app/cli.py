@@ -150,6 +150,13 @@ def doctor():
     except ImportError: print("google libs : — (chỉ cần cho calendar-sync)")
     print("kênh notify :", ", ".join(filter(None, [
         "Telegram" if config.TELEGRAM_TOKEN else "", "Discord" if config.DISCORD_WEBHOOK_URL else ""])) or "—")
+    # API v1/v2 + khoá v2 CHỈ in có/không — KHÔNG BAO GIỜ in giá trị khoá.
+    from ..core import apiv2
+    ver = apiv2.api_version()
+    print("API FAP     :", ver, "(mặc định · default)" if not config.api_version_raw() else "")
+    if ver == "v2":
+        print("FAP_V2_KEY  :", "✓ có · set" if config.v2_key_raw() else
+              "✗ thiếu · missing (python analysis/apk_drift.py --write-v2-key <apk>)")
 
 def _core_cmd(cmd):
     """True nếu `cmd` là lệnh lõi (bot_core.COMMAND_INFO) chưa có nhánh CLI riêng.
