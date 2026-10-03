@@ -13,6 +13,9 @@ gom lịch tuần, in bảng transcript, digest thông báo.
 import os, sys, io, contextlib, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# API v2 là OPT-IN: ghim v1 + XOÁ khoá v2 TRƯỚC khi import fapc (loader .env dùng setdefault -> giá trị đặt ở đây
+# THẮNG .env thật). Test v2 tự bật/tắt qua os.environ với khoá GIẢ "test-key" — khoá thật không bao giờ vào test.
+os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
 
 from fapc.core.schedule import parse_session, build_ics
 from fapc.core.grades import _gpa
@@ -2218,6 +2221,336 @@ def test_banrisk_skips_schedule_request_when_nothing_below_threshold():
         assert "B" in B.handle("banrisk") and calls == [1]      # có nguy cơ thô -> mới lấy lịch (1 lần)
     finally:
         B.creds, B.current_semester, B.fetch_att, B.fetch_sessions, B._vn_now = saved
+
+# ---- B2: API v2 OPT-IN (FAP_API_VERSION=v2) — khoá GIẢ "test-key", token/roll giả, 0 mạng thật ----
+_V2_KEY = "test-key"
+
+def _env_set(saved):
+    for k, v in saved.items():
+        if v is None: os.environ.pop(k, None)
+        else: os.environ[k] = v
+
+@contextlib.contextmanager
+def _v2_env(version="v2", key=_V2_KEY, stamp="v2"):
+    """Bật v2 TẠM: env + token.json GIẢ ở thư mục tạm. stamp: 'v1'/'v2' = đóng dấu · False = token cũ KHÔNG có
+    khoá api_version · None = không có file. Trả module apiv2; hết khối trả lại env/đường dẫn như cũ."""
+    import tempfile, json as _json
+    import fapc.core.apiv2 as V
+    saved = {k: os.environ.get(k) for k in ("FAP_API_VERSION", "FAP_V2_KEY")}
+    saved_tj = V.TOKEN_JSON
+    tj = os.path.join(tempfile.mkdtemp(), "token.json")
+    if stamp is not None:
+        body = {"authenkey": "tok", "campus": "APHL", "rollnumber": "HE000000"}
+        if stamp:
+            body["api_version"] = stamp
+        with open(tj, "w", encoding="utf-8") as f:
+            _json.dump(body, f)
+    try:
+        os.environ["FAP_API_VERSION"] = version; os.environ["FAP_V2_KEY"] = key
+        V.TOKEN_JSON = tj; V._SESSION_CACHE.clear()
+        yield V
+    finally:
+        _env_set(saved); V.TOKEN_JSON = saved_tj; V._SESSION_CACHE.clear()
+
+class _V2Resp:
+    def __init__(self, js=None, status=200, text=""):
+        self.status_code, self._js, self.text, self.headers = status, js, text, {}
+    def json(self):
+        if self._js is None: raise ValueError("not json")
+        return self._js
+
+def test_v2_checksum_matches_independent_hmac():
+    """checksum_v2 == HMAC-SHA256 tính ĐỘC LẬP ngay trong test (không gọi lại hàm): khoá = byte UTF-8 của CHUỖI."""
+    import hmac as _h, hashlib as _hl, base64 as _b
+    from fapc.core.apiv2 import checksum_v2
+    exp = _b.b64encode(_h.new(b"test-key", b"tok.ABC-123MyFAP1700000000", _hl.sha256).digest()).decode()
+    exp = exp.replace("=", "%3d").replace(" ", "+")
+    got = checksum_v2("tok.ABC-123", 1700000000, "test-key")
+    assert got == exp, (got, exp)
+    assert got.endswith("%3d") and "=" not in got           # SHA-256 = 32 byte -> base64 44 ký tự, đúng 1 '=' đệm
+    assert checksum_v2("tok.ABC-123", "1700000000", "test-key") == got and checksum_v2("tok.ABC-123", 1700000001, "test-key") != got
+    hk = "0a1b2c3d4e5f"                                      # khoá app TRÔNG như hex nhưng KHÔNG hex-decode
+    raw = _b.b64encode(_h.new(hk.encode("utf-8"), b"tMyFAP1", _hl.sha256).digest()).decode().replace("=", "%3d")
+    dec = _b.b64encode(_h.new(bytes.fromhex(hk), b"tMyFAP1", _hl.sha256).digest()).decode().replace("=", "%3d")
+    assert checksum_v2("t", 1, hk) == raw and raw != dec
+
+def test_v2_headers_shape_and_bearer_omission():
+    from fapc.core.apiv2 import build_headers_v2, checksum_v2
+    h = build_headers_v2("tok", "APHL", 1700000000, "test-key")
+    assert list(h) == ["ClientCode", "CampusCode", "Authorization", "Checksum", "Content-Type"], list(h)
+    assert h["ClientCode"] == "MyFAP" and h["CampusCode"] == "APHL" and h["Authorization"] == "Bearer tok"
+    assert h["Checksum"] == checksum_v2("tok", 1700000000, "test-key") + ":1700000000"
+    assert h["Content-Type"] == "application/json"
+    h0 = build_headers_v2("", None, 5, "test-key")             # token rỗng -> KHÔNG Authorization (như app)
+    assert "Authorization" not in h0 and h0["CampusCode"] == "" and h0["Checksum"].endswith(":5")
+    assert "test-key" not in repr(h) + repr(h0)
+
+def test_v2_request_urls_params_and_casing():
+    from fapc.core.apiv2 import v2_request, BASE_V2
+    P = lambda *extra: [("campusCode", "APHL"), ("Authen", "tok/+="), ("rollNumber", "HE000000")] + list(extra)
+    url, tok = v2_request("GetApplication", P(), "HE000000", "APHL")        # 1 trong 7 endpoint giữ Authen trên query
+    assert url == BASE_V2 + "/GetApplication?CampusCode=APHL&rollNumber=HE000000&Authen=tok%2F%2B%3D" and tok == "tok/+=", url
+    url, _ = v2_request("GetStudentMark", P(("Semester", "Fall2026")), "HE000000", "APHL")   # KHÔNG Authen trên query
+    assert url == BASE_V2 + "/GetStudentMark?CampusCode=APHL&rollNumber=HE000000&Semester=Fall2026", url
+    url, _ = v2_request("getCourseAttendance", [("campusCode", "APHL"), ("rollNumber", "HE000000"), ("Semester", "Fall2026"),
+                        ("ClassName", "SE1900"), ("SubjectCode", "PRF192"), ("Authen", "tok")], "HE000000", "APHL")
+    assert url == (BASE_V2 + "/GetCourseAttendance?CampusCode=APHL&rollNumber=HE000000&Semester=Fall2026"
+                   "&SubjectCode=PRF192&ClassName=SE1900"), url              # v2 viết HOA chữ đầu
+    assert v2_request("GetWeekByDate", P(("date", "2026-10-03")))[0] == BASE_V2 + "/GetWeekByDate?date=2026-10-03"
+    assert v2_request("GetSemester", [("campusCode", "APHL"), ("Authen", "tok")])[0] == BASE_V2 + "/GetSemester"
+    url, _ = v2_request("GetMarkByCourse", P(("CourseId", "42"), ("SubjectCode", "PRF192")), "HE000000", "APHL")
+    assert url == BASE_V2 + "/GetMarkByCourse?CampusCode=APHL&CourseId=42&rollNumber=HE000000", url   # app v2 không gửi SubjectCode
+    assert v2_request("GetDiemphongtrao", P(("semester", "Fall2026")))[0].endswith("?CampusCode=APHL&rollNumber=HE000000&semester=Fall2026")
+    url, _ = v2_request("GetStudentById", [("Authen", "tok")], "HE000000", "APHL")   # thiếu trong params -> roll/campus của call()
+    assert url == BASE_V2 + "/GetStudentById?rollNumber=HE000000&CampusCode=APHL", url
+    for bad in ("AddRate", "SubmitStudentFeedback", "UpdateTokedevices", "UpdateTokenDonor", "GetApiActive",
+                "GetStudentRate", "NoSuchEndpoint"):
+        assert _raises_exit(lambda b=bad: v2_request(b, P(), "HE000000", "APHL")), bad
+    assert _raises_exit(lambda: v2_request("GetStudentMark", [("campusCode", "APHL")], "HE000000", "APHL"))   # thiếu token
+
+def test_v2_table_covers_every_endpoint_fapcli_calls():
+    """Mọi endpoint fap-cli gọi qua call()/call_login_retry (quét mã nguồn) + bảng extract đều có đường v2 (hoặc
+    được miễn rõ ràng). Endpoint GHI/cấm KHÔNG BAO GIỜ nằm trong bảng."""
+    import re, glob
+    import fapc.core.apiv2 as V, fapc.core.extract as E
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    used = set(E.SIMPLE)
+    for p in glob.glob(os.path.join(root, "fapc", "**", "*.py"), recursive=True):
+        with open(p, encoding="utf-8") as f:
+            used |= set(re.findall(r'\bcall(?:_login_retry)?\(\s*"(\w+)"', f.read()))
+    known = set(V.ENDPOINTS) | V.V1_ONLY | V.V2_UNAVAILABLE
+    assert len(used) > 20 and not (used - known), sorted(used - known)
+    assert not (V.DENY & set(V.ENDPOINTS)) and not (V.DENY & used)
+    assert all(m == "GET" for _p, m, _k in V.ENDPOINTS.values())
+    assert V.ENDPOINTS["getCourseAttendance"][0] == "GetCourseAttendance" and V.is_unavailable("GetStudentRate")
+    authen_q = sorted(k for k, (_p, _m, ks) in V.ENDPOINTS.items() if "Authen" in ks)
+    assert authen_q == ["CheckOpenFeedBack", "CheckUpdateProfile", "GetApplication", "GetNotificationByRoll",
+                        "GetSemesterMark"], authen_q          # 5/7 endpoint giữ Authen mà fap-cli gọi (2 còn lại: Donor/AddRate)
+
+def test_v2_version_normalize_and_single_warning():
+    import fapc.core.apiv2 as V
+    N = V.normalize_version
+    assert N(None) == ("v1", True) and N("") == ("v1", True) and N("  ") == ("v1", True)
+    assert N("v1") == ("v1", True) and N(" V2 ") == ("v2", True)
+    for bad in ("v3", "2", "true", "test-key"):
+        assert N(bad) == ("v1", False), bad
+    saved, w = {"FAP_API_VERSION": os.environ.get("FAP_API_VERSION")}, dict(V._WARNED)
+    try:
+        V._WARNED["bad_version"] = False
+        os.environ["FAP_API_VERSION"] = "weird-VALUE-123"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert V.api_version() == "v1" and V.api_version() == "v1"
+        out = err.getvalue()
+        assert out.count("FAP_API_VERSION") == 2 and "v1" in out, out              # 1 cảnh báo = 1 dòng VI + 1 dòng EN
+        assert "weird-VALUE-123" not in out                                         # không echo giá trị đã gõ
+        os.environ["FAP_API_VERSION"] = "v2"
+        assert V.api_version() == "v2"
+    finally:
+        _env_set(saved); V._WARNED.update(w)
+
+def test_v2_session_version_mismatch_requires_refresh():
+    """token.json đổi bằng phiên bản A mà FAP_API_VERSION = B -> SystemExit 'fap refresh', 0 request.
+    Token cũ không có dấu = v1. Không có token.json -> không chặn (creds() tự báo 'chưa đăng nhập')."""
+    import fapc.core.api as A
+    calls = []
+    orig = A.requests.get
+    P = [("campusCode", "APHL"), ("Authen", "tok"), ("rollNumber", "HE000000")]
+    def _msg(fn):
+        try: fn()
+        except SystemExit as e: return str(e)
+        return None
+    try:
+        A.requests.get = lambda url, **k: (calls.append(url), _V2Resp({"code": "200", "data": []}))[1]
+        A._CACHE.clear()
+        for ver, stamp in (("v1", "v2"), ("v2", "v1"), ("v2", False)):
+            with _v2_env(version=ver, stamp=stamp):
+                m = _msg(lambda: A.call("GetStudentMark", P, "HE000000", "APHL"))
+            assert m and "fap refresh" in m and "/login" in m and f"FAP_API_VERSION={ver}" in m, (ver, stamp, m)
+        assert calls == []                                                   # lệch phiên bản -> KHÔNG request nào
+        with _v2_env(version="v1", stamp=False):                             # token cũ + v1 = như trước đây
+            assert A.call("GetStudentMark", P, "HE000000", "APHL")[0] == 200
+            assert A.call("GetAllActiveCampus", [], "", "", checksum_value=False)[0] == 200
+        with _v2_env(version="v2", stamp="v1"):                              # `fap campuses`: luôn v1, KHÔNG bị chặn
+            assert A.call("GetAllActiveCampus", [], "", "", checksum_value=False)[0] == 200
+        with _v2_env(version="v2", stamp=None) as V:                         # chưa có token.json -> không chặn
+            assert A.call("GetStudentMark", P, "HE000000", "APHL")[0] == 200
+        assert calls[-1].startswith(V.BASE_V2 + "/GetStudentMark?")
+        assert all("api.fpt.edu.vn/fap/api/MyFAP/GetAllActiveCampus" in u for u in calls[1:3])
+    finally:
+        A.requests.get = orig; A._CACHE.clear()
+
+def test_v2_missing_key_bilingual_message_no_request():
+    import fapc.core.api as A
+    n = len(_NET_ATTEMPTS)
+    with _v2_env(key=""):
+        try:
+            A.call("GetStudentMark", [("campusCode", "APHL"), ("Authen", "tok")], "HE000000", "APHL"); assert False
+        except SystemExit as e:
+            m = str(e)
+        assert "FAP_V2_KEY" in m and "python analysis/apk_drift.py --write-v2-key" in m, m
+        assert "Trích" in m and "Extract" in m                                      # song ngữ, VI trước
+        assert m.index("Trích") < m.index("Extract")
+        saved = {"FAP_SEMESTER": os.environ.get("FAP_SEMESTER")}
+        os.environ.pop("FAP_SEMESTER", None)
+        try:                                                                         # hợp đồng: LUÔN chuỗi, KHÔNG raise
+            with contextlib.redirect_stderr(io.StringIO()):
+                assert isinstance(A.current_semester("tok", "APHL", "HE000000"), str)
+        finally:
+            _env_set(saved)
+    assert len(_NET_ATTEMPTS) == n
+
+def test_v2_call_round_trip_single_shot_and_cache_key():
+    """call() với v2: đúng 1 request (không vòng ±1h kể cả lỗi checksum kiểu v1), header ký, timeout 15,
+    không theo redirect; cache FAP_CACHE_MIN dùng chung nhưng KHÔNG trộn với khoá v1."""
+    import hmac as _h, hashlib as _hl, base64 as _b
+    import fapc.core.api as A
+    calls = []
+    orig = A.requests.get
+    body = {"code": "201", "message": "Thông tin checksum không chính xác", "data": None}
+    try:
+        A.requests.get = lambda url, **k: (calls.append((url, k)), _V2Resp(body))[1]
+        A._CACHE.clear()
+        with _v2_env() as V:
+            out = A.call_login_retry("GetSemester", [("campusCode", "APHL"), ("Authen", "tok")], "HE000000", "APHL")
+            assert out[0] == 200 and len(calls) == 1, calls                   # v1 sẽ thử thêm (±1h)
+            url, k = calls[0]
+            assert url == V.BASE_V2 + "/GetSemester" and k["timeout"] == 15 and k["allow_redirects"] is False
+            h = k["headers"]
+            sig, ts = h["Checksum"].rsplit(":", 1)
+            exp = _b.b64encode(_h.new(b"test-key", ("tokMyFAP" + ts).encode(), _hl.sha256).digest()).decode().replace("=", "%3d")
+            assert sig == exp and h["Authorization"] == "Bearer tok" and h["CampusCode"] == "APHL"
+            assert h.get("User-Agent") == A.UA["User-Agent"]
+            body.update(code="200", message="ok", data=[1])
+            os.environ["FAP_CACHE_MIN"] = "5"
+            P = [("campusCode", "APHL"), ("Authen", "tok"), ("rollNumber", "HE000000"), ("Semester", "Fall2026")]
+            r1 = A.call("GetStudentMark", P, "HE000000", "APHL"); r2 = A.call("GetStudentMark", P, "HE000000", "APHL")
+            assert r1 == r2 and len(calls) == 2                                # lần 2 từ cache
+            assert all(str(key).startswith("v2|") for key in A._CACHE)
+    finally:
+        A.requests.get = orig; A._CACHE.clear(); os.environ.pop("FAP_CACHE_MIN", None)
+
+def test_v2_key_never_in_errors_or_logs():
+    """Khoá v2 KHÔNG BAO GIỜ xuất hiện ở URL, header, giá trị trả về, thông điệp SystemExit hay stdout/stderr —
+    kể cả khi exception của requests 'lắm lời' (nhúng url + header). Cộng: _redact che khoá/Bearer/Checksum."""
+    import tempfile
+    import fapc.core.api as A, fapc.core.auth as AU
+    KEY = "test-key-DO-NOT-LEAK-9f8e"
+    seen, texts = [], []
+    orig_get, orig_post = A.requests.get, AU.requests.post
+    P = [("campusCode", "APHL"), ("Authen", "TOKEN-XYZ-123"), ("rollNumber", "HE000000")]
+    mode = {"v": "ok"}
+    def fake_get(url, **k):
+        seen.append(url); seen.append(repr(k.get("headers")))
+        if mode["v"] == "net":
+            raise A.requests.ConnectionError(f"boom {url} {k.get('headers')}")
+        if mode["v"] == "html":
+            return _V2Resp(None, status=500, text="<html>err</html>")
+        if mode["v"] == "expired":
+            return _V2Resp({"code": "401", "errorMessage": "Unauthorized", "data": None})
+        return _V2Resp({"code": "200", "data": [{"x": 1}]})
+    def fake_post(url, **k):
+        seen.append(url); seen.append(repr(k.get("headers")))
+        raise AU.requests.ConnectionError(f"boom {url} {k.get('headers')}")
+    def grab(fn):
+        o, e = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(o), contextlib.redirect_stderr(e):
+                texts.append(repr(fn()))
+        except SystemExit as ex:
+            texts.append(str(ex))
+        texts.extend([o.getvalue(), e.getvalue()])
+    saved_tj, saved_out = AU.TOKEN_JSON, AU.OUT
+    try:
+        A.requests.get, AU.requests.post = fake_get, fake_post
+        AU.TOKEN_JSON = os.path.join(tempfile.mkdtemp(), "token.json"); AU.OUT = os.path.dirname(AU.TOKEN_JSON)
+        with _v2_env(key=KEY) as V:
+            for mode["v"] in ("ok", "net", "html", "expired"):
+                A._CACHE.clear()
+                grab(lambda: A.call("GetApplication", P, "HE000000", "APHL"))
+                grab(lambda: A.check_auth(*A.call("GetStudentMark", P, "HE000000", "APHL")))
+            grab(lambda: A.call("AddRate", P, "HE000000", "APHL"))                      # cấm
+            grab(lambda: A.call("GetStudentMark", P[:1], "HE000000", "APHL"))           # thiếu token
+            grab(lambda: AU._do_fap("APHL", "FE-ACCESS-TOKEN", log=print))               # đăng nhập v2 lỗi mạng
+            assert "x *** y" == V.scrub(f"x {KEY} y") and V.scrub("a FE-ACCESS-TOKEN b", "FE-ACCESS-TOKEN") == "a *** b"
+        with _v2_env(version="v1", key=KEY, stamp="v2"):
+            grab(lambda: A.call("GetStudentMark", P, "HE000000", "APHL"))               # lệch phiên bản
+        assert seen and any("Checksum" in s for s in seen)                              # đã thật sự ký
+        blob = "\n".join(seen + texts)
+        assert KEY not in blob, "khoá v2 lọt ra!"
+        net = [x for x in texts if "Lỗi mạng" in x]
+        assert net and not any("TOKEN-XYZ-123" in x or "FE-ACCESS-TOKEN" in x for x in net)   # như v1: không str(e)
+        r = AU._redact({"Authorization": "Bearer t", "Checksum": "sig:1", "FAP_V2_KEY": KEY, "ok": 1})
+        assert r == {"Authorization": "***REDACTED***", "Checksum": "***REDACTED***", "FAP_V2_KEY": "***REDACTED***", "ok": 1}
+    finally:
+        A.requests.get, AU.requests.post = orig_get, orig_post
+        AU.TOKEN_JSON, AU.OUT = saved_tj, saved_out; A._CACHE.clear()
+
+def test_v2_auth_exchange_shape_and_api_version_stamp():
+    """Đăng nhập v2: POST fap-proxy …/AuthenticationByFeId, body {token: FE}, Bearer + Checksum bằng CHÍNH token FE,
+    KHÔNG query; token.json đóng dấu api_version. v1 giữ đường cũ (đóng dấu 'v1'). v2 thiếu khoá -> None, 0 request."""
+    import tempfile, json as _json, time as _t, hmac as _h, hashlib as _hl, base64 as _b
+    import fapc.core.auth as AU
+    d = tempfile.mkdtemp()
+    saved = (AU.TOKEN_JSON, AU.OUT, AU.requests.post)
+    seen = {}
+    class _R:
+        status_code = 200
+        def json(s): return {"code": "200", "message": "ok", "data": {"authenKey": "FAPTOK", "rollnumber": "HE000000",
+                                                                       "email": "a@b.c", "studentName": "Test"}}
+    def fake_post(url, json=None, headers=None, timeout=None, allow_redirects=True, **k):
+        seen.update(url=url, body=json, headers=dict(headers or {}), timeout=timeout, redirects=allow_redirects)
+        return _R()
+    quiet = lambda *a, **k: None
+    try:
+        AU.TOKEN_JSON = os.path.join(d, "token.json"); AU.OUT = d
+        AU.requests.post = fake_post
+        with _v2_env(stamp=None):
+            fap = AU._do_fap("APHL", "FE.ACCESS.TOKEN", log=quiet)
+        assert fap and fap["authenkey"] == "FAPTOK" and fap["rollnumber"] == "HE000000" and fap["api_version"] == "v2"
+        with open(AU.TOKEN_JSON, encoding="utf-8") as f:
+            assert _json.load(f)["api_version"] == "v2"
+        assert seen["url"] == "https://fap-proxy.fpt.edu.vn/MyFAP/AuthenticationByFeId", seen["url"]   # không query
+        assert seen["body"] == {"token": "FE.ACCESS.TOKEN"} and seen["timeout"] == 15 and seen["redirects"] is False
+        h = seen["headers"]
+        assert h["Authorization"] == "Bearer FE.ACCESS.TOKEN" and h["CampusCode"] == "APHL" and h["ClientCode"] == "MyFAP"
+        sig, ts = h["Checksum"].rsplit(":", 1)
+        exp = _b.b64encode(_h.new(b"test-key", ("FE.ACCESS.TOKEN" + "MyFAP" + ts).encode(), _hl.sha256).digest()).decode()
+        assert sig == exp.replace("=", "%3d") and abs(int(ts) - _t.time()) < 300
+        with _v2_env(version="v1", stamp=None):                         # mặc định v1: ĐƯỜNG CŨ, đóng dấu 'v1'
+            fap1 = AU._do_fap("APHL", "FE.ACCESS.TOKEN", log=quiet)
+        assert fap1["api_version"] == "v1" and "fap-proxy" not in seen["url"]
+        assert "/fap/api/MyFAP/AuthenticationByFeId?campusCode=APHL&checksum=" in seen["url"]
+        os.remove(AU.TOKEN_JSON); seen.clear(); logs = []
+        with _v2_env(key="", stamp=None):                               # thiếu khoá: None (để _finish HOÀN TÁC), 0 request
+            assert AU._do_fap("APHL", "FE.ACCESS.TOKEN", log=logs.append) is None
+        assert not seen and not os.path.exists(AU.TOKEN_JSON) and any("FAP_V2_KEY" in l for l in logs)
+    finally:
+        AU.TOKEN_JSON, AU.OUT, AU.requests.post = saved
+
+def test_extract_skips_studentrate_on_v2_only():
+    import tempfile
+    import fapc.core.extract as E
+    names = []
+    saved = (E.creds, E.current_semester, E.call, E.save, E.APIOUT, E.DB)
+    saved_env = {k: os.environ.get(k) for k in ("FAP_API_VERSION", "FAP_EXTRACT_DELAY")}
+    try:
+        E.creds = lambda: ("tok12345678", "APHL", "HE000000")
+        E.current_semester = lambda *a, **k: "Fall2026"
+        E.call = lambda ep, params, roll, campus, **k: (names.append(ep), (200, {"code": "200", "data": []}))[1]
+        E.save = lambda *a, **k: None
+        E.APIOUT = tempfile.mkdtemp(); E.DB = os.path.join(E.APIOUT, "nope")
+        os.environ["FAP_EXTRACT_DELAY"] = "0"
+        for ver, expect in (("v1", True), ("v2", False)):
+            names.clear(); os.environ["FAP_API_VERSION"] = ver
+            out = _cap(E.main)
+            assert ("GetStudentRate" in names) is expect, (ver, names)
+            assert ("GetAllActiveCampus" in names) and ("GetStudentMark" in names)
+            if ver == "v2":
+                assert "GetStudentRate" in out and "API v2" in out, out[:300]
+    finally:
+        (E.creds, E.current_semester, E.call, E.save, E.APIOUT, E.DB) = saved
+        _env_set(saved_env)
 
 # ---- runner không cần pytest ----
 def _run():

@@ -8,6 +8,7 @@ extract.py — KÉO TOÀN BỘ dữ liệu đọc-được của tài khoản b�
   C) Chi tiết điểm danh từng môn (getCourseAttendance)     -> output/api/courseAttendance__<mã>.json
 
 Bỏ qua các endpoint GHI dữ liệu (AddRate, UpdateToken...). Chỉ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN.
+FAP_API_VERSION=v2 (thử nghiệm): bỏ thêm GetStudentRate — adapter v2 của app trả [] cố định, không có request.
 
 Chạy (từ thư mục gốc repo):
     fap login       # nếu chưa có token
@@ -15,7 +16,7 @@ Chạy (từ thư mục gốc repo):
 """
 import os, json, time, sqlite3
 from .api import creds, call, unwrap, as_list, current_semester, checksum_auth, checksum_login, _vn_now, DB
-from . import paths
+from . import paths, apiv2
 
 # Học phí / hồ sơ / CCCD nằm ở đây → PHẢI tách theo profile, nếu không người này ghi đè người kia.
 ROOT = paths.ROOT
@@ -67,7 +68,9 @@ def save(name, http, data):
 def main():
     token, campus, roll = creds()
     sem = current_semester(token, campus, roll)
-    print(f"== Tài khoản: campus={campus} roll={roll} token={token[:8]}… kỳ={sem} ==")
+    ver = apiv2.api_version()                # v1 mặc định; v2 = opt-in thử nghiệm (docs/21-api-v2.md)
+    print(f"== Tài khoản: campus={campus} roll={roll} token={token[:8]}… kỳ={sem}"
+          + (" · API v2 (thử nghiệm)" if ver == "v2" else "") + " ==")
     os.makedirs(APIOUT, exist_ok=True)
     try: DELAY = max(0.0, float(os.environ.get("FAP_EXTRACT_DELAY", "0.7")))   # nghỉ giữa lượt (nhẹ tay server)
     except (TypeError, ValueError): DELAY = 0.7
@@ -103,7 +106,15 @@ def main():
     # ---- B) Endpoint read-only ----
     print("\n[B] API read-only:")
     subjects = marks = []
-    for i, (ep, keys) in enumerate(SIMPLE.items()):
+    eps = list(SIMPLE.items())
+    if ver == "v2":
+        # GetStudentRate: adapter v2 của app trả [] CỐ ĐỊNH, không có request thật -> bỏ, khỏi ghi file giả.
+        for ep, _keys in eps:
+            if apiv2.is_unavailable(ep):
+                print(f"  {ep:24} (bỏ qua — API v2 không có endpoint này; app trả rỗng cố định · "
+                      f"skipped — not on API v2)")
+        eps = [(ep, keys) for ep, keys in eps if not apiv2.is_unavailable(ep)]
+    for i, (ep, keys) in enumerate(eps):
         if i: time.sleep(DELAY)              # nghỉ TRƯỚC mỗi lượt trừ lượt đầu -> bỏ luôn sleep cuối thừa
         params = [(k, VAL[k]) for k in keys]
         cv = CK[ep]() if ep in CK else None

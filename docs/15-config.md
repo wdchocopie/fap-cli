@@ -63,6 +63,8 @@ $env:FAP_LANG = "en"; fap whoami
 | `FAP_PROFILE` | *(trống · empty)* | Tên profile khi chạy **nhiều tài khoản trên 1 máy**: trạng thái vào `output/profiles/<tên>/`, cấu hình đọc `.env.<tên>` trước. Chỉ `A-Z a-z 0-9 . _ -`; tên sai ⇒ bỏ qua (chạy như không có profile). Trống = y hệt trước đây · profile name for **multi-account on one box**: state moves to `output/profiles/<name>/` and `.env.<name>` is read first. Letters/digits/`._-` only; a bad name is ignored. Empty = exactly as before. Xem · see [19-multi-profile](19-multi-profile.md) | `FAP_PROFILE=alice` |
 | `FAP_TOKEN_READONLY` | *(trống · empty)* | `1`/`true` = **CẤM `fap refresh` trên máy này**. Dùng cho máy PHỤ dùng chung 1 session (PC copy token từ VPS): `refresh_token` **xoay vòng** nên chỉ **MỘT** máy được refresh. **ĐỪNG đặt trên máy chạy bot/watcher** — token sẽ hết hạn và watcher chết lặng · `1`/`true` **blocks `fap refresh` on this machine**. For the secondary box in a shared session; the `refresh_token` **rotates**, so only **ONE** machine may refresh. **Never set it on the bot/watcher box.** Xem · see [14-deploy §9](14-deploy.md#9-một-session-hai-máy--one-session-two-machines) | `FAP_TOKEN_READONLY=1` |
 | `FAP_ALLOW_UPDATE` | *(trống · empty = CẤM · off)* | `1`/`true` = cho phép lệnh bot **`/update`** (`git pull` + selftest + tự khởi động lại). Mặc định **TẮT** vì `/update` tác động lên **checkout dùng chung của mọi profile**. Chỉ đặt trong unit/`.env` của **chủ máy**; kiểm tra chủ sở hữu bot vẫn chạy trước như cũ · `1`/`true` enables the bot's **`/update`**. **Off by default** because `/update` acts on the **checkout every profile shares**. Owner-only checks still apply | `FAP_ALLOW_UPDATE=1` |
+| `FAP_API_VERSION` | `v1` | API FAP dùng để đọc dữ liệu: `v1` (mặc định, như trước) hoặc `v2` (**opt-in, thử nghiệm, CHƯA kiểm chứng thật** — qua `fap-proxy.fpt.edu.vn`, cần `FAP_V2_KEY`). Giá trị khác ⇒ v1 + 1 cảnh báo. Đổi giá trị ⇒ chạy `fap refresh` (token gắn phiên bản) và khởi động lại service · API used to read data: `v1` (default, unchanged) or `v2` (**opt-in, experimental, NOT verified live**; needs `FAP_V2_KEY`). Anything else ⇒ v1 + one warning. After changing it run `fap refresh` and restart services. Xem · see [21-api-v2](21-api-v2.md) §5 | `FAP_API_VERSION=v2` |
+| `FAP_V2_KEY` | *(trống · empty)* | **BÍ MẬT** — khoá ký HMAC của API v2, chỉ đọc khi `FAP_API_VERSION=v2`. fap-cli **không** nhúng sẵn: trích từ **APK của chính bạn** bằng `python analysis/apk_drift.py --write-v2-key <apk>` (tự ghi vào `.env`, không in giá trị). Không commit, không dán vào chat · **SECRET** — the API v2 HMAC signing key, read only when `FAP_API_VERSION=v2`. Not shipped: extract it from **your own APK** with the command above (writes `.env`, never prints it). Never commit or paste it | `FAP_V2_KEY=…` *(do lệnh trên ghi · written by the command)* |
 
 **VI —** Để trống `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL` thì kênh đó **tắt** — `fap notify` đơn giản không gửi qua kênh chưa cấu hình.
 **EN —** Leaving `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL` empty simply **disables** that channel — `fap notify` won't push over an unconfigured channel.
@@ -118,7 +120,17 @@ FAP_TOKEN_READONLY=
 # 1 = cho phép lệnh bot /update (git pull + tự khởi động lại). Trống = CẤM.
 # 1 = allow the bot's /update (git pull + self-restart). Empty = off.
 FAP_ALLOW_UPDATE=
+
+# API FAP: v1 (mặc định) | v2 (opt-in, THỬ NGHIỆM, chưa kiểm chứng thật — docs/21-api-v2.md §5)
+# FAP API: v1 (default) | v2 (opt-in, EXPERIMENTAL, not verified live). Đổi -> `fap refresh` · After changing -> `fap refresh`
+FAP_API_VERSION=
+# BÍ MẬT · SECRET — khoá ký v2; để trống, chạy: python analysis/apk_drift.py --write-v2-key <apk>
+# v2 signing key; leave empty and let that command write it. Never commit / paste it.
+FAP_V2_KEY=
 ```
+
+> **VI —** Bộ đọc `.env` **không** hiểu chú thích `#` cùng dòng: `FAP_API_VERSION=v2  # thử` sẽ thành giá trị `v2  # thử` (không hợp lệ ⇒ v1). Luôn để chú thích ở **dòng riêng**.
+> **EN —** The `.env` reader does **not** support inline `#` comments: `FAP_API_VERSION=v2  # try` becomes the value `v2  # try` (invalid ⇒ v1). Keep comments on **their own line**.
 
 **VI —** Sau khi sửa `.env`, kiểm tra nhanh bằng `fap doctor` để xem cấu hình đã được nạp đúng chưa.
 **EN —** After editing `.env`, sanity-check with `fap doctor` to confirm the config loaded correctly.
