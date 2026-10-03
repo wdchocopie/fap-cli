@@ -1074,16 +1074,22 @@ def test_gpa_trend():
     assert T.trend_text([]).strip().startswith("📈")         # rỗng -> thông báo, KHÔNG lỗi
 
 def test_conduct_graceful():
-    """conduct: code 201 + NullReference (data null) -> coi như CHƯA có điểm, KHÔNG raise như token hết hạn."""
+    """conduct: code 201 + NullReference (data null) -> coi như CHƯA có điểm, KHÔNG raise như token hết hạn.
+    Shape ĐÚNG dump thật (keys_schema): message 'Thành công' + errorMessage CÓ chữ (NullReference)."""
     import fapc.core.conduct as K
-    K.call = lambda *a, **k: (200, {"code": "201", "message": "Thành công", "data": None})
-    assert K.fetch("t", "c", "r", "Summer2026") == []        # null/NullReference -> [] (không raise)
-    assert "rèn luyện" in K.conduct_text("t", "c", "r", "Summer2026")
-    K.call = lambda *a, **k: (200, {"code": "201", "message": "Token invalid", "data": None})
-    raised = False
-    try: K.fetch("t", "c", "r", "Summer2026")                # token THẬT hết hạn -> phải raise
-    except SystemExit: raised = True
-    assert raised
+    orig = K.call
+    try:
+        K.call = lambda *a, **k: (200, {"code": "201", "message": "Thành công", "data": None,
+                                        "errorMessage": "System.NullReferenceException: Object reference not set"})
+        assert K.fetch("t", "c", "r", "Summer2026") == []        # null/NullReference -> [] (không raise)
+        assert "rèn luyện" in K.conduct_text("t", "c", "r", "Summer2026")
+        K.call = lambda *a, **k: (200, {"code": "201", "message": "Token invalid", "data": None})
+        raised = False
+        try: K.fetch("t", "c", "r", "Summer2026")                # token THẬT hết hạn -> phải raise
+        except SystemExit: raised = True
+        assert raised
+    finally:
+        K.call = orig
 
 def test_exam_countdown():
     """exam-countdown: bỏ thi đã qua, sắp xếp sớm nhất trước, nhãn độ gấp ('now' truyền vào)."""
@@ -2943,6 +2949,40 @@ def test_apkdrift_write_v2_key(tmp_path=None):
     assert "FAP_V2_KEY=beef5678feedface" in lines
     assert "FAP_LANG=en" in lines and "TELEGRAM_TOKEN=keepme" in lines
 
+# ---- B4b: link hoá đơn điện tử (CHỈ CLI) · tin hoa/thường · đếm ngược thi · 404 học phí · 201 rèn luyện ----
+# Giá trị GIẢ hết (MSSV HE000000…). Mọi monkeypatch đều KHÔI PHỤC trong finally (runner chạy theo thứ tự tên).
+def test_conduct_no_data_vs_checksum_and_auth():
+    """GetDiemphongtrao 201: NullReference (errorMessage) = chưa có điểm; checksum/token (message) = LỖI,
+    kể cả khi errorMessage của ca NullReference nhắc chữ 'checksum' (chữ ký hàm)."""
+    import fapc.core.conduct as K
+    nullref = {"code": "201", "message": "Thành công", "data": None,
+               "errorMessage": "System.NullReferenceException: Object reference not set to an instance of an "
+                               "object. at X.GetDiemphongtrao(String campusCode, String checksum)"}
+    cks = {"code": "201", "message": "Thông tin checksum không chính xác", "errorMessage": None, "data": None}
+    assert K.is_no_data(nullref) is True
+    assert K.is_no_data(cks) is False
+    assert K.is_no_data(dict(cks, errorMessage="NullReferenceException")) is False   # message thắng
+    assert K.is_no_data({"code": "201", "message": "Token invalid", "data": None}) is False
+    assert K.is_no_data({"code": "201", "message": "Thành công", "data": None, "errorMessage": None}) is False
+    assert K.is_no_data({"code": "200", "data": []}) is False
+    assert K.is_no_data("text") is False and K.is_no_data(None) is False
+    orig = K.call
+    def _exit_text(resp):
+        K.call = lambda *a, **k: resp
+        try:
+            K.fetch("t", "c", "r", "Summer2026")
+        except SystemExit as e:
+            return str(e)
+        return None
+    try:
+        assert "checksum" in (_exit_text((200, cks)) or "").lower()     # lỗi checksum KHÔNG bị giấu
+        assert _exit_text((200, {"code": "201", "message": "Lỗi lạ", "data": None})) is not None
+        assert _exit_text((401, {})) is not None
+        assert _exit_text((200, nullref)) is None
+        K.call = lambda *a, **k: (200, {"code": "200", "data": [{"activityName": "A", "point": 5}]})
+        assert K.fetch("t", "c", "r", "Summer2026") == [{"activityName": "A", "point": 5}]
+    finally:
+        K.call = orig
 
 # ---- runner không cần pytest ----
 def _run():

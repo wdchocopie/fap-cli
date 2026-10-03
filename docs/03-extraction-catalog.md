@@ -54,7 +54,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 
 | Endpoint | Lấy gì | Tham số | Trường trả về | Độ tin |
 |---|---|---|---|---|
-| `GetDiemphongtrao` | Điểm phong trào / rèn luyện theo kỳ | `campusCode`, `rollNumber`, `semester`, `Authen`, `checksum` | `semester`, `activityName`, `point`, `totalPoint`, `PhongTrao`, `joinMovement` | high |
+| `GetDiemphongtrao` | Điểm phong trào / rèn luyện theo kỳ | `campusCode`, `rollNumber`, `semester`, `Authen`, `checksum` | `semester`, `activityName`, `point`, `totalPoint`, `PhongTrao`, `joinMovement` · **chưa có dữ liệu** ⇒ `code 201` + `message` "Thành công" + `data` null + `errorMessage` NullReferenceException (dump thật; `errorMessage` có thể nhắc chữ `checksum` trong chữ ký hàm — đừng dựa vào đó) | high |
 | `GetActivityStudent` *(nhánh hoạt động)* | Hoạt động ngoại khóa đã/đang tham gia trong kỳ | `campusCode`, `Authen`, `Semester`, `checksum`, `rollNumber` | `eventName`, `activityDate`, `point`, `status` | low |
 | `GetStudentRate` | Các mục đánh giá/feedback giảng viên-môn của sinh viên | `campusCode`, `rollNumber`, `Authen`, `checksum` | `rateId`, `rateValue`, `rateComment`, `hasStudentRated`, `subjectCode`, `subjectName`, `lecturer` | high |
 | `CheckOpenFeedBack` | Cờ kiểm tra có đợt feedback/khảo sát đang mở không | `campusCode`, `rollNumber`, `Authen`, `checksum` | `data` = **boolean trần** (không có `isOpen`/`hasFeedback`) · bare boolean — [20](20-api-fields.md) | high |
@@ -136,7 +136,8 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 **Endpoint có thể trả về rỗng giữa kỳ (bình thường, không phải lỗi):**
 - `GetScheduleExam` — đầu/giữa kỳ chưa xếp lịch thi → `data=[]` (nhãn `lb_schex_notSchedule`).
 - `GetStudentAttendances` / `GetStudentMark` — môn chưa bắt đầu → số buổi `0` hoặc cột điểm `null`.
-- `GetDiemphongtrao` / `GetActivityStudent` — chưa tham gia hoạt động → mảng rỗng (`code` khác 200 trả `[]`).
+- `GetDiemphongtrao` — chưa có dữ liệu → `code 201` + `errorMessage` NullReferenceException ⇒ fap-cli coi là "chưa có điểm". **Nhưng** `code 201` cũng là mã của lỗi token (`message` "Token invalid") và lỗi checksum (`message` "Thông tin checksum không chính xác") ⇒ hai ca này **báo lỗi**, không bị giấu thành "chưa có" (phân biệt bằng `message` trước, `errorMessage` sau).
+- `GetActivityStudent` *(nhánh hoạt động)* — chưa tham gia hoạt động → mảng rỗng.
 - `GetActivityStudentByWeek` — tuần nghỉ lễ/giữa kỳ → `data` rỗng.
 - `CheckOpenFeedBack` — ngoài đợt khảo sát → chuỗi rỗng `''` / `false` (boolean trần).
 - `GetCourseOfSemester` — khi gọi thật bằng URL trong dump trả **HTTP 404** (có thể phân biệt hoa/thường hoặc đã đổi path). fap-cli **vẫn dùng** nó (lệnh `fap courses` + vá `courseID` cho `grades-detail`) nhưng **degrade êm**: `fetch_courses()` trả `None` khi 404/lỗi và mọi nơi gọi đều có fallback (gộp từ `GetActivityStudent` / giữ hành vi cũ) — không phụ thuộc cứng.
