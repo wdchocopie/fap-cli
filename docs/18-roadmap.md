@@ -215,7 +215,8 @@ Ghi lại để mai khỏi điều tra lại. Đã đo/đọc code thật:
 - `/profile` gửi CCCD / SĐT / ngày sinh / email qua bot → nên chỉ hiện ở CLI ([20](20-api-fields.md) §4).
 - Ứng viên còn lại: [20](20-api-fields.md) §3 (tài liệu môn, cờ qua/trượt transcript, điểm chính thức từ `GetMarkByCourse`, đợt feedback…).
 - Lỗi phụ từ audit: `_news_get` phân biệt hoa thường; `exam_countdown` không nhận `examSubject`; `fees()` báo "chưa có chi tiết" khi thật ra 404; `conduct.fetch` coi mọi code 201 là "chưa có dữ liệu".
-- Kiểm bản app mới **versionCode 29** (đang làm).
+- ~~Kiểm bản app mới **versionCode 29**~~ → **xong (2.0.5)**: v1 không đổi ⇒ fap-cli chạy bình thường; mới có **API v2** qua `fap-proxy` (chưa bật được kiểm chứng, [21](21-api-v2.md)), **OTA tự host** ⇒ JS có thể đổi không cần bản Play mới ([20](20-api-fields.md) §5), và **`studentStatus` đổi nghĩa** (`2` = Hủy, `3` = Chờ thanh toán) — đã sửa ngay trong PR #2 trước khi merge.
+- Chuẩn bị cho v2 (chưa làm): `check_auth` hiểu lỗi kiểu v2 (tránh "danh sách rỗng im lặng"); bộ phân loại thuần cảnh báo sớm khi v1 bị tắt; script so APK offline có che dữ liệu.
 
 ---
 

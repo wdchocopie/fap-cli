@@ -251,8 +251,8 @@ fap refresh && fap banrisk || fap notify test   # nếu nguy cơ (exit 2) -> g�
 
 ### 9.1 Dùng chung 1 lần login → ✅ ĐƯỢC · Sharing one login → ✅ OK
 
-**VI —** Token FAP là **bearer-style** (gửi ở header `Authen` trong mọi call), **không gắn thiết bị**: User-Agent cố định `okhttp/4.9.2`, checksum chỉ phụ thuộc **đồng hồ** (đã tự retry ±1h), bước đổi token chỉ gửi `{"token": access_token}`. Nghĩa là **copy file token sang máy khác là chạy được**.
-**EN —** The FAP token is **bearer-style** (sent in the `Authen` header on every call) with **no device binding**: the User-Agent is a fixed `okhttp/4.9.2`, the checksum depends only on the **clock** (already retried ±1h), and the exchange step posts just `{"token": access_token}`. So **copying the token files to another machine simply works**.
+**VI —** Token FAP là **bearer-style** (gửi ở **tham số query** `Authen` trong mọi call), **không gắn thiết bị**: User-Agent cố định `okhttp/4.9.2`, checksum chỉ phụ thuộc **đồng hồ** (đã tự retry ±1h), bước đổi token chỉ gửi `{"token": access_token}`. Nghĩa là **copy file token sang máy khác là chạy được**.
+**EN —** The FAP token is **bearer-style** (sent as the `Authen` **query parameter** on every call) with **no device binding**: the User-Agent is a fixed `okhttp/4.9.2`, the checksum depends only on the **clock** (already retried ±1h), and the exchange step posts just `{"token": access_token}`. So **copying the token files to another machine simply works**.
 
 ```bash
 # Trên máy ĐÃ login (VPS = máy sở hữu token) · from the machine that already logged in

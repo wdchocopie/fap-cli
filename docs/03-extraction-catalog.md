@@ -75,7 +75,7 @@ Tài liệu này tổng hợp **khoảng 35 endpoint API** của ứng dụng My
 | `SearchNews` | Tìm tin tức theo từ khóa + loại | `campusCode`, `Authen`, `checksum`, `keysearch`, `type` | `Title`, `Contents`, `EntryDate`, `EntryBy` | medium |
 | `GetNotificationByRoll` | Thông báo cá nhân gửi tới sinh viên | `campusCode`, `Authen`, `checksum`, `rollNumber` | `id` (số nhỏ, ổn định), `title`, `contents` (**text thuần**), `entryBy`, `entryDate`, `pType`, `topic`, `uRL`, `campusId`, `rollnumbers` (⚠️ có thể là mã SV **người khác** — không hiển thị) — [20](20-api-fields.md) | high |
 | `GetNotificationByDonor` | Thông báo cho phụ huynh/người bảo trợ | `CampusCode` *(C hoa)*, `Authen`, `rollNumber` *(không có checksum)* | `Title`, `Contents`, `EntryBy`, `EntryDate` | high |
-| `GetApplication` | Danh sách đơn từ + trạng thái xử lý | `campusCode`, `Authen`, `checksum`, `rollNumber` | `w_APP_ID`, `name`, `description`, `processNote`, `createDate` (`dd/mm/yyyy`), `studentStatus` (`0` xử lý / `1` chấp nhận / khác = từ chối), `fileUpLoad` (⚠️ tệp đính kèm), `amount` — [20](20-api-fields.md) | high |
+| `GetApplication` | Danh sách đơn từ + trạng thái xử lý | `campusCode`, `Authen`, `checksum`, `rollNumber` | `w_APP_ID`, `name`, `description`, `processNote`, `createDate` (`dd/mm/yyyy`), `studentStatus` (theo app 2.0.5: `0` xử lý / `1` chấp nhận / `2` hủy / `3` chờ thanh toán / khác), `fileUpLoad` (⚠️ tệp đính kèm), `amount` — [20](20-api-fields.md) | high |
 
 > `keysearch` được `encodeURIComponent` + trim trước khi gọi. News và Notification dùng chung hạ tầng (state `dataNotifi`), tên trường gốc từ FAP là `Title`, `Contents` (có "s"), `EntryDate`, `EntryBy`.
 

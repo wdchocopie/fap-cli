@@ -65,16 +65,20 @@ def fetch_applications(token, campus, roll):
     check_auth(http, data)
     return as_list(data)
 
-# Mã `studentStatus` của GetApplication, lấy ĐÚNG theo app chính thức (hàm getStatusConfig trong bundle +
-# bảng i18n lb_appli_status_*): '0' -> Đang xử lý, '1' -> Đã được chấp nhận, còn lại -> Đã bị từ chối.
-# Khác app ở MỘT chỗ có chủ ý: app coi MỌI mã lạ là "từ chối"; fap-cli hiện '❔ <mã>' — thà nói "không rõ"
-# còn hơn báo nhầm một lá đơn là bị từ chối.
+# Mã `studentStatus` của GetApplication, lấy ĐÚNG theo app chính thức (hàm getStatusConfig + bảng i18n
+# lb_appli_status_*), bản myFAP 2.0.5 (versionCode 29):
+#   '0' Đang xử lý · '1' Đã được chấp nhận · '2' Hủy · '3' Đang chờ thanh toán · mã khác -> "Khác".
+# ⚠️ Bản 2.0.4 chỉ có nhánh '0'/'1' và cho MỌI mã khác rơi vào "Đã bị từ chối" — vì vậy '2' TỪNG hiện là
+# "từ chối". 2.0.5 sửa '2' thành "Hủy", thêm '3', và bỏ hẳn nhãn "từ chối" khỏi getStatusConfig. Đừng quay lại
+# cách đọc cũ: một lá đơn bị HỦY mà báo là bị TỪ CHỐI là thông tin sai.
 _APP_STATUS = {"0": ("⏳", "Đang xử lý", "Processing"),
                "1": ("✅", "Đã được chấp nhận", "Approved"),
-               "2": ("❌", "Đã bị từ chối", "Rejected")}
+               "2": ("🚫", "Đã hủy", "Cancelled"),
+               "3": ("💳", "Đang chờ thanh toán", "Pending payment")}
 
 def app_status(r):
-    """THUẦN: nhãn trạng thái đơn có icon ('' nếu server không gửi trạng thái)."""
+    """THUẦN: nhãn trạng thái đơn có icon ('' nếu server không gửi trạng thái).
+    Mã ngoài bảng -> '❔ Khác (mã N)' — khớp nhãn "Khác/Other" của app 2.0.5, kèm mã để tra cứu."""
     raw = r.get("studentStatus")
     v = str(raw if raw is not None else "").strip()          # int 0 phải thành '0', không được rơi mất
     if not v:
@@ -82,16 +86,16 @@ def app_status(r):
     if v in _APP_STATUS:
         icon, vi, en = _APP_STATUS[v]
         return f"{icon} {t(vi, en)}"
-    return t(f"❔ trạng thái {v}", f"❔ status {v}")
+    return t(f"❔ Khác (mã {v})", f"❔ Other (code {v})")
 
 def _app_tally(rows):
-    """THUẦN: '⏳1 ✅1 ❌2' — đếm theo trạng thái cho dòng tiêu đề ('' nếu không đơn nào có trạng thái)."""
+    """THUẦN: '⏳1 ✅1 🚫2' — đếm theo trạng thái cho dòng tiêu đề ('' nếu không đơn nào có trạng thái)."""
     counts = {}
     for r in rows:
         v = str(r.get("studentStatus") if r.get("studentStatus") is not None else "").strip()
         if v in _APP_STATUS:
             counts[v] = counts.get(v, 0) + 1
-    return " ".join(f"{_APP_STATUS[k][0]}{counts[k]}" for k in ("0", "1", "2") if k in counts)
+    return " ".join(f"{_APP_STATUS[k][0]}{counts[k]}" for k in _APP_STATUS if k in counts)
 
 def applications_text(token, campus, roll):
     rows = [r for r in fetch_applications(token, campus, roll) if isinstance(r, dict)]

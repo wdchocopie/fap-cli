@@ -1878,24 +1878,31 @@ def test_day_digest_attendance_marks():
     assert len(lines) == 2 and "✅\n" in lines[1] and lines[1].endswith(_URL)   # dấu ✅ rồi mới tới link, vẫn 1 phần tử/buổi
 
 def test_application_status_badges():
+    """Theo getStatusConfig của myFAP 2.0.5: 0 xử lý · 1 chấp nhận · 2 HỦY · 3 chờ thanh toán · khác 'Khác'.
+    (2.0.4 cho mọi mã ≠0/1 là 'từ chối' -> '2' từng bị đọc nhầm thành từ chối. KHÔNG được quay lại.)"""
     import fapc.core.extras as E
     from fapc.core.extras import app_status, _app_tally
     assert app_status({"studentStatus": "0"}).startswith("⏳")
     assert app_status({"studentStatus": "1"}).startswith("✅")
-    assert app_status({"studentStatus": "2"}).startswith("❌")
+    two = app_status({"studentStatus": "2"})
+    assert two.startswith("🚫") and ("hủy" in two.lower() or "cancel" in two.lower())
+    assert "từ chối" not in two and "reject" not in two.lower()            # đơn bị HỦY không được báo là TỪ CHỐI
+    assert app_status({"studentStatus": "3"}).startswith("💳")              # mới ở 2.0.5: chờ thanh toán
     assert app_status({"studentStatus": 0}).startswith("⏳")                # int 0 không được rơi mất
-    assert app_status({"studentStatus": "7"}).startswith("❔") and "7" in app_status({"studentStatus": "7"})
+    other = app_status({"studentStatus": "7"})
+    assert other.startswith("❔") and "7" in other and ("Khác" in other or "Other" in other)
     assert app_status({}) == "" and app_status({"studentStatus": ""}) == ""
-    assert _app_tally([{"studentStatus": "2"}, {"studentStatus": "1"}, {"studentStatus": "2"}, {}]) == "✅1 ❌2"
+    assert _app_tally([{"studentStatus": "2"}, {"studentStatus": "1"}, {"studentStatus": "2"},
+                       {"studentStatus": "3"}, {}]) == "✅1 🚫2 💳1"
     orig = E.fetch_applications
     try:
         E.fetch_applications = lambda *a, **k: [
             {"name": "Đơn A", "createDate": "16/09/2023", "studentStatus": "1", "processNote": "OK"},
             {"name": "Đơn B", "createDate": "05/03/2026", "studentStatus": "2", "processNote": ""}]
         txt = E.applications_text("t", "FPTU", "HE1")
-        assert "✅1 ❌1" in txt.split("\n")[0]
+        assert "✅1 🚫1" in txt.split("\n")[0]
         b = txt.index("Đơn B")
-        assert txt.index("❌", b) < txt.index("Đơn A")                    # huy hiệu nằm ngay dưới đúng lá đơn
+        assert txt.index("🚫", b) < txt.index("Đơn A")                    # huy hiệu nằm ngay dưới đúng lá đơn
     finally:
         E.fetch_applications = orig
 
