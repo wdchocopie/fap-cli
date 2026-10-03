@@ -82,6 +82,29 @@
 
 **EN —** Check `versionCode` with `gplaydl info com.fuct`; diff response fields with `fap extract` + `analysis/keys_schema.py`; read status mappings from the app's own functions in a disassembly kept **outside the repo** (or in gitignored paths), printing only identifier-shaped strings; diff the `MyFAP/…` endpoint set against [01](01-reverse-engineering.md) §B.
 
+### 5.1 · Công cụ tự động `analysis/apk_drift.py` · Automated drift checker
+
+**VI —** Bước 4 (endpoint) + "hằng số fap-cli có còn không" đã được **tự động hoá, OFFLINE, chỉ thư viện chuẩn** trong `analysis/apk_drift.py`. Nhận **APK base** (zip chứa `assets/index.android.bundle`) **hoặc raw Hermes bundle**:
+
+```bash
+python analysis/apk_drift.py <apk|bundle>                       # kiểm 1 build vs hằng/endpoint fap-cli
+python analysis/apk_drift.py <old.apk|bundle> <new.apk|bundle>  # diff 2 build (case-SENSITIVE)
+python analysis/apk_drift.py --write-v2-key <apk|bundle> [--env-file PATH]
+```
+
+Mỗi bản APK mới: chạy chế độ **diff** với bản đã kiểm gần nhất. Báo cáo in: version bytecode + số chuỗi; tập **v1** (`…/MyFAP/<Name>`) và **v2** (`MyFAP/<Name>` + `fap-proxy`) — so **phân biệt hoa/thường**; danh sách host; các hằng fap-cli (`SECRET`/`LOGIN_PREFIX`/`BASE` + `CLIENT_ID`/`ISSUER`/`REDIRECT_URI`) chỉ dưới dạng **CÓ/THIẾU**; marker `GetApiActive`/`sessionApiVersion`/OTA/`v1`/`v2`; và **số đếm + độ dài** literal "dạng khoá" mới (không in giá trị). Tool còn so với **endpoint fap-cli thực sự gọi** (quét `call("…"` trong `fapc/` + khoá dict `SIMPLE` của `extract.py`) ⇒ báo ngay nếu một endpoint fap-cli dùng **biến mất** khỏi build.
+
+**Mã thoát (dùng cho cron/CI):**
+- `0` — không có gì fap-cli **đang dựa vào** bị đổi.
+- `1` — có thay đổi fap-cli phụ thuộc: một endpoint fap-cli gọi **thiếu** trong build, **hoặc** `SECRET` (HMAC v1) / `BASE` không còn thấy.
+- `2` — lỗi đầu vào (file hỏng, version bytecode chưa hỗ trợ) hoặc `--write-v2-key` **từ chối**.
+
+`--write-v2-key` dò **theo cấu trúc** chuỗi hằng dùng làm khoá `HmacSHA256` trong hàm checksum v2 (hàm ký `token + "MyFAP" + epoch`), **chỉ chấp nhận khi đúng MỘT ứng viên** (0 hoặc >1 ⇒ từ chối, exit 2), kiểm khoá **khác** secret v1/tiền tố login, rồi thay/append dòng `FAP_V2_KEY=…` trong file env (atomic, `chmod 0600` best-effort, giữ nguyên mọi dòng khác). Bản chưa có v2 (vd 2.0.4) ⇒ 0 ứng viên ⇒ từ chối. **Cần** `hermes-dec` hoặc `hbc-disassembler` cho riêng `--write-v2-key` (phần báo cáo drift thì không).
+
+> 🔒 **VI —** Tool **không bao giờ in secret/PII.** Mọi chuỗi in ra qua `safe()` (che credential, hex≥12 có chữ số, email, mã SV, JWT, dãy số dài, token dài, tên riêng VN) — chỉ in chuỗi dạng **định danh**. `--write-v2-key` **không** in giá trị khoá, chỉ in `FAP_V2_KEY written (<N> chars, sha256 <8 hex đầu>)`. Khi dò bằng `hbc-disassembler`, tool ghi `.hasm` vào thư mục tạm rồi **xoá ngay** (bundle app chứa dữ liệu cá nhân của người khác). `FAP_V2_KEY` **chưa được fap-cli dùng** (v1 vẫn chạy — xem [21-api-v2](21-api-v2.md)); nó được ghi sẵn cho ngày phải chuyển v2.
+
+**EN —** `analysis/apk_drift.py` automates endpoint + "do fap-cli's constants still exist" checks, **offline, stdlib only**, on a base **APK** (zip with `assets/index.android.bundle`) or a raw Hermes bundle. For each new APK run it in **diff** mode against the last-audited build. It prints the bytecode version + string count; the **v1** and **v2** endpoint sets (case-**sensitive** diff); hosts; fap-cli constants as **present/missing only**; the `GetApiActive`/`sessionApiVersion`/OTA/`v1`/`v2` markers; and the **count + lengths** of new key-like literals (never their values). It also compares against the endpoints fap-cli actually calls (scanning `call("…"` across `fapc/` plus the `SIMPLE` dict in `extract.py`), flagging any that **vanished** from the build. Exit codes: `0` nothing fap-cli relies on changed; `1` something did (a called endpoint missing, or `SECRET`/`BASE` gone); `2` input error or `--write-v2-key` refusal. `--write-v2-key` locates the v2 `HmacSHA256` key **structurally**, accepts it **only when exactly one candidate** exists (else refuses, exit 2), checks it differs from the v1 secret/login prefix, and writes/replaces the `FAP_V2_KEY=` line in the env file atomically (`chmod 0600` best-effort, other lines preserved); it needs `hermes-dec` or `hbc-disassembler` (the drift report does not). The tool **never prints secrets/PII** — every string is masked and `--write-v2-key` prints only `FAP_V2_KEY written (<N> chars, sha256 <first 8 hex>)`; any temporary `.hasm` is deleted immediately. `FAP_V2_KEY` is **not consumed by fap-cli yet** (v1 still works — see [21-api-v2](21-api-v2.md)); it is written ahead of a future v2 migration.
+
 > ⚠️ **VI — Từ 2.0.5, versionCode KHÔNG còn đủ.** App tự cập nhật JS qua **OTA** (máy chủ của bên phát triển app — `codepushota.ptudev.net`, không phải `fpt.edu.vn`), có cả bản **bắt buộc reload ngay**. Endpoint, trường, ánh xạ mã có thể đổi mà Play Store **không** có bản mới. Cách theo dõi:
 > 1. Định kỳ `fap extract` rồi so `analysis/keys_schema.py` với lần trước — đổi khoá = đáng xem.
 > 2. Trên máy/emulator **của mình**, xem `adb logcat` dòng `[OTA]` ("Update available", "Bundle … ready"); có bundle OTA thì phân tích **bundle đó** chứ không phải asset trong APK.

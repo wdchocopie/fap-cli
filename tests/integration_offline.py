@@ -399,6 +399,105 @@ finally:
     os.environ["FAP_API_VERSION"] = _saved_v2[2] if _saved_v2[2] is not None else "v1"
     os.environ["FAP_V2_KEY"] = _saved_v2[3] if _saved_v2[3] is not None else ""
     apiv2._SESSION_CACHE.clear(); api._CACHE.clear()
+# [L] analysis/apk_drift.py — báo cáo drift + ghi .env CHẠY TRỌN ĐƯỜNG trên bundle TỔNG HỢP + repo giả.
+#     Không mạng (apk_drift không gọi mạng); kiểm MÃ THOÁT (cron/CI) + CHE (secret không lọt ra stdout).
+import struct as _struct
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+import apk_drift as _ad
+
+_SECRET = "deadSECRET0000badf00ddeadSECRET0000badf00d"   # chuỗi TỔNG HỢP, dạng khoá (hex+chữ số)
+_BASE = "https://api.fpt.edu.vn/fap/api/MyFAP"
+
+
+def _blob(strings, version=96):
+    storage = b""; entries = []
+    for s in strings:
+        raw = s.encode("utf-8"); off = len(storage); storage += raw
+        assert len(raw) < 0xFF
+        entries.append(_struct.pack("<I", (len(raw) << 24) | (off << 1)))
+    hdr = _struct.pack("<Q", _ad.HBC_MAGIC) + _struct.pack("<I", version) + b"\x00" * 20
+    u32s = [0, 0, 0, 0, 0, len(strings), 0, len(storage), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    hdr += b"".join(_struct.pack("<I", x) for x in u32s) + b"\x00"
+    out = bytearray(hdr)
+    def _pad(n):
+        while len(out) % n: out.append(0)
+    _pad(32); _pad(4); out += b"".join(entries); _pad(4); _pad(4); out += storage
+    return bytes(out)
+
+
+def _fake_repo():
+    """Repo fapc/ TỐI GIẢN để apk_drift đọc hằng + endpoint (SECRET/BASE/CLIENT_ID… + SIMPLE + 1 call)."""
+    root = tempfile.mkdtemp()
+    core = os.path.join(root, "fapc", "core"); os.makedirs(core)
+    open(os.path.join(root, "fapc", "__init__.py"), "w").close()
+    open(os.path.join(core, "__init__.py"), "w").close()
+    with open(os.path.join(core, "api.py"), "w", encoding="utf-8") as f:
+        f.write("SECRET = %r\nLOGIN_PREFIX = 'loginprefix99aa'\nBASE = %r\n" % (_SECRET, _BASE))
+    with open(os.path.join(core, "auth.py"), "w", encoding="utf-8") as f:
+        f.write("CLIENT_ID = 'clientid_syn'\nISSUER = 'https://feid.example'\nREDIRECT_URI = 'app:/cb'\n")
+    with open(os.path.join(core, "extract.py"), "w", encoding="utf-8") as f:
+        f.write("SIMPLE = {'GetStudentMark': [], 'GetSemester': []}\n")
+    with open(os.path.join(core, "grades.py"), "w", encoding="utf-8") as f:
+        f.write("def r():\n    call('GetStudentMark', [])\n    call('GetSemester', [])\n")
+    return root
+
+
+_root = _fake_repo()
+_present_all = [_BASE + "/GetStudentMark?campusCode=x", _BASE + "/GetSemester", _SECRET,
+                "https://api.fpt.edu.vn", "clientid_syn", "https://feid.example", "app:/cb", "loginprefix99aa"]
+_missing_one = [_BASE + "/GetStudentMark?campusCode=x", _SECRET, "https://api.fpt.edu.vn",
+                "clientid_syn", "https://feid.example", "app:/cb", "loginprefix99aa"]   # THIẾU GetSemester
+_tmp_blobs = tempfile.mkdtemp()
+_pa = os.path.join(_tmp_blobs, "a.bundle"); open(_pa, "wb").write(_blob(_present_all))
+_pb = os.path.join(_tmp_blobs, "b.bundle"); open(_pb, "wb").write(_blob(_missing_one))
+
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()):
+    _rc_ok = _ad.report_one(_pa, root=_root)
+_out = _buf.getvalue()
+check("apk_drift: build đủ endpoint -> exit 0", _rc_ok == 0, str(_rc_ok))
+check("apk_drift: SECRET tổng hợp KHÔNG lọt ra stdout (bị che)", _SECRET not in _out)
+check("apk_drift: báo CÓ các hằng fap-cli", "present" in _out or "CÓ" in _out)
+
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()):
+    _rc_bad = _ad.report_one(_pb, root=_root)
+check("apk_drift: build THIẾU endpoint fap-cli gọi -> exit 1", _rc_bad == 1, str(_rc_bad))
+check("apk_drift: báo cáo nêu endpoint thiếu", "GetSemester" in _buf.getvalue())
+
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()):
+    _rc_diff = _ad.report_diff(_pb, _pa, root=_root)
+_dout = _buf.getvalue()
+check("apk_drift: diff (thiếu->đủ) exit 0", _rc_diff == 0, str(_rc_diff))
+check("apk_drift: diff cho thấy GetSemester được THÊM", "GetSemester" in _dout)
+check("apk_drift: diff không lọt SECRET", _SECRET not in _dout)
+
+# --write-v2-key: giả lớp decode bytecode -> 1 hàm checksum v2 (HmacSHA256 + '%3d' + khoá) -> ghi .env tạm.
+_syn_key = "cafeV2KEY1234beeff00dcafeV2KEY1234beeff00d"
+_saved_decode = _ad._decode_functions
+_env_tmp = os.path.join(_tmp_blobs, ".env.synth")
+open(_env_tmp, "w", encoding="utf-8").write("FAP_LANG=vi\nFAP_CACHE_MIN=60\n")
+try:
+    _ad._decode_functions = lambda data: [({"HmacSHA256", "default"}, {"%3d", "+", _syn_key})]
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()):
+        _rc_key = _ad.cmd_write_v2_key(_pa, _env_tmp)
+    _kout = _buf.getvalue()
+    check("apk_drift: write-v2-key 1 ứng viên -> exit 0", _rc_key == 0, str(_rc_key))
+    check("apk_drift: write-v2-key KHÔNG in giá trị khoá", _syn_key not in _kout)
+    check("apk_drift: write-v2-key in độ dài + sha", "FAP_V2_KEY" in _kout and "sha256" in _kout)
+    _envlines = open(_env_tmp, encoding="utf-8").read().splitlines()
+    check("apk_drift: .env giữ dòng cũ + thêm FAP_V2_KEY", "FAP_LANG=vi" in _envlines and
+          any(l == "FAP_V2_KEY=" + _syn_key for l in _envlines))
+    # 0 ứng viên -> từ chối exit 2, KHÔNG đụng .env
+    _ad._decode_functions = lambda data: [({"foo"}, {"bar"})]
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()):
+        _rc_ref = _ad.cmd_write_v2_key(_pa, _env_tmp)
+    check("apk_drift: write-v2-key 0 ứng viên -> exit 2 (từ chối)", _rc_ref == 2, str(_rc_ref))
+finally:
+    _ad._decode_functions = _saved_decode
 
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")

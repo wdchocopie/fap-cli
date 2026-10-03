@@ -2551,6 +2551,158 @@ def test_extract_skips_studentrate_on_v2_only():
     finally:
         (E.creds, E.current_semester, E.call, E.save, E.APIOUT, E.DB) = saved
         _env_set(saved_env)
+# ---- analysis/apk_drift.py: masker · bộ đọc bảng chuỗi HBC · rút endpoint · ghi .env ----
+# apk_drift CHỈ dùng thư viện chuẩn, KHÔNG import fapc, KHÔNG gọi mạng -> an toàn nạp ở đây.
+import struct as _struct
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "analysis"))
+import apk_drift as _ad
+
+
+def _hbc_blob(strings, version=96):
+    """Dựng một bundle Hermes TỐI GIẢN (ASCII, 0 function/kind/identifier/overflow) cho bộ đọc.
+
+    Chỉ đủ để test HBC.strings — khớp đúng đường parse của apk_drift.HBC."""
+    storage = b""
+    entries = []
+    for s in strings:
+        raw = s.encode("ascii")
+        off = len(storage)
+        storage += raw
+        assert len(raw) < 0xFF
+        entries.append((_struct.pack("<I", (len(raw) << 24) | (off << 1))))  # isUTF16=0
+    small_tbl = b"".join(entries)
+    # header: magic(8)+version(4)+hash(20) = 32, rồi 19 u32, rồi 1 byte cờ
+    hdr = _struct.pack("<Q", _ad.HBC_MAGIC) + _struct.pack("<I", version) + b"\x00" * 20
+    u32s = [
+        0,                 # fileLength (không kiểm)
+        0,                 # globalCodeIndex
+        0,                 # functionCount
+        0,                 # stringKindCount
+        0,                 # identifierCount
+        len(strings),      # stringCount
+        0,                 # overflowStringCount
+        len(storage),      # stringStorageSize
+        0, 0,              # bigIntCount, bigIntStorageSize (v>=87)
+        0, 0,              # regExpCount, regExpStorageSize
+        0, 0, 0,           # arrayBufferSize, objKeyBufferSize, objValueBufferSize (v<97)
+        0, 0,              # segmentID, cjsModuleCount
+        0,                 # functionSourceCount (v>=84)
+        0,                 # debugInfoOffset
+    ]
+    hdr += b"".join(_struct.pack("<I", x) for x in u32s) + b"\x00"  # 1 byte cờ
+    out = bytearray(hdr)
+    def _pad(buf, n):
+        while len(buf) % n:
+            buf += b"\x00"
+    _pad(out, 32)                 # căn 32 trước function headers (0 function -> chỉ padding)
+    _pad(out, 4); out += small_tbl        # string kinds(0)+identifier(0) rỗng -> ngay small table
+    _pad(out, 4)                          # overflow(0) rỗng
+    _pad(out, 4); out += storage
+    return bytes(out)
+
+
+def test_apkdrift_masker():
+    m = _ad.safe
+    assert m("GetStudentMark") == "GetStudentMark"            # định danh -> giữ
+    assert m("sessionApiVersion") == "sessionApiVersion"
+    assert m("MyFAP/GetApiActive") == "MyFAP/GetApiActive"
+    assert m("[OTA]") == "[OTA]"
+    assert m("deadbeef1234cafe") == "<masked:hex>"            # hex>=12 có chữ số
+    assert m("HE000000") == "<masked:roll>"                   # mã SV (không word-boundary)
+    assert m("a@b.com") == "<masked:email>"
+    assert m("eyJhbGciOi") == "<masked:jwt>"
+    assert m("123456789") == "<masked:number>"                # dãy số dài
+    assert m("Bearer abcd1234efgh") == "<masked:credential>"
+    assert m("Nguyễn Văn A") == "<masked:name?>"              # tên riêng VN
+    # URL: giữ scheme/host/path, GIẤU giá trị query
+    assert m("https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentMark?Authen=zzz") == \
+        "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentMark?Authen=<v>"
+
+
+def test_apkdrift_looks_secret():
+    assert _ad._looks_secret("deadbeef1234") is True
+    assert _ad._looks_secret("GetStudentMark") is False
+    assert _ad._looks_secret("abcdefabcdef") is False         # hex nhưng KHÔNG có chữ số
+
+
+def test_apkdrift_extract_sets_and_markers():
+    strings = [
+        "https://api.fpt.edu.vn/fap/api/MyFAP/GetStudentMark?campusCode=x",
+        "https://api.fpt.edu.vn/fap/api/MyFAP/getCourseAttendance",
+        "https://survey.fpt.edu.vn/API/myFAP/GetRequiredSurvey?username=x",
+        "MyFAP/GetApiActive", "MyFAP/GetStudentMark", "MyFAP/GetCourseAttendance",
+        "https://fap-proxy.fpt.edu.vn", "https://api.fpt.edu.vn",
+        "sessionApiVersion", "[OTA]", "v1", "v2",
+    ]
+    info = _ad.extract(strings)
+    assert info["v1"] == {"GetStudentMark", "getCourseAttendance"}
+    assert info["survey"] == {"GetRequiredSurvey"}
+    assert info["v2"] == {"GetApiActive", "GetStudentMark", "GetCourseAttendance"}
+    assert "https://fap-proxy.fpt.edu.vn" in info["hosts"]
+    assert info["markers"]["fap_proxy"] and info["markers"]["sessionApiVersion"]
+    assert info["markers"]["OTA"] and info["markers"]["v1_literal"] and info["markers"]["v2_literal"]
+    # case-SENSITIVE: v1 có 'getCourseAttendance' thường, v2 có 'GetCourseAttendance' hoa -> KHÁC tập
+    assert "getCourseAttendance" in info["v1"] and "getCourseAttendance" not in info["v2"]
+
+
+def test_apkdrift_hbc_reader_synthetic():
+    names = ["GetStudentMark", "sessionApiVersion", "MyFAP/GetApiActive", ""]
+    blob = _hbc_blob(names)
+    hbc = _ad.HBC(blob)
+    assert hbc.version == 96
+    assert hbc.strings == names
+
+
+def test_apkdrift_hbc_reader_rejects():
+    # magic sai
+    try:
+        _ad.HBC(b"\x00" * 64); assert False
+    except _ad.HBCError:
+        pass
+    # version ngoài dải hỗ trợ
+    bad = bytearray(_hbc_blob(["x"]))
+    _struct.pack_into("<I", bad, 8, 200)
+    try:
+        _ad.HBC(bytes(bad)); assert False
+    except _ad.HBCError:
+        pass
+
+
+def test_apkdrift_load_bundle(tmp_path=None):
+    import tempfile, zipfile as _zip
+    blob = _hbc_blob(["GetStudentMark"])
+    d = tempfile.mkdtemp()
+    raw = os.path.join(d, "index.android.bundle")
+    with open(raw, "wb") as f:
+        f.write(blob)
+    data, src = _ad.load_bundle(raw)
+    assert data == blob and src == "bundle"
+    apk = os.path.join(d, "app.apk")
+    with _zip.ZipFile(apk, "w") as z:
+        z.writestr("assets/index.android.bundle", blob)
+        z.writestr("AndroidManifest.xml", b"x")
+    data2, src2 = _ad.load_bundle(apk)
+    assert data2 == blob and src2.startswith("APK:")
+
+
+def test_apkdrift_write_v2_key(tmp_path=None):
+    import tempfile
+    d = tempfile.mkdtemp()
+    env = os.path.join(d, ".env")
+    # append khi chưa có
+    with open(env, "w", encoding="utf-8") as f:
+        f.write("FAP_LANG=en\nTELEGRAM_TOKEN=keepme\n")
+    _ad.write_v2_key(env, "cafe1234deadbeef")
+    lines = open(env, encoding="utf-8").read().splitlines()
+    assert "FAP_LANG=en" in lines and "TELEGRAM_TOKEN=keepme" in lines
+    assert "FAP_V2_KEY=cafe1234deadbeef" in lines
+    # thay TẠI CHỖ (không nhân đôi), giữ dòng khác
+    _ad.write_v2_key(env, "beef5678feedface")
+    lines = open(env, encoding="utf-8").read().splitlines()
+    assert sum(1 for ln in lines if ln.startswith("FAP_V2_KEY=")) == 1
+    assert "FAP_V2_KEY=beef5678feedface" in lines
+    assert "FAP_LANG=en" in lines and "TELEGRAM_TOKEN=keepme" in lines
+
 
 # ---- runner không cần pytest ----
 def _run():
