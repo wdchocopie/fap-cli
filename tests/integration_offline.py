@@ -67,8 +67,11 @@ def fake_get(url, **k):
             return _R([])
     return _R(SUCCESS.get(ep, []))
 api.requests.get = fake_get; api._CACHE.clear()
-try: api.creds()
-except SystemExit: api.creds = lambda: ("SECRETTOKEN123", "FPTU", "HE190000")
+# Tách hẳn khỏi output/ THẬT: luôn dùng danh tính GIẢ (token.json thật mang MSSV/token thật vào output test),
+# và dấu phiên v1/v2 đọc từ file tạm KHÔNG tồn tại (dấu 'v2' thật sẽ làm mọi api.call() SystemExit -> selftest hỏng).
+api.creds = lambda: ("SECRETTOKEN123", "FPTU", "HE190000")
+import fapc.core.apiv2 as _V2M
+_V2M.TOKEN_JSON = os.path.join(tempfile.mkdtemp(), "token.json"); _V2M._SESSION_CACHE.clear()
 import fapc.app.notify as notify
 _REAL_TELEGRAM = notify._telegram          # giữ hàm THẬT để [I] kiểm việc cắt tin dài
 notify._telegram = lambda t: False; notify._discord = lambda t: False

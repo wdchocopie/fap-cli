@@ -214,17 +214,19 @@ def call(endpoint, params, roll, campus, base=BASE, secret=SECRET, timeout=25, c
         except requests.RequestException as e:
             # KHÔNG nội suy str(e): chuỗi requests/urllib3 nhúng NGUYÊN url (chứa Authen=<token>) -> lộ token.
             return None, f"Lỗi mạng ({type(e).__name__}) khi gọi {endpoint}"
+        parsed = True
         try:
             out = (r.status_code, r.json())
         except ValueError:
-            out = (r.status_code, r.text)
+            out = (r.status_code, r.text); parsed = False
         # Cảnh báo sớm v1 dời nhà: soi CHÍNH phản hồi vừa nhận (0 request thêm). getattr: response giả trong test
         # có thể không có .headers.
         try:
             ctype = (getattr(r, "headers", None) or {}).get("Content-Type", "")
         except Exception:                                # noqa: BLE001 — headers lạ không được làm hỏng call()
             ctype = ""
-        _warn_drift(endpoint, out[0], classify_drift(out[0], out[1], ctype))
+        # Thân JSON `null` (r.json() -> None) VẪN là JSON: đừng để nó trông như "404 không thân" -> báo nhầm v2.
+        _warn_drift(endpoint, out[0], classify_drift(out[0], "null" if parsed and out[1] is None else out[1], ctype))
         return out
 
     if checksum_value is False:
