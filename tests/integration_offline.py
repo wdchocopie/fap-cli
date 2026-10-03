@@ -499,6 +499,45 @@ try:
 finally:
     _ad._decode_functions = _saved_decode
 
+# [L] B4a: đơn từ ĐỔI trạng thái — ĐƯỜNG THẬT: requests (mock) -> api.call -> fetch_applications_checked
+#     -> app_changes -> mốc applications_state.json (thư mục tạm) -> push, qua lối vào THẬT `notify.run("notifications")`
+#     (cùng nhịp với thông báo mới — không cần job/lịch mới).
+_saved_app = SUCCESS.get("GetApplication")
+_saved_tg, _saved_appstate = notify._telegram, notify._APP_STATE
+notify._APP_STATE = os.path.join(_tmp, "apps.json")
+_pushed = []
+notify._telegram = lambda t: (_pushed.append(t), True)[1]
+_apps_pushed = lambda: [p for p in _pushed if "📄" in p]
+MODE["v"] = "success"
+try:
+    SUCCESS["GetApplication"] = [{"w_APP_ID": "501", "name": "Đơn xin Y", "createDate": "01/09/2026",
+                                  "studentStatus": "0", "processNote": "", "amount": "", "description": "", "fileUpLoad": ""}]
+    api._CACHE.clear()
+    _cap(lambda: notify.run("notifications"))                 # lần đầu: ghi mốc (thông báo + đơn), KHÔNG đẩy
+    check("apps: lần đầu chỉ ghi mốc", _pushed == [] and os.path.exists(notify._APP_STATE), str(_pushed)[:80])
+    SUCCESS["GetApplication"] = [dict(SUCCESS["GetApplication"][0], studentStatus=3)]   # server gửi INT 3
+    api._CACHE.clear()
+    _cap(lambda: notify.run("notifications"))
+    check("apps: ⏳ → 💳 được đẩy qua kênh", len(_apps_pushed()) == 1 and "→ 💳" in _apps_pushed()[0]
+          and "Đơn xin Y" in _apps_pushed()[0], str(_pushed)[:200])
+    api._CACHE.clear()
+    _cap(lambda: notify.run("notifications"))
+    check("apps: không báo lại cùng trạng thái", len(_apps_pushed()) == 1)
+    with open(notify._APP_STATE, encoding="utf-8") as _f: _before = _f.read()
+    MODE["v"] = "netdown"; api._CACHE.clear()
+    no_raise("apps: mất mạng không sập", lambda: notify.run("notifications"))
+    with open(notify._APP_STATE, encoding="utf-8") as _f:
+        check("apps: mất mạng GIỮ nguyên mốc", _f.read() == _before)
+    MODE["v"] = "expired"; api._CACHE.clear()
+    raises_exit("apps: token hết hạn -> exit ≠ 0 (cron thấy lỗi)", lambda: notify.run("notifications"))
+    check("apps: không đẩy gì khi lỗi", len(_apps_pushed()) == 1)
+finally:
+    MODE["v"] = "success"
+    notify._telegram, notify._APP_STATE = _saved_tg, _saved_appstate
+    if _saved_app is None: SUCCESS.pop("GetApplication", None)
+    else: SUCCESS["GetApplication"] = _saved_app
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)

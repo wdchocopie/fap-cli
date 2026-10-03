@@ -22,6 +22,7 @@
 | `fap notify grades` · `status` · `whatif [điểm]` | vi · điểm / tổng quan / mô phỏng GPA. en · grades / overview / GPA what-if. |
 | `fap notify grades-detail [MÔN]` | vi · điểm thành phần; kèm **mã hoặc tên môn** = chỉ 1 môn (kỳ 6 môn: **8 → 3 request**). en · component marks; naming a subject fetches only that one. |
 | `fap notify exams` | vi · gửi **lịch thi** (hẹn lịch để **nhắc trước ngày thi**). en · push the **exam schedule** (schedule it for exam reminders). |
+| `fap notify notifications` | vi · CHỈ đẩy **thông báo trường MỚI** + **đơn từ ĐỔI trạng thái** (cùng một lượt — xem [§10](#10-đơn-từ-đổi-trạng-thái--application-status-alerts)); lần đầu chỉ ghi mốc. en · push only **NEW school notifications** + **application status changes** (one round — see §10); the first run only records a baseline. |
 
 **VI —** Mọi lệnh (trừ `test`) dùng **chung lõi với bot** (`bot_core`) rồi đẩy kết quả lên kênh đã cấu hình. Không đối số → mặc định `test`. Bản không cài đặt: `python -m fapc notify <lệnh>`.
 **EN —** Every command (except `test`) shares the **bot core** (`bot_core`) and pushes the result to your configured channels. No argument → defaults to `test`. Non-install: `python -m fapc notify <cmd>`.
@@ -355,3 +356,43 @@ fap watch-attendance loop 15 --absent-only
 • EXE101 · 22/06/2026 · slot 2
    📍 BE-213 → Có mặt ✅
 ```
+
+---
+
+## 10. Đơn từ đổi trạng thái · Application status alerts
+
+**VI —** `fap notify notifications` nay làm **hai việc trong cùng một lượt**: đẩy thông báo trường MỚI (như cũ) **và** báo khi một **lá đơn đổi trạng thái** (`GetApplication.studentStatus`). Ai đã hẹn lệnh này chạy định kỳ (cron/Task Scheduler) thì **tự có thêm** cảnh báo đơn từ — **không cần job mới, không cần sửa `.env`**. Tốn thêm **1 request** (`GetApplication`) mỗi lượt.
+**EN —** `fap notify notifications` now does **two things in one round**: push NEW school notifications (as before) **and** alert you when an **application changes status** (`GetApplication.studentStatus`). If you already schedule this command (cron/Task Scheduler) you get application alerts **for free** — **no new job, no `.env` change**. Costs **one extra request** (`GetApplication`) per round.
+
+| Đổi sang · Changed to | Tin báo · Alert |
+|---|---|
+| `3` 💳 Đang chờ thanh toán · Pending payment | **đứng đầu**, có `‼️` + dòng *"👉 CẦN THANH TOÁN — thanh toán trong app myFAP"* · **first**, flagged `‼️` + a "pay in the official myFAP app" line |
+| `1` ✅ Đã được chấp nhận · Approved | ngay sau, có `🎉` · next, flagged `🎉` |
+| `0` ⏳ / `2` 🚫 / mã khác · other | báo bình thường; mã lạ hiện `❔ Khác (mã N)` như app 2.0.5 · plain; unknown codes show `❔ Other (code N)` like app 2.0.5 |
+| đơn **MỚI** · a **new** application | `🆕` + trạng thái hiện tại · `🆕` + its current status |
+
+```
+📄 Đơn từ đổi trạng thái  ·  2
+━━━━━━━━━━━━━━━━
+‼️ 📄 Đơn xin … (16/09/2025) · ⏳ Đang xử lý → 💳 Đang chờ thanh toán
+   👉 CẦN THANH TOÁN — thanh toán trong app myFAP chính thức (fap-cli chỉ đọc).
+🎉 📄 Đơn xin … (02/09/2025) · ⏳ Đang xử lý → ✅ Đã được chấp nhận
+   👉 Đơn đã được CHẤP NHẬN.
+```
+
+**VI —** Quy tắc chống báo nhầm:
+- Mỗi lá đơn khoá theo **mã đơn của server** (`w_APP_ID`; app 2.0.5 đọc `w_app_id` — dò không phân biệt hoa/thường), **không** theo vị trí hay tên đơn. Đơn thiếu mã thì không theo dõi.
+- **Lần đầu chỉ ghi mốc** (không báo dồn lịch sử). Mốc lưu `output/applications_state.json` (ghi nguyên tử, `chmod 0600`; file hỏng → cô lập `.corrupt` rồi ghi mốc lại).
+- Mã `3` (số) và `'3'` (chuỗi) là **một**. Đơn **biến mất** khỏi danh sách → bỏ khỏi mốc, **không** báo.
+- **Lỗi mạng / phản hồi lạ** → bỏ lượt, **giữ nguyên mốc**; danh sách rỗng trong khi mốc đang có đơn → coi là trục trặc tạm thời, giữ mốc. Đơn tạm mất trạng thái → giữ mã cũ, không báo.
+- Hai phần (thông báo · đơn từ) **cô lập lỗi**: phần này hỏng không làm mất phần kia; lỗi vẫn trả **exit ≠ 0** để cron/systemd thấy.
+
+**EN —** Anti-false-alarm rules:
+- Each application is keyed by the **server's application id** (`w_APP_ID`; app 2.0.5 reads `w_app_id` — matched case-insensitively), **never** by list position or title. Rows without an id are not tracked.
+- **The first run only records a baseline** (no history replay). State lives in `output/applications_state.json` (atomic write, `chmod 0600`; a corrupt file is quarantined as `.corrupt` and re-baselined).
+- Code `3` (int) and `'3'` (string) are the **same**. An application that **disappears** is dropped from the baseline **silently**.
+- **Network error / odd response** → the round is skipped and the **baseline kept**; an empty list while the baseline has rows is treated as a transient glitch. A row that temporarily loses its status keeps its old code (no alert).
+- The two parts (notifications · applications) are **failure-isolated**; an error still exits **non-zero** so cron/systemd notice.
+
+> ⚠️ **VI —** Như `seen_notifications.json`: `applications_state.json` là mốc **riêng từng máy** — đừng copy sang máy khác (sẽ báo trùng/báo sót).
+> ⚠️ **EN —** Like `seen_notifications.json`, `applications_state.json` is a **per-machine** baseline — don't copy it between machines (duplicate/missed alerts).

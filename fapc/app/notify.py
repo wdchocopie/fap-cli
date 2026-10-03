@@ -12,6 +12,7 @@ Chạy (từ gốc repo):
     fap notify attendance|banrisk      # điểm danh / cảnh báo cấm thi -> kênh
     fap notify grades|status|whatif    # điểm / tổng quan / mô phỏng GPA -> kênh
     fap notify grades-detail IAP491    # tham số NHIỀU TỪ được giữ nguyên (split(None, 1))
+    fap notify notifications           # CHỈ thông báo MỚI + đơn từ ĐỔI trạng thái (cả hai dedupe theo mốc)
 
 Mọi lệnh (trừ `test`) dùng chung lõi `bot_core.handle()` rồi đẩy kết quả lên kênh đã cấu hình;
 allowlist = `bot_core.COMMANDS` nên lệnh mới tự dùng được, không phải sửa file này.
@@ -26,6 +27,7 @@ from .. import config, fmt
 
 _UA = {"User-Agent": "fapc/1.0 (+FAP schedule notifier)"}
 _SEEN_NOTIF = paths.out("seen_notifications.json")
+_APP_STATE = paths.out("applications_state.json")    # {mã đơn: mã trạng thái} — mốc cảnh báo đơn từ
 
 # Trần ký tự MỘT tin nhắn của từng kênh (trần thật: Telegram 4096 / Discord 2000 — chừa biên an toàn).
 # Tin dài hơn được CẮT THÀNH NHIỀU MẨU (fmt.chunks) rồi gửi lần lượt — KHÔNG cắt cụt làm mất chữ.
@@ -169,6 +171,57 @@ def push_new_notifications():
     sent = push(msg)
     print(t("→ Đã gửi tới:", "→ Sent to:"), sent or t("(chưa cấu hình kênh — sửa .env)", "(no channel — edit .env)"))
 
+# ---------- đẩy khi ĐƠN TỪ đổi trạng thái (mốc theo mã đơn) ----------
+def _load_app_state():
+    """{mã đơn: mã trạng thái}; None nếu CHƯA ghi mốc (file vắng) — hoặc file HỎNG (cô lập .corrupt, ghi mốc lại)."""
+    try:
+        with open(_APP_STATE, encoding="utf-8") as f:
+            st = json.load(f)
+        if not isinstance(st, dict):
+            raise ValueError("applications_state.json: not an object")
+        return {str(k): str(v) for k, v in st.items()}
+    except FileNotFoundError:
+        return None
+    except (ValueError, OSError):
+        # Như _load_seen: cô lập .corrupt + coi như first_run (ghi mốc lại, KHÔNG báo nhầm hàng loạt).
+        try: os.replace(_APP_STATE, _APP_STATE + ".corrupt")
+        except OSError: pass
+        print(t("⚠️ applications_state.json hỏng → thiết lập lại mốc; lượt này KHÔNG báo đơn từ.",
+                "⚠️ applications_state.json corrupt → rebaselining; no application alerts this round."))
+        return None
+
+def _save_app_state(state):
+    paths.ensure_dir(_APP_STATE)
+    tmp = f"{_APP_STATE}.{os.getpid()}.tmp"         # tmp RIÊNG mỗi tiến trình: cron + tay chạy cùng lúc không giẫm nhau
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, _APP_STATE)
+    try: os.chmod(_APP_STATE, 0o600)                # 0600 như _save_seen: chế độ nhiều profile = dữ liệu NGƯỜI KHÁC
+    except OSError: pass
+
+def push_application_changes():
+    """Đẩy khi đơn từ ĐỔI trạng thái (vd ⏳ → 💳 cần thanh toán / ✅ được chấp nhận) hoặc có đơn MỚI.
+    Lần đầu chỉ ghi mốc. Lấy đơn THẤT BẠI (mạng/phản hồi lạ) -> bỏ lượt, KHÔNG đụng mốc."""
+    from ..core.api import creds
+    from ..core.extras import fetch_applications_checked, app_changes, app_changes_text
+    token, campus, roll = creds()
+    rows = fetch_applications_checked(token, campus, roll)
+    if rows is None:
+        print(t("(Không lấy được đơn từ — bỏ qua lượt này.)", "(Couldn't fetch applications — skipping this round.)")); return
+    prev = _load_app_state()
+    state, changes = app_changes(prev, rows)
+    if state != prev:
+        _save_app_state(state)
+    if prev is None:
+        print(t(f"👀 Ghi mốc {len(state)} đơn từ. Lần sau chỉ báo khi đổi trạng thái.",
+                f"👀 Baselined {len(state)} applications. Only status changes from now on.")); return
+    if not changes:
+        print(t("Không có đơn từ nào đổi trạng thái.", "No application status changes.")); return
+    msg = app_changes_text(changes)
+    print(msg)
+    sent = push(msg)
+    print(t("→ Đã gửi tới:", "→ Sent to:"), sent or t("(chưa cấu hình kênh — sửa .env)", "(no channel — edit .env)"))
+
 # ---------- nội dung ----------
 def _day_digest(sessions, day):
     items = sessions_on_day(sessions, day)         # [(start, end, session), ...] đã sort
@@ -220,7 +273,18 @@ def run(cmd="test"):
     name = parts[0] if parts else "today"            # 'weekly' giờ là lệnh thật (recap), KHÔNG còn alias 'week'
     arg = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     if name == "notifications":                 # đẩy dedupe (chỉ cái MỚI), khác các view tĩnh
-        return push_new_notifications()
+        # CÙNG NHỊP: dò luôn đơn từ đổi trạng thái -> ai đã hẹn `fap notify notifications` (cron/Task) tự có
+        # thêm cảnh báo đơn từ, KHÔNG cần job mới. Hai phần CÔ LẬP: phần này hỏng không làm mất phần kia;
+        # lỗi (nếu có) vẫn ném lại SAU CÙNG để cron/systemd thấy exit ≠ 0 như trước.
+        errs = []
+        for job in (push_new_notifications, push_application_changes):
+            try:
+                job()
+            except (Exception, SystemExit) as e:   # noqa: BLE001
+                errs.append(e)
+        if errs:
+            raise errs[0]
+        return
     if name == "help" or name not in COMMANDS:
         # Danh sách SINH TỪ COMMANDS (COMMAND_INFO) -> không thể lệch khi thêm lệnh mới.
         avail = " | ".join(["test"] + [c for c in COMMANDS if c != "help"])
