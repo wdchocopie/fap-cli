@@ -39,6 +39,7 @@ Start at [10-install](10-install.md); the command reference is [11-commands](11-
 | [03-extraction-catalog](03-extraction-catalog.md) | Danh mục dữ liệu trích xuất được · Extractable-data catalog |
 | [04-feid-oauth-tool](04-feid-oauth-tool.md) | Đăng nhập FE Identity (OAuth) · FE Identity (OAuth) login |
 | [05-checksum-map](05-checksum-map.md) | Bản đồ checksum theo endpoint · Per-endpoint checksum map |
+| [20-api-fields](20-api-fields.md) | **Ý nghĩa đã kiểm chứng của từng trường** (vd `meetURL` là mã Meet trần, mã `P/A/N`, `studentStatus 0/1/2`), trường dùng/chưa dùng, PII giữ nguyên, cách kiểm lại sau khi FAP cập nhật app · Verified field meanings, used vs unused, PII to keep unused, re-audit after an app update |
 
 ---
 
