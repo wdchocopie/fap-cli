@@ -31,12 +31,15 @@
 > **VI —** `fap refresh` đọc `output/oauth_tokens.json` (chứa `refresh_token`) → cấp `access_token` mới → đổi lấy token FAP (`output/token.json`). Nếu nó báo `Refresh lỗi ... refresh_token hết hạn?` thì job nền sẽ dừng — đó là tín hiệu bạn phải đăng nhập lại bằng tay.
 > **EN —** `fap refresh` reads `output/oauth_tokens.json` (holds the `refresh_token`) → mints a fresh `access_token` → exchanges it for the FAP token (`output/token.json`). If it prints `Refresh lỗi ... refresh_token hết hạn?`, the headless job stops — that is your cue to re-login interactively.
 
+> 🧪 **VI —** `token.json` mang dấu **phiên bản API** (`api_version`). Đổi `FAP_API_VERSION` (v1 ↔ v2 — v2 là **opt-in, thử nghiệm**, cần `FAP_V2_KEY`) thì mọi lệnh dữ liệu dừng cho tới khi chạy **`fap refresh`**; sau đó **khởi động lại** service thường trú để nạp `.env` mới (vd `systemctl --user restart fap-bot fap-watch fap-gradewatch`, hoặc task Windows tương ứng). Các bước đầy đủ: [21-api-v2 §5](21-api-v2.md).
+> 🧪 **EN —** `token.json` carries an **API-version stamp** (`api_version`). After changing `FAP_API_VERSION` (v1 ↔ v2 — v2 is **opt-in and experimental** and needs `FAP_V2_KEY`), every data command stops until you run **`fap refresh`**; then **restart** resident services so they load the new `.env` (e.g. `systemctl --user restart fap-bot fap-watch fap-gradewatch`, or the matching Windows task). Full steps: [21-api-v2 §5](21-api-v2.md).
+
 **VI —** Mẹo kiểm tra nhanh trước khi giao cho máy nền:
 **EN —** Quick sanity check before handing it to a scheduler:
 
 ```bash
 fap whoami     # token FAP đã lưu chưa · is the FAP token saved
-fap doctor     # Python, token.json, .env, requests, kênh notify · environment self-check
+fap doctor     # Python, token.json, .env, requests, kênh notify, API v1/v2 · environment self-check
 ```
 
 ---
@@ -235,7 +238,7 @@ fap refresh && fap banrisk || fap notify test   # nếu nguy cơ (exit 2) -> g�
 |---|---|
 | Nhẹ tay · Be gentle | vi: vài lần/ngày là đủ, đừng chạy mỗi phút/giờ · en: a few times/day is plenty, never per-minute/hour |
 | Của bạn thôi · Yours only | vi: chỉ tài khoản của chính bạn · en: your own account only |
-| Bí mật ở đúng chỗ · Keep secrets in place | vi: `.env` + `output/` (`token.json`, `oauth_tokens.json`, `gcal_token.json`) + `credentials.json` · en: in `.env` + `output/` + `credentials.json` |
+| Bí mật ở đúng chỗ · Keep secrets in place | vi: `.env` (kể cả `FAP_V2_KEY` nếu bật v2) + `output/` (`token.json`, `oauth_tokens.json`, `gcal_token.json`) + `credentials.json` · en: in `.env` (including `FAP_V2_KEY` if you opted into v2) + `output/` + `credentials.json` |
 | Đừng commit/đừng bake · Don't commit/bake | vi: tất cả đã `.gitignore`; đừng nhúng vào image hay log · en: all `.gitignored`; never embed in images or logs |
 | Lỗi `refresh` = login lại · Refresh failure = re-login | vi: `refresh_token` hết hạn thì job dừng, chạy `fap login` tay · en: when the refresh token expires the job stops; run `fap login` manually |
 
@@ -269,6 +272,7 @@ chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens.json
 | `output/grade_state.json` | ❌ **KHÔNG** | baseline **riêng từng máy** — copy sang ⇒ **báo trùng hoặc báo sót điểm** · per-machine baseline; copying causes **duplicate or missed alerts** |
 | `output/attendance_state.json` | ❌ **KHÔNG** | như trên · same |
 | `output/seen_notifications.json` | ❌ **KHÔNG** | như trên · same |
+| `output/applications_state.json` | ❌ **KHÔNG** | như trên — mốc cảnh báo **đơn đổi trạng thái** của `fap notify notifications` · same — the application-status baseline used by `fap notify notifications` |
 | `credentials.json`, `output/gcal_token.json` | *(chỉ khi máy đó thật sự `calendar-sync`)* | Google Calendar, không liên quan token FAP · unrelated to the FAP token |
 
 ### 9.2 🔴 Chỉ MỘT máy được refresh · Exactly ONE machine may refresh
@@ -299,6 +303,9 @@ DISCORD_WEBHOOK_URL=
 
 **VI —** Token trên PC hết hạn thì **không** login lại ở PC — chỉ cần copy lại `output/token.json` từ VPS (`scp` + `chmod 600`). Login lại ở PC cũng hợp lệ, nhưng nó **xoay** `refresh_token` và giết bản của VPS.
 **EN —** When the PC's token expires, don't re-login there — just re-copy `output/token.json` from the VPS (`scp` + `chmod 600`). Re-logging-in on the PC also works, but it **rotates** the `refresh_token` and kills the VPS's copy.
+
+> 🧪 **VI —** Đổi `FAP_API_VERSION` (v1 ↔ v2, opt-in): máy `FAP_TOKEN_READONLY=1` **không** tự `fap refresh` được ⇒ đổi `FAP_API_VERSION` **trên cả hai máy cùng lúc**, để VPS `fap refresh`, rồi chép lại `output/token.json` (dấu `api_version` phải khớp, nếu không PC báo "bạn vừa đổi phiên bản API"). `FAP_V2_KEY` chỉ cần ở máy nào chạy v2 — mỗi máy tự ghi vào `.env` của nó, **đừng** chép qua chat.
+> 🧪 **EN —** Switching `FAP_API_VERSION` (v1 ↔ v2, opt-in): a `FAP_TOKEN_READONLY=1` box **can't** `fap refresh` ⇒ change `FAP_API_VERSION` **on both machines together**, let the VPS `fap refresh`, then re-copy `output/token.json` (the `api_version` stamp must match, or the PC says "you switched API versions"). `FAP_V2_KEY` is needed on every box that runs v2 — write it into each box's own `.env`, **never** paste it through chat.
 
 ### 9.3 ❌ ĐỪNG chạy bot/watcher ở cả hai nơi · ❌ DON'T run bots/watchers in both places
 

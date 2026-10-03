@@ -63,6 +63,7 @@ fap-cli/
             ├── grade_state.json         baseline watch-grades
             ├── attendance_state.json    baseline watch-attendance
             ├── seen_notifications.json  baseline notify
+            ├── applications_state.json  baseline đơn đổi trạng thái (notify notifications, 0600) · application-status baseline
             ├── subjects_catalog.json    cache
             ├── gcal_token.json          token Google Calendar RIÊNG · per-profile Google token
             ├── lichhoc.ics / lichthi.ics
@@ -90,8 +91,8 @@ fap-cli/
 **VI —** Profile nào **không tự khai** một khóa gửi thì kênh đó **TẮT HẲN** — đó là **thiết kế, không phải bug**. Thà không gửi còn hơn bắn điểm của alice vào chat của chủ máy.
 **EN —** A profile that **doesn't declare** a delivery key simply has that channel **switched off** — that is **by design, not a bug**. Silence beats pushing alice's marks into the owner's chat.
 
-**VI —** Các khóa **thuộc về máy** thì vẫn thừa kế từ `.env` gốc: `FAP_LANG`, `FAP_SEMESTER`, `FAP_TOKEN_READONLY`, `FAP_REMIND_MINUTES`, `FAP_AUTOUPDATE_MIN`, `FAP_WATCH_ABSENT_ONLY`, `FAP_CACHE_MIN`, `FAP_EXTRACT_DELAY`, `FAP_TOTAL_CREDITS`. Muốn khác? Khai đè trong `.env.<tên>`.
-**EN —** **Machine-level** keys are still inherited from the root `.env`: `FAP_LANG`, `FAP_SEMESTER`, `FAP_TOKEN_READONLY`, `FAP_REMIND_MINUTES`, `FAP_AUTOUPDATE_MIN`, `FAP_WATCH_ABSENT_ONLY`, `FAP_CACHE_MIN`, `FAP_EXTRACT_DELAY`, `FAP_TOTAL_CREDITS`. Want a different value? Override it in `.env.<name>`.
+**VI —** Các khóa **thuộc về máy** thì vẫn thừa kế từ `.env` gốc: `FAP_LANG`, `FAP_SEMESTER`, `FAP_TOKEN_READONLY`, `FAP_REMIND_MINUTES`, `FAP_AUTOUPDATE_MIN`, `FAP_WATCH_ABSENT_ONLY`, `FAP_CACHE_MIN`, `FAP_EXTRACT_DELAY`, `FAP_TOTAL_CREDITS`, `FAP_API_VERSION`, `FAP_V2_KEY` (API v2 opt-in — [21-api-v2](21-api-v2.md) §5; đổi phiên bản thì **mỗi** profile phải `fap refresh` lại vì token của từng người mang dấu phiên bản). Muốn khác? Khai đè trong `.env.<tên>`.
+**EN —** **Machine-level** keys are still inherited from the root `.env`: `FAP_LANG`, `FAP_SEMESTER`, `FAP_TOKEN_READONLY`, `FAP_REMIND_MINUTES`, `FAP_AUTOUPDATE_MIN`, `FAP_WATCH_ABSENT_ONLY`, `FAP_CACHE_MIN`, `FAP_EXTRACT_DELAY`, `FAP_TOTAL_CREDITS`, `FAP_API_VERSION`, `FAP_V2_KEY` (opt-in API v2 — [21-api-v2](21-api-v2.md) §5; after switching versions **every** profile must `fap refresh`, since each token is version-stamped). Want a different value? Override it in `.env.<name>`.
 
 > ⚠️ **VI —** `FAP_SEMESTER` **có** thừa kế. Chủ máy ép `FAP_SEMESTER=Spring2026` thì profile khách cũng bị ép theo (chỉ sai *khung thời gian* của dữ liệu **chính họ**, không rò dữ liệu). Để trống ở `.env` gốc là an toàn nhất.
 > ⚠️ **EN —** `FAP_SEMESTER` **is** inherited. If the owner forces `FAP_SEMESTER=Spring2026`, guest profiles are forced too (it only skews the *time window* of **their own** data — nothing leaks). Leaving it empty in the root `.env` is safest.
@@ -248,8 +249,8 @@ journalctl --user -u fap-watch@alice.service -n 50 -f
 
 ### 6.3 🔴 `refresh_token` của mỗi người nằm trên server CỦA BẠN · Everyone's refresh token lives on YOUR server
 
-**VI —** Đây là hệ quả **không né được** của multi-profile: `output/profiles/alice/oauth_tokens.json` là **chìa khóa dài hạn** vào dữ liệu FAP của alice, và nó nằm trên máy bạn. Quyền file: `token.json`, `oauth_tokens.json`, `gcal_token.json`, `attendance_state.json`, `seen_notifications.json`, `api/*.json`, `local_data.json` được ghi với mode `0600`; **`grade_state.json` thì CHƯA** (nó chứa điểm — nếu máy có nhiều user Linux, hãy `chmod 700 output/profiles/<tên>`; `deploy/setup-profile.sh` tự làm việc này). Kèm theo:
-**EN —** This is the **unavoidable** consequence of multi-profile: `output/profiles/alice/oauth_tokens.json` is a **long-lived key** to alice's FAP data and it sits on your box. File modes: `token.json`, `oauth_tokens.json`, `gcal_token.json`, `attendance_state.json`, `seen_notifications.json`, `api/*.json` and `local_data.json` are written `0600`; **`grade_state.json` is not yet** (it holds marks — on a multi-user box, `chmod 700 output/profiles/<name>`; `deploy/setup-profile.sh` does that for you). It follows that:
+**VI —** Đây là hệ quả **không né được** của multi-profile: `output/profiles/alice/oauth_tokens.json` là **chìa khóa dài hạn** vào dữ liệu FAP của alice, và nó nằm trên máy bạn. Quyền file: `token.json`, `oauth_tokens.json`, `gcal_token.json`, `attendance_state.json`, `seen_notifications.json`, `applications_state.json`, `api/*.json`, `local_data.json` được ghi với mode `0600`; **`grade_state.json` thì CHƯA** (nó chứa điểm — nếu máy có nhiều user Linux, hãy `chmod 700 output/profiles/<tên>`; `deploy/setup-profile.sh` tự làm việc này). Kèm theo:
+**EN —** This is the **unavoidable** consequence of multi-profile: `output/profiles/alice/oauth_tokens.json` is a **long-lived key** to alice's FAP data and it sits on your box. File modes: `token.json`, `oauth_tokens.json`, `gcal_token.json`, `attendance_state.json`, `seen_notifications.json`, `applications_state.json`, `api/*.json` and `local_data.json` are written `0600`; **`grade_state.json` is not yet** (it holds marks — on a multi-user box, `chmod 700 output/profiles/<name>`; `deploy/setup-profile.sh` does that for you). It follows that:
 
 - **VI —** Alice phải **đồng ý rõ ràng** (Bước 1) — đây là chuyện **con người**, không phải chuyện kỹ thuật.
   **EN —** Alice must give **explicit consent** (Step 1) — a **human** matter, not a technical one.

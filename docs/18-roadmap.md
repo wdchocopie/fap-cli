@@ -212,11 +212,46 @@ Ghi lại để mai khỏi điều tra lại. Đã đo/đọc code thật:
 | `docs/20-api-fields.md` + `analysis/keys_schema.py` | Ghi lại sự thật đã đo để khỏi điều tra lại; sơ đồ trường **chỉ tên khoá**, không bao giờ in giá trị | 🔄 PR #2 |
 
 **Còn mở · Open:**
-- `/profile` gửi CCCD / SĐT / ngày sinh / email qua bot → nên chỉ hiện ở CLI ([20](20-api-fields.md) §4).
-- Ứng viên còn lại: [20](20-api-fields.md) §3 (tài liệu môn, cờ qua/trượt transcript, điểm chính thức từ `GetMarkByCourse`, đợt feedback…).
-- Lỗi phụ từ audit: `_news_get` phân biệt hoa thường; `exam_countdown` không nhận `examSubject`; `fees()` báo "chưa có chi tiết" khi thật ra 404; `conduct.fetch` coi mọi code 201 là "chưa có dữ liệu".
+- ~~`/profile` gửi CCCD / SĐT / ngày sinh / email qua bot → nên chỉ hiện ở CLI~~ → **xong** ([§7](#7-đợt-2026-10-03--round-of-2026-10-03)): CCCD / SĐT / ngày sinh chỉ ở CLI; `email` vẫn hiện trong chat.
+- Ứng viên còn lại: [20](20-api-fields.md) §3 (tài liệu môn, cờ qua/trượt transcript, điểm chính thức từ `GetMarkByCourse`, ~~đợt feedback~~ → xong ở §7…).
+- ~~Lỗi phụ từ audit: `_news_get` phân biệt hoa thường; `exam_countdown` không nhận `examSubject`; `fees()` báo "chưa có chi tiết" khi thật ra 404; `conduct.fetch` coi mọi code 201 là "chưa có dữ liệu".~~ → **xong cả bốn** ([§7](#7-đợt-2026-10-03--round-of-2026-10-03)).
 - ~~Kiểm bản app mới **versionCode 29**~~ → **xong (2.0.5)**: v1 không đổi ⇒ fap-cli chạy bình thường; mới có **API v2** qua `fap-proxy` (chưa bật được kiểm chứng, [21](21-api-v2.md)), **OTA tự host** ⇒ JS có thể đổi không cần bản Play mới ([20](20-api-fields.md) §5), và **`studentStatus` đổi nghĩa** (`2` = Hủy, `3` = Chờ thanh toán) — đã sửa ngay trong PR #2 trước khi merge.
-- Chuẩn bị cho v2 (chưa làm): `check_auth` hiểu lỗi kiểu v2 (tránh "danh sách rỗng im lặng"); bộ phân loại thuần cảnh báo sớm khi v1 bị tắt; script so APK offline có che dữ liệu.
+- ~~Chuẩn bị cho v2 (chưa làm): `check_auth` hiểu lỗi kiểu v2 (tránh "danh sách rỗng im lặng"); bộ phân loại thuần cảnh báo sớm khi v1 bị tắt; script so APK offline có che dữ liệu.~~ → **xong cả ba**, thêm client v2 opt-in ([§7](#7-đợt-2026-10-03--round-of-2026-10-03)).
+
+---
+
+## 7. Đợt 2026-10-03 · Round of 2026-10-03
+
+**VI —** Nhánh `feat/v2-prep-todo`: chuẩn bị cho API v2 của myFAP 2.0.5 + các việc "chỉ bạn làm được" + cảnh báo đơn từ + dọn các lỗi phụ còn mở ở §6. Lúc chốt: **181/181 unit + 195/195 integration** test offline PASS.
+**EN —** Branch `feat/v2-prep-todo`: groundwork for myFAP 2.0.5's API v2 + a to-do block + application alerts + the minor bugs left open in §6. At sign-off: **181/181 unit + 195/195 integration** offline tests PASS.
+
+| Thay đổi · Change | Quyết định chính · Key decision | Tài liệu · Docs |
+|---|---|---|
+| **Client API v2 opt-in** (`fapc/core/apiv2.py`, `FAP_API_VERSION=v2`) | Mặc định **v1**, hành vi v1 y nguyên. v2 **thử nghiệm, chưa kiểm chứng thật**. Khoá ký v2 **không nhúng, không commit** — chỉ trong `.env`, mỗi người tự trích từ APK của mình. `token.json` đóng dấu `api_version`; lệch ⇒ `fap refresh`. Mọi request v2 ký bằng **token của chính người dùng** · opt-in, experimental; key only in `.env`, never committed; version-stamped token | [21](21-api-v2.md) §5 · [15](15-config.md) |
+| `analysis/apk_drift.py` | So APK/bundle **offline**, thư viện chuẩn, không in secret/PII; exit `0/1/2` cho cron/CI; `--write-v2-key` ghi `.env` mà không in giá trị · offline drift checker | [20](20-api-fields.md) §5.1 |
+| `check_auth` nhận lỗi phiên kiểu v2 + gợi ý drift thụ động (`classify_drift`) | `code 401` / `Unauthorized` trong HTTP 200 = hết phiên; **HTTP 500 không tính** (tránh vòng refresh, khác app); drift chỉ soi phản hồi đã có (**0 request thêm**), in **1 lần/tiến trình**, không URL/token | [16](16-troubleshooting.md) · [21](21-api-v2.md) §4 |
+| **Một** quy tắc chọn kỳ (`select_semester`) | Kỳ đầu tiên chứa hôm nay, so theo **ngày** — **ngày cuối kỳ vẫn trong kỳ** (**cố ý lệch app**, app so thời điểm với 00:00 ngày cuối ⇒ mất lịch ngày cuối); không có ⇒ `startDate` gần nhất (như app); dùng chung cho `current_semester` + `pick_semester` · last day inclusive, a deliberate deviation | [16](16-troubleshooting.md) · [17](17-architecture.md) §2 |
+| **Việc cần làm** (`fap todo`, `/todo`, cuối `/all`, gắn vào `fap notify today` chỉ khi có việc) | **Chỉ đọc**, chỉ dẫn tới kênh chính thức; `CheckUpdateProfile` chặt hơn app (chỉ boolean `false` trên v1; v2: khác rỗng); `GetStudentRate` **không dùng** (nghĩa trường chưa kiểm chứng) · read-only, points to official channels | [13](13-notify.md) §11 |
+| **Đơn đổi trạng thái** trong `fap notify notifications` | Cùng nhịp, **không job mới**; khoá theo `w_APP_ID`; lần đầu ghi mốc im lặng; `output/applications_state.json` **riêng từng máy / từng profile**, không copy | [13](13-notify.md) §10 · [14](14-deploy.md) §9 · [19](19-multi-profile.md) |
+| `fap fees`: link hoá đơn điện tử `dng.fpt.edu.vn` + 404 `GeFeeByRoll`; khoá tin tức / thẻ lịch thi 2.0.5; `conduct` 201 | Link chứa MSSV ⇒ **chỉ CLI**; 404 = "không dùng được", không phải "chưa có học phí"; khoá so **không phân biệt hoa/thường**; `201` do token/checksum được **báo**, chỉ NullReference mới là "chưa có điểm" | [11](11-commands.md) · [03](03-extraction-catalog.md) · [20](20-api-fields.md) §1 |
+| `/profile` trên bot/web ẩn ngày sinh · SĐT · CCCD | PII nhạy cảm **chỉ ở CLI** (`fap profile`); mặc định an toàn (`full=False`) | [20](20-api-fields.md) §4 |
+| `fap doctor` | In phiên bản API; đang v2 thì `FAP_V2_KEY` **có/thiếu** — không bao giờ in giá trị | [11](11-commands.md) |
+
+**Quyết định · Decisions:**
+- **VI —** Ngày cuối kỳ **tính là trong kỳ** — lệch app myFAP 2.0.5 có chủ ý. · **EN —** The last day of a term **counts as inside it** — a deliberate deviation from myFAP 2.0.5.
+- **VI —** v2 là **opt-in**; khoá chỉ ở `.env` (hoặc biến môi trường), **không bao giờ** commit, in ra, hay nằm trong `token.json`/log. · **EN —** v2 is **opt-in**; the key lives only in `.env`/the environment and is **never** committed, printed, or written to `token.json`/logs.
+- **VI —** PII hồ sơ (ngày sinh, SĐT, CCCD) **chỉ ở CLI**. · **EN —** Profile PII (DOB, phone, ID card) is **CLI-only**.
+- **VI —** `GetApiActive` **không bao giờ** được gọi — fap-cli không tự dò cờ v1/v2 của server; người dùng tự chọn bằng `FAP_API_VERSION`. · **EN —** `GetApiActive` is **never** called — fap-cli doesn't probe the server's v1/v2 flag; the user picks with `FAP_API_VERSION`.
+- **VI —** `GetStudentRate` **không dùng** (nghĩa trường chưa kiểm chứng; v2 cũng không có). · **EN —** `GetStudentRate` stays **unused** (unverified field meanings; absent on v2 anyway).
+
+**Chưa kiểm chứng live · Not yet verified live:**
+- **VI —** v2 **từ đầu tới cuối**: server có chấp nhận chữ ký/tham số, token v1 có dùng được trên v2, phản hồi đăng nhập v2 có cùng dạng v1 không. · **EN —** v2 **end-to-end**: whether the server accepts the signature/params, whether v1 tokens work on v2, whether the v2 login reply matches v1's shape.
+- **VI —** `CheckOpenFeedBack` / `CheckUpdateProfile` trong một **đợt feedback đang mở thật** / khi FAP **thật sự** yêu cầu cập nhật hồ sơ. · **EN —** `CheckOpenFeedBack` / `CheckUpdateProfile` during a **real open round** / a **real** profile-update request.
+- **VI —** Link hoá đơn `dng.fpt.edu.vn` với tài khoản **campus khác Đà Nẵng** (app hiện nút cho mọi campus, nhưng chưa mở thử). · **EN —** The `dng.fpt.edu.vn` invoice link for **non-Da Nang campuses** (the app shows it for every campus, untested).
+- **VI —** `w_APP_ID` có **ổn định** qua thời gian (khoá của cảnh báo đơn từ). · **EN —** Whether `w_APP_ID` is **stable** over time (the application-alert key).
+
+> 🧭 **VI —** Không có bước deploy thủ công bắt buộc: v2 mặc định tắt; `applications_state.json` tự ghi mốc (im lặng) ở lượt `fap notify notifications` đầu tiên. Bật v2 thì theo [21](21-api-v2.md) §5 (`FAP_V2_KEY` + `FAP_API_VERSION=v2` + `fap refresh` + restart service).
+> 🧭 **EN —** No mandatory manual deploy step: v2 is off by default and `applications_state.json` baselines itself (silently) on the first `fap notify notifications` round. To opt into v2 follow [21](21-api-v2.md) §5 (`FAP_V2_KEY` + `FAP_API_VERSION=v2` + `fap refresh` + restart services).
 
 ---
 

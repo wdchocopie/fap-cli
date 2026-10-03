@@ -104,9 +104,9 @@ Bộ **feedback** chỉ có trên v2 và **chưa màn hình nào gọi** ⇒ ch�
 | Request | `GET https://fap-proxy.fpt.edu.vn/MyFAP/<Name>?<params>` · header `ClientCode: MyFAP`, `CampusCode`, `Authorization: Bearer <token>`, `Checksum: <sig>:<epoch>`, `Content-Type: application/json` · timeout 15 s · **không** theo redirect · **không** thử lại ±1h (ký theo epoch giây) |
 | Đăng nhập · Login | `POST …/MyFAP/AuthenticationByFeId`, body `{"token": <access token FE>}`, ký bằng **chính** token FE; `token.json` được đóng dấu `"api_version"` (cả v1 lẫn v2). Token cũ không có dấu = `v1` |
 | Phiên lệch · Mismatch | `api_version` trong `token.json` ≠ `FAP_API_VERSION` ⇒ `SystemExit` "chạy `fap refresh`" (giống app: lệch `sessionApiVersion` ⇒ đăng xuất). `fap refresh`, watcher tự refresh, `/login` của bot đều đổi lại theo phiên bản đang cấu hình |
-| Luôn v1 · Always v1 | `GetAllActiveCampus` (`fap campuses`): app gọi bản v2 bằng **bearer tĩnh của app** — fap-cli không mượn danh tính đó, nên lệnh này vẫn đi v1 và **không cần token** |
+| Luôn v1 · Always v1 | `GetAllActiveCampus` (`fap campuses`): luôn đi v1 và **không cần token** (chạy được trước khi đăng nhập) — fap-cli không mượn danh tính của app · always v1, no token needed |
 | Bỏ qua · Skipped | `GetStudentRate`: adapter v2 của app trả `[]` **cố định** (không có request) ⇒ `fap extract` bỏ qua, in ghi chú |
-| Cấm · Denied | `AddRate`, `SubmitStudentFeedback`, `UpdateTokedevices`, `UpdateTokenDonor` (GHI) và `GetApiActive` (cần bearer tĩnh) — bị từ chối **trước khi** chạm mạng |
+| Cấm · Denied | `AddRate`, `SubmitStudentFeedback`, `UpdateTokedevices`, `UpdateTokenDonor` (GHI) và `GetApiActive` (fap-cli **không bao giờ** gọi) — bị từ chối **trước khi** chạm mạng |
 | Lỗi/cache · Errors/cache | Cùng hợp đồng `(http, body)` với v1, cùng `check_auth`/`is_session_expired`, cùng cache `FAP_CACHE_MIN` (khoá tách riêng `v2|…`). Lỗi mạng không in URL/token/khoá |
 
 **Bảng endpoint (đọc từ adapter v2 của app) · Endpoint table (read from the app's v2 adapters)** — mọi endpoint là GET · all GET:

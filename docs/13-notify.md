@@ -407,7 +407,7 @@ fap watch-attendance loop 15 --absent-only
 | Mục · Item | Nguồn · Source | Khi nào hiện · Shown when |
 |---|---|---|
 | 📝 Đợt feedback giảng dạy đang mở · teaching-feedback round open | `CheckOpenFeedBack` | `data` là `true` — boolean **hoặc chuỗi** `'true'` (app 2.0.5 nhận cả hai) · `data` is `true`, boolean **or the string** `'true'` (app 2.0.5 accepts both) |
-| 👤 FAP yêu cầu cập nhật hồ sơ · profile update required | `CheckUpdateProfile` | `data` là boolean `false` — đúng điều kiện app 2.0.5 hiện *"You need to update your profile at FAP"*. Rỗng / lỗi / giá trị lạ = **không biết** → không hiện gì · `data` is boolean `false`, the exact condition under which app 2.0.5 shows that prompt; empty / error / odd = **unknown** → nothing shown |
+| 👤 FAP yêu cầu cập nhật hồ sơ · profile update required | `CheckUpdateProfile` | **v1:** `data` là boolean `false` — đúng điều kiện app 2.0.5 hiện *"You need to update your profile at FAP"*. **v2** (opt-in, [21-api-v2](21-api-v2.md) §5): adapter v2 của app đổi nghĩa — `data` **khác rỗng** = phải cập nhật, rỗng = không; fap-cli quy đổi y như vậy. Lỗi / giá trị lạ (và trên v1: rỗng) = **không biết** → không hiện gì · **v1:** `data` is boolean `false`, the exact condition under which app 2.0.5 shows that prompt. **v2** (opt-in): the app's v2 adapter flips it — a **non-empty** `data` means an update is required, empty means none, and fap-cli maps it the same way. Error / odd value (and, on v1, empty) = **unknown** → nothing shown |
 | 💳 Đơn chờ thanh toán · application awaiting payment | `GetApplication` | `studentStatus` = `3` (mỗi đơn 1 dòng) · one line per application |
 
 ```
