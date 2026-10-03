@@ -270,6 +270,80 @@ finally:
         else: SUCCESS[_k] = _v
     api._CACHE.clear()
 
+# [L] B1 — lõi API cứng hơn, ĐƯỜNG THẬT: requests (mock) -> api.call -> check_auth/drift -> fetch -> handle.
+#     Phản hồi giả có `.text` + `.headers` như requests thật. Cờ drift là 1-lần/process -> reset trước, trả lại sau.
+check("drift: lưu lượng bình thường (A–K) KHÔNG bật gợi ý v2", not api._DRIFT_WARNED["done"])
+class _Raw:
+    def __init__(s, code, js=None, text="", ctype="application/json; charset=utf-8"):
+        s.status_code, s._js, s.text, s.headers = code, js, text, {"Content-Type": ctype}
+    def json(s):
+        if s._js is None: raise ValueError("not json")
+        return s._js
+_L = {"resp": None}
+def _fake_raw(url, **k):
+    return _L["resp"](url.split("/MyFAP/")[1].split("?")[0])
+_saved_get, _saved_drift = api.requests.get, dict(api._DRIFT_WARNED)
+try:
+    api.requests.get = _fake_raw
+    # (1) hết phiên KIỂU v2 bọc trong HTTP 200 -> raise rõ ở CLI, bot trả lời 'refresh' (không còn [] im lặng)
+    for _lbl, _body in [("code '401'", {"code": "401", "errorMessage": None, "data": None}),
+                        ("errorMessage 'Unauthorized'", {"code": "200", "errorMessage": "Unauthorized", "data": []})]:
+        _L["resp"] = lambda ep, b=_body: _Raw(200, b)
+        api._CACHE.clear()
+        raises_exit(f"v2 {_lbl}: grades.report raise", g.report)
+        raises_exit(f"v2 {_lbl}: exams raise", ex.exams)
+        check(f"v2 {_lbl}: bot trả lời 'refresh'", "refresh" in _cap(lambda: handle("grades")).lower())
+        check(f"v2 {_lbl}: bot /all không sập", "refresh" in _cap(lambda: handle("all")).lower())
+    # (2) HTTP 500 KHÔNG phải hết phiên: không raise _EXPIRED_MSG, CLI không sập
+    _L["resp"] = lambda ep: _Raw(500, None, text="<html><body>Server Error</body></html>", ctype="text/html")
+    api._CACHE.clear()
+    no_raise("HTTP 500: grades.report không raise hết-phiên", g.report)
+    check("HTTP 500: bot KHÔNG bảo refresh", "fap refresh" not in _cap(lambda: handle("grades")))
+    # (3) drift: 404 + JSON (GeFeeByRoll thật) và 404-HTML của GetSemesterMark (đã 404 từ trước) -> IM
+    api._DRIFT_WARNED["done"] = False
+    _L["resp"] = lambda ep: (_Raw(404, {"Message": "No HTTP resource was found"}) if ep == "GeFeeByRoll"
+                             else _Raw(404, None, text="<html>404</html>", ctype="text/html") if ep == "GetSemesterMark"
+                             else _Raw(200, {"code": "200", "errorMessage": None, "data": "0"}))
+    api._CACHE.clear()
+    _e = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(_e):
+        ex.fees()
+        api.call("GetSemesterMark", [("CampusCode", "FPTU"), ("Authen", "SECRETTOKEN123")], "HE190000", "FPTU",
+                 checksum_value=False)
+    check("drift: 404-JSON / 404 đã-biết KHÔNG báo động giả", _e.getvalue() == "" and not api._DRIFT_WARNED["done"],
+          _e.getvalue()[:160])
+    # (4) drift THẬT (v1 bị chuyển hướng): đúng 1 gợi ý dù nhiều lệnh, không rò token/URL, lệnh vẫn trả lời
+    _L["resp"] = lambda ep: _Raw(302, None, text="", ctype="text/html")
+    api._CACHE.clear()
+    _e = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(_e):
+        _r1 = handle("grades"); _r2 = handle("attendance"); _r3 = handle("exams")
+    _out = _e.getvalue()
+    check("drift: 302 -> đúng 1 gợi ý song ngữ", _out.count("docs/21-api-v2.md") == 2 and "moved to API v2" in _out, _out[:200])
+    check("drift: gợi ý KHÔNG rò token/URL", "SECRETTOKEN123" not in _out and "://" not in _out and "Authen" not in _out)
+    check("drift: lệnh vẫn trả lời (không sập)", all(isinstance(x, str) and x for x in (_r1, _r2, _r3)))
+finally:
+    api.requests.get = _saved_get; api._DRIFT_WARNED.update(_saved_drift)
+    MODE["v"] = "success"; api._CACHE.clear()
+# (5) bộ chọn kỳ DÙNG CHUNG: dashboard (pick_semester trên list đã có) == current_semester (tự hỏi GetSemester)
+_saved_sem = os.environ.pop("FAP_SEMESTER")
+_saved_vn = (api._vn_now, sched._vn_now)
+try:
+    for _when in (datetime.datetime(2026, 8, 30, 10, 0), datetime.datetime(2026, 8, 31, 10, 0),
+                  datetime.datetime(2026, 10, 3, 9, 0), datetime.datetime(2026, 12, 30, 9, 0)):
+        api._vn_now = sched._vn_now = (lambda w=_when: w.replace(tzinfo=datetime.timezone.utc))
+        api._CACHE.clear()
+        _cur = _cap(lambda: api.current_semester("SECRETTOKEN123", "FPTU", "HE190000"))
+        _pk = sched.pick_semester(SUCCESS["GetSemester"])
+        check(f"semester: current_semester == pick_semester @ {_when:%d/%m %H:%M}", _cur == _pk, f"{_cur} vs {_pk}")
+    check("semester: ngày cuối Summer (30/08 10:00) -> Fall như app",
+          sched.pick_semester(SUCCESS["GetSemester"], datetime.datetime(2026, 8, 30, 10, 0)) == "Fall2026")
+    check("semester: khe cuối năm -> Fall2026 (kỳ cuối trong list, gần nhất)", _cur == "Fall2026", _cur)
+finally:
+    os.environ["FAP_SEMESTER"] = _saved_sem
+    api._vn_now, sched._vn_now = _saved_vn
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)
