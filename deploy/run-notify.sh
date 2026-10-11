@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run-notify.sh <view> — refresh token roi day 1 'view' len kenh chat (Telegram/Discord).
-#   view: today | tomorrow | weekly | banrisk | attendance | grades | status   (mac dinh: today)
+#   view: today | tomorrow | weekly | banrisk | attendance | grades | status | notifications   (mac dinh: today)
 # Tu tim goc repo, log ra output/deploy.log. Dung trong cron de hen gio thong bao.
 set -uo pipefail
 export PYTHONUTF8=1

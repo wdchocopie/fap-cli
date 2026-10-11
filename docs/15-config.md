@@ -35,8 +35,8 @@ $env:FAP_LANG = "en"; fap whoami
 1. **`<gốc repo>/.env.alice`** — nạp **TRƯỚC** nên **THẮNG** (loader dùng `setdefault`) · loaded **first**, so it **wins**
 2. **`<gốc repo>/.env`** — chỉ bù các khóa **không mang danh tính** · fills in only the **non-identity** keys
 
-**VI —** Các khóa sau **KHÔNG BAO GIỜ** thừa kế từ `.env` gốc sang profile: `FAP_PROFILE`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT`, `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_ID`, `DISCORD_ALLOW_ANYONE`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`. Profile không tự khai ⇒ kênh đó **tắt hẳn** (cố ý: để điểm của người này không bắn vào chat của người kia).
-**EN —** These keys are **never** inherited from the root `.env` into a profile: `FAP_PROFILE`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT`, `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_ID`, `DISCORD_ALLOW_ANYONE`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`. A profile that doesn't declare one has that channel **switched off** — deliberately, so one person's marks never land in another person's chat.
+**VI —** Các khóa sau **KHÔNG BAO GIỜ** thừa kế từ `.env` gốc sang profile: `FAP_PROFILE`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT`, `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_ID`, `DISCORD_ALLOW_ANYONE`, `MESSENGER_PUSH_URL`, `MESSENGER_PUSH_TOKEN`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`. Profile không tự khai ⇒ kênh đó **tắt hẳn** (cố ý: để điểm của người này không bắn vào chat của người kia).
+**EN —** These keys are **never** inherited from the root `.env` into a profile: `FAP_PROFILE`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT`, `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_ID`, `DISCORD_ALLOW_ANYONE`, `MESSENGER_PUSH_URL`, `MESSENGER_PUSH_TOKEN`, `GCAL_CALENDAR_ID`, `FAP_ALLOW_UPDATE`. A profile that doesn't declare one has that channel **switched off** — deliberately, so one person's marks never land in another person's chat.
 
 > 🔴 **VI —** `.gitignore` chỉ có dòng `.env` (khớp **đúng** tên đó) ⇒ `.env.alice` **SẼ BỊ COMMIT**. Thêm `.env.*` **và** `!.env.example` vào `.gitignore` **trước khi** tạo profile đầu tiên. Chi tiết: [19-multi-profile](19-multi-profile.md).
 > 🔴 **EN —** `.gitignore` only has a bare `.env` (an **exact** name match) ⇒ `.env.alice` **would be committed**. Add `.env.*` **and** `!.env.example` **before** creating your first profile. Details: [19-multi-profile](19-multi-profile.md).
@@ -50,6 +50,8 @@ $env:FAP_LANG = "en"; fap whoami
 | `TELEGRAM_TOKEN` | *(trống · empty)* | Token bot Telegram từ BotFather; trống = tắt kênh Telegram · Telegram bot token from BotFather; empty = Telegram disabled | `TELEGRAM_TOKEN=123456:ABC-DEF...` |
 | `TELEGRAM_CHAT` | *(trống · empty)* | ID chat/kênh nhận thông báo · target chat/channel id for notifications | `TELEGRAM_CHAT=987654321` |
 | `DISCORD_WEBHOOK_URL` | *(trống · empty)* | Webhook Discord (push 1 chiều `notify`); trống = tắt kênh Discord · Discord webhook for one-way `notify` push; empty = disabled | `DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/.../...` |
+| `MESSENGER_PUSH_URL` | *(trống · empty)* | Origin của **bridge** Messenger (repo "Messenger chat bot"); `notify` đẩy vào **chat riêng** của bot qua `POST <url>/v1/push`. Trống = tắt kênh Messenger · origin of the Messenger **bridge** ("Messenger chat bot" repo); `notify` pushes into the bot's **private chat** via `POST <url>/v1/push`. Empty = Messenger disabled. Xem · see [13-notify §12](13-notify.md) | `MESSENGER_PUSH_URL=http://127.0.0.1:8787` |
+| `MESSENGER_PUSH_TOKEN` | *(trống · empty)* | **BÍ MẬT** — đúng giá trị `BRIDGE_PUSH_TOKEN` của bridge (gửi dạng `Bearer`; bridge tự gửi vào `BRIDGE_PUSH_THREAD`). Không bao giờ được in ra; `fap doctor` chỉ báo có/thiếu · **SECRET** — the bridge's `BRIDGE_PUSH_TOKEN` (sent as `Bearer`; the bridge delivers to `BRIDGE_PUSH_THREAD`). Never printed; `fap doctor` only says set/missing | `MESSENGER_PUSH_TOKEN=…` |
 | `GCAL_CALENDAR_ID` | `primary` | Lịch Google đích cho `calendar-sync` · target Google Calendar for `calendar-sync`. `primary` = lịch chính · main calendar | `GCAL_CALENDAR_ID=primary` |
 | `DISCORD_BOT_TOKEN` | *(trống · empty)* | Token **bot** Discord cho `fap discord-bot` (KHÁC webhook URL) · Discord **bot** token for `fap discord-bot` (≠ webhook URL) | `DISCORD_BOT_TOKEN=MTk4N...` |
 | `DISCORD_ALLOWED_USER_ID` | *(trống · empty)* | Chỉ user này được bot Discord trả lời; trống = trả lời mọi người (**nên đặt**) · only this user the Discord bot answers; empty = replies to everyone (**set it**) | `DISCORD_ALLOWED_USER_ID=123456789012345678` |
@@ -66,8 +68,8 @@ $env:FAP_LANG = "en"; fap whoami
 | `FAP_API_VERSION` | `v1` | API FAP dùng để đọc dữ liệu: `v1` (mặc định, như trước) hoặc `v2` (**opt-in, thử nghiệm, CHƯA kiểm chứng thật** — qua `fap-proxy.fpt.edu.vn`, cần `FAP_V2_KEY`). Giá trị khác ⇒ v1 + 1 cảnh báo. Đổi giá trị ⇒ chạy `fap refresh` (token gắn phiên bản) và khởi động lại service · API used to read data: `v1` (default, unchanged) or `v2` (**opt-in, experimental, NOT verified live**; needs `FAP_V2_KEY`). Anything else ⇒ v1 + one warning. After changing it run `fap refresh` and restart services. Xem · see [21-api-v2](21-api-v2.md) §5 | `FAP_API_VERSION=v2` |
 | `FAP_V2_KEY` | *(trống · empty)* | **BÍ MẬT** — khoá ký HMAC của API v2, chỉ đọc khi `FAP_API_VERSION=v2`. fap-cli **không** nhúng sẵn: trích từ **APK của chính bạn** bằng `python analysis/apk_drift.py --write-v2-key <apk>` (tự ghi vào `.env`, không in giá trị). Không commit, không dán vào chat · **SECRET** — the API v2 HMAC signing key, read only when `FAP_API_VERSION=v2`. Not shipped: extract it from **your own APK** with the command above (writes `.env`, never prints it). Never commit or paste it | `FAP_V2_KEY=…` *(do lệnh trên ghi · written by the command)* |
 
-**VI —** Để trống `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL` thì kênh đó **tắt** — `fap notify` đơn giản không gửi qua kênh chưa cấu hình.
-**EN —** Leaving `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL` empty simply **disables** that channel — `fap notify` won't push over an unconfigured channel.
+**VI —** Để trống `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL`/`MESSENGER_PUSH_*` thì kênh đó **tắt** — `fap notify` đơn giản không gửi qua kênh chưa cấu hình.
+**EN —** Leaving `TELEGRAM_TOKEN`/`TELEGRAM_CHAT`/`DISCORD_WEBHOOK_URL`/`MESSENGER_PUSH_*` empty simply **disables** that channel — `fap notify` won't push over an unconfigured channel.
 
 ### Giá trị `FAP_SEMESTER` hợp lệ · Valid `FAP_SEMESTER` values
 
@@ -99,6 +101,11 @@ TELEGRAM_CHAT=
 
 # Discord (Server Settings → Integrations → Webhooks → New Webhook → Copy URL)
 DISCORD_WEBHOOK_URL=
+
+# Messenger: chat riêng của bot qua bridge (POST /v1/push) — URL = origin bridge, TOKEN = BRIDGE_PUSH_TOKEN
+# Messenger: the bot's private chat via the bridge (POST /v1/push) — URL = bridge origin, TOKEN = BRIDGE_PUSH_TOKEN
+MESSENGER_PUSH_URL=
+MESSENGER_PUSH_TOKEN=
 
 # Google Calendar (primary = lịch chính · main calendar)
 GCAL_CALENDAR_ID=primary

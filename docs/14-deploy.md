@@ -114,11 +114,13 @@ schtasks /Delete /TN "FAP Daily" /F   :: xóa · delete
 - Dùng **đường dẫn tuyệt đối** tới `fap` (hoặc tới `python -m fapc`) vì cron có `PATH` tối thiểu.
 - `&&` đảm bảo chỉ sync/notify khi `refresh` thành công.
 - Ghi log ra `output/cron.log` để soi khi lỗi.
+- **Cảnh báo cần một job riêng:** `fap notify notifications` là **công tắc** bật thông báo trường mới, cảnh báo đơn từ đổi trạng thái **và** cảnh báo lịch thi mới/đổi + nhắc ngày mai thi ([13-notify](13-notify.md) §10, §13). Mẫu: mỗi 30 phút 07:05–21:35 — dòng `notifications` trong [`deploy/crontab.example`](../deploy/crontab.example) (~3–4 request mỗi lượt), chạy qua `deploy/run-notify.sh` để `fap refresh` trước mỗi lượt (token FAP chỉ sống ~1 giờ). Máy đã chạy `fap-watch`/`fap-gradewatch`/`fap-bot` cho **cùng profile** (chúng tự giữ token tươi) → dùng dòng `fap notify notifications` trực tiếp thay vào, tránh thêm một nơi refresh giẫm lên chúng (refresh_token xoay vòng — xem §9.2).
 
 **EN —**
 - Use the **absolute path** to `fap` (or to `python -m fapc`) because cron has a minimal `PATH`.
 - `&&` ensures sync/notify only run if `refresh` succeeded.
 - Logging to `output/cron.log` makes failures debuggable.
+- **Alerts need their own job:** `fap notify notifications` is the **switch** for new school notifications, application status alerts **and** new/changed exam + day-before alerts ([13-notify](13-notify.md) §10, §13). Sample: every 30 minutes 07:05–21:35 — the `notifications` line in [`deploy/crontab.example`](../deploy/crontab.example) (~3–4 requests per round), run via `deploy/run-notify.sh` so it does `fap refresh` before each round (FAP tokens live only ~1 h). If `fap-watch`/`fap-gradewatch`/`fap-bot` already run on that machine for the **same profile** (they keep the token fresh) → use the direct `fap notify notifications` line instead, so no extra refresher races them (refresh tokens rotate — see §9.2).
 
 > **VI —** Muốn 2 lần/ngày? Thêm một dòng nữa (vd `0 7` và `0 18`). Đừng đặt mỗi phút/mỗi giờ — token chỉ cần làm mới quanh lúc bạn thật sự xem.
 > **EN —** Want twice a day? Add a second line (e.g. `0 7` and `0 18`). Don't go per-minute/per-hour — the token only needs refreshing around when you actually look.
@@ -273,6 +275,7 @@ chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens.json
 | `output/attendance_state.json` | ❌ **KHÔNG** | như trên · same |
 | `output/seen_notifications.json` | ❌ **KHÔNG** | như trên · same |
 | `output/applications_state.json` | ❌ **KHÔNG** | như trên — mốc cảnh báo **đơn đổi trạng thái** của `fap notify notifications` · same — the application-status baseline used by `fap notify notifications` |
+| `output/exams_state.json` | ❌ **KHÔNG** | như trên — mốc cảnh báo **lịch thi** của `fap notify notifications` · same — the exam-alert baseline used by `fap notify notifications` |
 | `credentials.json`, `output/gcal_token.json` | *(chỉ khi máy đó thật sự `calendar-sync`)* | Google Calendar, không liên quan token FAP · unrelated to the FAP token |
 
 ### 9.2 🔴 Chỉ MỘT máy được refresh · Exactly ONE machine may refresh

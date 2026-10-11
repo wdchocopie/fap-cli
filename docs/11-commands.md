@@ -58,7 +58,7 @@
 | `fap credits` | **tiến độ tín chỉ tới tốt nghiệp**: đã đạt / tổng + % + thanh + ước lượng số kỳ còn lại (tổng = `FAP_TOTAL_CREDITS`, mặc định ~145, *ước lượng*) · credit progress to graduation | *(không · none)* | stdout |
 | `fap conduct` | **điểm rèn luyện/phong trào** (`GetDiemphongtrao`, xét tốt nghiệp). Chưa có dữ liệu thì server trả `201` + `errorMessage` NullReference → hiện "chưa có", không lỗi; còn `201` do **token/checksum** → **báo lỗi** (không giấu thành "chưa có"); mất mạng / lỗi máy chủ → "không lấy được" · conduct / movement points; "none yet" only for the server's NullReference empty-data reply — token/checksum errors are reported, network/server errors say "couldn't fetch" | *(không · none)* | stdout |
 | `fap whatif [target]` | mô phỏng GPA: bảng dự kiến nếu các môn còn lại đạt 5–10, hoặc cần TB bao nhiêu để đạt `target` · GPA what-if: projection table, or the average needed to hit `target` | `[target]` số 0–10 tùy chọn · optional 0–10 number | stdout |
-| `fap exams` | lịch thi (`GetScheduleExam`); rỗng nếu trường chưa xếp · exam schedule; empty until scheduled | *(không · none)* | stdout |
+| `fap exams [kỳ]` | lịch thi (`GetScheduleExam`) kỳ hiện tại, hoặc kỳ ghi rõ (`Summer2026`, không phân biệt hoa/thường); kỳ hiện tại chưa xếp lịch → gợi ý kỳ trước · exam schedule for the current term or the given one (`Summer2026`, case-insensitive); an unscheduled current term suggests the previous one | `[kỳ · term]` | stdout |
 | `fap exam-countdown` | **đếm ngược ngày thi**: bỏ kỳ đã qua, sớm nhất trước, nhãn độ gấp (🔴 hôm nay / 🟠 mai / còn N ngày); đọc mã môn/phòng **giống hệt `fap exams`** (không phân biệt hoa/thường, nhận cả `examSubject`) · days until each upcoming exam, urgency-tagged; same subject/room field matching as `fap exams` | *(không · none)* | stdout |
 | `fap exams-ics` | xuất lịch thi ra `.ics` (kèm nhắc trước 1 ngày) để import Calendar · export exams to `.ics` (1-day reminder) | *(không · none)* | `output/lichthi.ics` |
 | `fap news [từ khoá] [--type=N]` | tin tức: không tham số → `GetTop10News`; có **từ khoá** → **`SearchNews`** (vd `fap news học bổng`); `--type=N` đổi nhóm tin; đọc được cả khoá hoa `Title`/`Contents`/`EntryDate`/`EntryBy` (hiện nơi đăng cạnh ngày) · school news; keyword → SearchNews; either key casing is read | `[từ khoá]` · `--type=N` | stdout |
@@ -306,6 +306,7 @@ fap notify semester              # đẩy lên Telegram/Discord · push to chat
 | `TELEGRAM_TOKEN` | token bot Telegram · Telegram bot token | `notify` |
 | `TELEGRAM_CHAT` | chat id Telegram · Telegram chat id | `notify` |
 | `DISCORD_WEBHOOK_URL` | webhook Discord · Discord webhook | `notify` |
+| `MESSENGER_PUSH_URL` · `MESSENGER_PUSH_TOKEN` | bridge Messenger (chat riêng, `POST /v1/push`) · Messenger bridge (private chat) — [13-notify §12](13-notify.md) | `notify` |
 | `GCAL_CALENDAR_ID` | lịch đích, mặc định `primary` · target calendar, default `primary` | `calendar-sync` |
 
 > **VI —** Múi giờ `Asia/Ho_Chi_Minh` được gắn cứng trong mã, **không** phải khóa `.env`.

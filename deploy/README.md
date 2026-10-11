@@ -100,7 +100,7 @@ ssh user@pc 'chmod 600 ~/fap-cli/output/token.json ~/fap-cli/output/oauth_tokens
 |---|---|
 | ✅ | `output/token.json`, `output/oauth_tokens.json` |
 | ❌ | `output/.pkce_state.json` *(dùng 1 lần · single-use)* |
-| ❌ | `output/grade_state.json`, `output/attendance_state.json`, `output/seen_notifications.json`, `output/applications_state.json` *(baseline riêng từng máy — copy = báo trùng/báo sót · per-machine baselines; copying causes duplicate/missed alerts)* |
+| ❌ | `output/grade_state.json`, `output/attendance_state.json`, `output/seen_notifications.json`, `output/applications_state.json`, `output/exams_state.json` *(baseline riêng từng máy — copy = báo trùng/báo sót · per-machine baselines; copying causes duplicate/missed alerts)* |
 
 > 🔴 **VI —** `refresh_token` **XOAY VÒNG** ⇒ **chỉ MỘT máy được refresh**: VPS. Trên PC đặt `FAP_TOKEN_READONLY=1` và **để trống** `TELEGRAM_*`/`DISCORD_*`. **ĐỪNG** đặt cờ này trên VPS — token sẽ hết hạn và mọi watcher chết lặng.
 > 🔴 **EN —** The `refresh_token` **rotates** ⇒ **only ONE machine may refresh**: the VPS. On the PC set `FAP_TOKEN_READONLY=1` and leave `TELEGRAM_*`/`DISCORD_*` empty. **Never** set that flag on the VPS — the token expires and every watcher silently dies.

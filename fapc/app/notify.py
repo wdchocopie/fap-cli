@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-notify.py — Đẩy thông báo lịch học lên kênh chat (Telegram + Discord).
+notify.py — Đẩy thông báo lịch học lên kênh chat (Telegram + Discord + Messenger).
 
-Cấu hình qua .env: TELEGRAM_TOKEN, TELEGRAM_CHAT, DISCORD_WEBHOOK_URL (xem .env.example).
+Cấu hình qua .env: TELEGRAM_TOKEN, TELEGRAM_CHAT, DISCORD_WEBHOOK_URL,
+MESSENGER_PUSH_URL + MESSENGER_PUSH_TOKEN (xem .env.example).
 
 Chạy (từ gốc repo):
     fap notify test                    # gửi tin thử tới các kênh đã cấu hình
@@ -12,7 +13,7 @@ Chạy (từ gốc repo):
     fap notify attendance|banrisk      # điểm danh / cảnh báo cấm thi -> kênh
     fap notify grades|status|whatif    # điểm / tổng quan / mô phỏng GPA -> kênh
     fap notify grades-detail IAP491    # tham số NHIỀU TỪ được giữ nguyên (split(None, 1))
-    fap notify notifications           # CHỈ thông báo MỚI + đơn từ ĐỔI trạng thái (cả hai dedupe theo mốc)
+    fap notify notifications           # CHỈ thông báo MỚI + đơn từ ĐỔI trạng thái + lịch thi mới/đổi/ngày mai (dedupe theo mốc)
 
 Mọi lệnh (trừ `test`) dùng chung lõi `bot_core.handle()` rồi đẩy kết quả lên kênh đã cấu hình;
 allowlist = `bot_core.COMMANDS` nên lệnh mới tự dùng được, không phải sửa file này.
@@ -28,11 +29,13 @@ from .. import config, fmt
 _UA = {"User-Agent": "fapc/1.0 (+FAP schedule notifier)"}
 _SEEN_NOTIF = paths.out("seen_notifications.json")
 _APP_STATE = paths.out("applications_state.json")    # {mã đơn: mã trạng thái} — mốc cảnh báo đơn từ
+_EXAM_STATE = paths.out("exams_state.json")          # {"terms": {kỳ: {"rows": {khoá: true}, "reminded": [khoá]}}} — mốc lịch thi THEO KỲ
 
 # Trần ký tự MỘT tin nhắn của từng kênh (trần thật: Telegram 4096 / Discord 2000 — chừa biên an toàn).
 # Tin dài hơn được CẮT THÀNH NHIỀU MẨU (fmt.chunks) rồi gửi lần lượt — KHÔNG cắt cụt làm mất chữ.
 TELEGRAM_LIMIT = 4000
 DISCORD_LIMIT  = 1900
+MESSENGER_LIMIT = 30000   # bridge nhận 1..32000 ký tự/tin (POST /v1/push)
 _GAP = 0.4      # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩu rất nhỏ: 2–3)
 
 # ---------- kênh ----------
@@ -113,11 +116,35 @@ def _discord(text):
             return _partial("Discord", i, len(parts))
     return True
 
+def _messenger(text):
+    """Đẩy vào CHAT RIÊNG của bot Messenger qua bridge: POST <MESSENGER_PUSH_URL>/v1/push (Bearer token push).
+    2xx = bridge đã XẾP HÀNG tin. Cắt ≤ MESSENGER_LIMIT. True chỉ khi MỌI mẩu đã được nhận.
+    Lỗi CHỈ in HTTP status / TÊN lớp lỗi: thông điệp lỗi của requests chứa URL, và token tuyệt đối không in."""
+    if not (config.MESSENGER_PUSH_URL and config.MESSENGER_PUSH_TOKEN):
+        return False
+    url = config.MESSENGER_PUSH_URL.rstrip("/") + "/v1/push"
+    headers = dict(_UA, Authorization="Bearer " + config.MESSENGER_PUSH_TOKEN)
+    parts = fmt.chunks(text, MESSENGER_LIMIT)
+    for i, part in enumerate(parts):
+        if i:
+            time.sleep(_GAP)
+        try:
+            # allow_redirects=False: không để một redirect mang Bearer token sang host khác
+            r = requests.post(url, json={"text": part}, headers=headers, timeout=15, allow_redirects=False)
+        except requests.RequestException as e:
+            print(t("  Messenger lỗi mạng:", "  Messenger network error:"), type(e).__name__)
+            return _partial("Messenger", i, len(parts))
+        if not 200 <= r.status_code < 300:
+            print(t(f"  Messenger lỗi: HTTP {r.status_code}", f"  Messenger error: HTTP {r.status_code}"))
+            return _partial("Messenger", i, len(parts))
+    return True
+
 def push(text):
     """Gửi tới mọi kênh đã cấu hình. Trả danh sách kênh đã gửi ĐẦY ĐỦ (kênh gửi dở KHÔNG được liệt kê)."""
     sent = []
-    if _telegram(text): sent.append("Telegram")
-    if _discord(text):  sent.append("Discord")
+    if _telegram(text):  sent.append("Telegram")
+    if _discord(text):   sent.append("Discord")
+    if _messenger(text): sent.append("Messenger")
     return sent
 
 # ---------- đẩy thông báo MỚI (dedupe theo id) ----------
@@ -190,14 +217,17 @@ def _load_app_state():
                 "⚠️ applications_state.json corrupt → rebaselining; no application alerts this round."))
         return None
 
-def _save_app_state(state):
-    paths.ensure_dir(_APP_STATE)
-    tmp = f"{_APP_STATE}.{os.getpid()}.tmp"         # tmp RIÊNG mỗi tiến trình: cron + tay chạy cùng lúc không giẫm nhau
+def _save_json(path, state):
+    paths.ensure_dir(path)
+    tmp = f"{path}.{os.getpid()}.tmp"               # tmp RIÊNG mỗi tiến trình: cron + tay chạy cùng lúc không giẫm nhau
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False)
-    os.replace(tmp, _APP_STATE)
-    try: os.chmod(_APP_STATE, 0o600)                # 0600 như _save_seen: chế độ nhiều profile = dữ liệu NGƯỜI KHÁC
+    os.replace(tmp, path)
+    try: os.chmod(path, 0o600)                      # 0600 như _save_seen: chế độ nhiều profile = dữ liệu NGƯỜI KHÁC
     except OSError: pass
+
+def _save_app_state(state):
+    _save_json(_APP_STATE, state)
 
 def push_application_changes():
     """Đẩy khi đơn từ ĐỔI trạng thái (vd ⏳ → 💳 cần thanh toán / ✅ được chấp nhận) hoặc có đơn MỚI.
@@ -221,6 +251,56 @@ def push_application_changes():
     print(msg)
     sent = push(msg)
     print(t("→ Đã gửi tới:", "→ Sent to:"), sent or t("(chưa cấu hình kênh — sửa .env)", "(no channel — edit .env)"))
+
+# ---------- LỊCH THI mới/đổi + nhắc "ngày mai thi" (mốc exams_state.json) ----------
+def _load_exam_state():
+    """{"terms": {kỳ: …}} (hoặc dạng cũ 1 kỳ); None nếu CHƯA ghi mốc — hoặc file HỎNG (cô lập .corrupt, ghi mốc lại)."""
+    try:
+        with open(_EXAM_STATE, encoding="utf-8") as f:
+            st = json.load(f)
+        if not isinstance(st, dict):
+            raise ValueError("exams_state.json: not an object")
+        return st
+    except FileNotFoundError:
+        return None
+    except (ValueError, OSError):
+        try: os.replace(_EXAM_STATE, _EXAM_STATE + ".corrupt")
+        except OSError: pass
+        print(t("⚠️ exams_state.json hỏng → thiết lập lại mốc; lượt này KHÔNG báo lịch thi.",
+                "⚠️ exams_state.json corrupt → rebaselining; no exam alerts this round."))
+        return None
+
+def push_exam_changes():
+    """Đẩy khi lịch thi kỳ hiện tại có dòng MỚI/ĐỔI (môn|ngày|giờ|phòng) + nhắc 1 LẦN môn thi NGÀY MAI (giờ VN).
+    Kỳ chưa có mốc (lần đầu / kỳ mới / kỳ dự phòng khi GetSemester chập chờn): chỉ ghi mốc kỳ đó, kỳ khác giữ
+    nguyên. Lấy lịch THẤT BẠI -> bỏ lượt, KHÔNG đụng mốc. Đẩy không tới kênh nào ->
+    KHÔNG lưu mốc (lượt sau báo lại) — mất một cảnh báo lịch thi tệ hơn nhận trùng."""
+    from ..core.api import creds, current_semester, _vn_now
+    from ..core.extras import fetch_exams_checked, exam_terms, exam_changes, exam_changes_text
+    token, campus, roll = creds()
+    sem = current_semester(token, campus, roll)
+    rows = fetch_exams_checked(token, campus, roll, sem)
+    if rows is None:
+        print(t("(Không lấy được lịch thi — bỏ qua lượt này.)", "(Couldn't fetch exams — skipping this round.)")); return
+    prev = _load_exam_state()
+    tomorrow = (_vn_now() + datetime.timedelta(days=1)).date()
+    state, new, removed, due = exam_changes(prev, rows, sem, tomorrow)
+    if sem not in exam_terms(prev):                 # kỳ chưa có mốc: ghi mốc IM LẶNG (kỳ khác giữ nguyên)
+        _save_json(_EXAM_STATE, state)
+        n = len(state["terms"][sem]["rows"])
+        print(t(f"👀 Ghi mốc {n} lịch thi kỳ {sem}. Lần sau chỉ báo cái mới/đổi + ngày mai thi.",
+                f"👀 Baselined {n} exams for {sem}. Only new/changed + tomorrow's from now on.")); return
+    subjects.load()
+    msg = exam_changes_text(sem, new, removed, due)
+    if not msg:
+        if state != prev:
+            _save_json(_EXAM_STATE, state)
+        print(t("Lịch thi không đổi.", "No exam changes.")); return
+    print(msg)
+    sent = push(msg)
+    print(t("→ Đã gửi tới:", "→ Sent to:"), sent or t("(chưa cấu hình kênh — sửa .env)", "(no channel — edit .env)"))
+    if sent:
+        _save_json(_EXAM_STATE, state)
 
 # ---------- "Việc cần làm" gắn vào digest hằng ngày ----------
 def _todo_tail():
@@ -286,11 +366,11 @@ def run(cmd="test"):
     name = parts[0] if parts else "today"            # 'weekly' giờ là lệnh thật (recap), KHÔNG còn alias 'week'
     arg = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
     if name == "notifications":                 # đẩy dedupe (chỉ cái MỚI), khác các view tĩnh
-        # CÙNG NHỊP: dò luôn đơn từ đổi trạng thái -> ai đã hẹn `fap notify notifications` (cron/Task) tự có
-        # thêm cảnh báo đơn từ, KHÔNG cần job mới. Hai phần CÔ LẬP: phần này hỏng không làm mất phần kia;
+        # CÙNG NHỊP: dò luôn đơn từ đổi trạng thái + lịch thi -> ai đã hẹn `fap notify notifications` (cron/Task)
+        # tự có thêm hai cảnh báo này, KHÔNG cần job mới. Các phần CÔ LẬP: phần này hỏng không làm mất phần kia;
         # lỗi (nếu có) vẫn ném lại SAU CÙNG để cron/systemd thấy exit ≠ 0 như trước.
         errs = []
-        for job in (push_new_notifications, push_application_changes):
+        for job in (push_new_notifications, push_application_changes, push_exam_changes):
             try:
                 job()
             except (Exception, SystemExit) as e:   # noqa: BLE001

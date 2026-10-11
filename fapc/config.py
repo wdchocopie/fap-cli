@@ -26,6 +26,10 @@ TZID = "Asia/Ho_Chi_Minh"
 TELEGRAM_TOKEN      = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT       = os.environ.get("TELEGRAM_CHAT")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+# Messenger: đẩy vào CHAT RIÊNG của bot Messenger qua bridge (repo "Messenger chat bot", POST /v1/push).
+# URL = origin của bridge (vd http://127.0.0.1:8787); TOKEN = BRIDGE_PUSH_TOKEN bên bridge — BÍ MẬT, không in.
+MESSENGER_PUSH_URL   = os.environ.get("MESSENGER_PUSH_URL")
+MESSENGER_PUSH_TOKEN = os.environ.get("MESSENGER_PUSH_TOKEN")
 
 # Google Calendar
 GCAL_CALENDAR_ID = os.environ.get("GCAL_CALENDAR_ID", "primary")

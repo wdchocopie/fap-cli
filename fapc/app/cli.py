@@ -43,7 +43,7 @@ HELP = """fap <command>   ·   fap-cli
     credits                tiến độ tín chỉ tới tốt nghiệp (thanh %) · credit progress to graduation
     conduct                điểm rèn luyện/phong trào (xét tốt nghiệp) · conduct / movement points
     whatif [target]        mô phỏng GPA · GPA what-if
-    exams | exams-ics      lịch thi | xuất lịch thi ra .ics (Calendar tự nhắc) · exams | exams→.ics
+    exams [kỳ] | exams-ics lịch thi (vd Summer2026) | xuất lịch thi ra .ics (Calendar tự nhắc) · exams [term] | exams→.ics
     exam-countdown         đếm ngược ngày thi (gần nhất trước, kèm độ gấp) · days until each upcoming exam
     news [từ khoá] [--type=N] | fees   tin tức (tìm từ khoá: SearchNews) | học phí · news (keyword search) | fees
     notifications [số|từ khoá]   thông báo + trích nội dung; số = toàn văn, chữ = lọc · notifications (+preview; number = full text, word = filter)
@@ -149,7 +149,11 @@ def doctor():
     try: import googleapiclient; print("google libs : ✓")  # noqa: F401
     except ImportError: print("google libs : — (chỉ cần cho calendar-sync)")
     print("kênh notify :", ", ".join(filter(None, [
-        "Telegram" if config.TELEGRAM_TOKEN else "", "Discord" if config.DISCORD_WEBHOOK_URL else ""])) or "—")
+        "Telegram" if config.TELEGRAM_TOKEN else "", "Discord" if config.DISCORD_WEBHOOK_URL else "",
+        "Messenger" if config.MESSENGER_PUSH_URL and config.MESSENGER_PUSH_TOKEN else ""])) or "—")
+    # Messenger CHỈ in có/thiếu — KHÔNG in URL/token của bridge.
+    print("Messenger   :", "✓ có · set" if config.MESSENGER_PUSH_URL and config.MESSENGER_PUSH_TOKEN else
+          "— thiếu · missing (MESSENGER_PUSH_URL + MESSENGER_PUSH_TOKEN)")
     # API v1/v2 + khoá v2 CHỈ in có/không — KHÔNG BAO GIỜ in giá trị khoá.
     from ..core import apiv2
     ver = apiv2.api_version()
@@ -216,7 +220,7 @@ def main():
     elif cmd == "conduct":        from ..core.conduct import report; report()
     elif cmd == "exam-countdown": from ..core.extras import exam_countdown_cmd; exam_countdown_cmd()
     elif cmd == "whatif":         from ..core.whatif import run; run(rest[0] if rest else None)
-    elif cmd == "exams":          from ..core.extras import exams; exams()
+    elif cmd == "exams":          from ..core.extras import exams; exams(rest[0] if rest else None)
     elif cmd == "exams-ics":      from ..core.extras import exams_ics; exams_ics()
     elif cmd == "news":
         from ..core.extras import news

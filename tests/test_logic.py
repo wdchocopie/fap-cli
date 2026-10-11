@@ -2252,24 +2252,25 @@ def test_notify_notifications_also_checks_applications_isolated():
     """`fap notify notifications` = thông báo MỚI + đơn từ đổi trạng thái (cùng nhịp, không cần job mới).
     Phần này hỏng KHÔNG làm mất phần kia; lỗi vẫn ném lại để cron thấy exit ≠ 0."""
     import fapc.app.notify as N
-    saved = (N.push_new_notifications, N.push_application_changes)
+    saved = (N.push_new_notifications, N.push_application_changes, N.push_exam_changes)
     ran = []
     try:
         def _boom():
             ran.append("notif"); raise SystemExit("⚠️ Token FAP có thể đã hết hạn")
         N.push_new_notifications = _boom
         N.push_application_changes = lambda: ran.append("apps")
+        N.push_exam_changes = lambda: ran.append("exams")
         try:
             _cap(lambda: N.run("notifications")); raised = False
         except SystemExit:
             raised = True
-        assert raised and ran == ["notif", "apps"]
+        assert raised and ran == ["notif", "apps", "exams"]
         ran.clear()
         N.push_new_notifications = lambda: ran.append("notif")
         _cap(lambda: N.run("notifications"))
-        assert ran == ["notif", "apps"]
+        assert ran == ["notif", "apps", "exams"]
     finally:
-        N.push_new_notifications, N.push_application_changes = saved
+        N.push_new_notifications, N.push_application_changes, N.push_exam_changes = saved
 
 # ---- khối "Việc cần làm · To-do" (CheckOpenFeedBack · đơn '3' chờ thanh toán) ----
 def _fake_call(table, log=None):
@@ -3500,6 +3501,146 @@ def test_session_version_read_error_not_cached():
     d = tempfile.mkdtemp()                       # thư mục: stat OK nhưng open() lỗi (OSError)
     V._SESSION_CACHE.pop(d, None)
     assert V.session_version(d) is None and d not in V._SESSION_CACHE
+
+# ---- lịch thi: kỳ trước · giờ kết thúc · ghi chú · cảnh báo mới/đổi/ngày mai ----
+def test_prev_term_and_norm_term():
+    from fapc.core.extras import prev_term, norm_term
+    assert prev_term("Fall2026") == "Summer2026"
+    assert prev_term("Summer2026") == "Spring2026"
+    assert prev_term("Spring2026") == "Fall2025"                       # Spring lùi sang Fall NĂM TRƯỚC
+    assert prev_term("FALL2026") == "Summer2026" and prev_term(" fall2026 ") == "Summer2026"
+    for bad in (None, "", "Autumn2026", "Fall26", "Fall2026 weeks", "x"):
+        assert prev_term(bad) is None, bad
+    assert norm_term("summer2026") == "Summer2026" and norm_term("Summer 2026") is None
+
+def test_exam_dt_time_range_end():
+    """time 'HHhMM-HHhMM' (dạng đo thật) -> DTEND = giờ KẾT THÚC thật; không có khoảng / vô lý -> +2h như cũ."""
+    from fapc.core.extras import _exam_dt, build_exam_ics
+    s, e = _exam_dt({"date": "2026-07-27T00:00:00", "time": "14h30-16h00"})
+    assert (s.hour, s.minute, e.hour, e.minute) == (14, 30, 16, 0)
+    s, e = _exam_dt({"date": "2026-07-27T00:00:00", "time": "07h30 - 09h10"})
+    assert (e.hour, e.minute) == (9, 10)
+    two = datetime.timedelta(hours=2)
+    s, e = _exam_dt({"examDate": "06/25/2026", "examTime": "09:15"}); assert e - s == two
+    s, e = _exam_dt({"date": "2026-07-27T00:00:00", "time": "16h00-14h30"}); assert e - s == two   # kết thúc < bắt đầu
+    s, e = _exam_dt({"date": "2026-07-27T00:00:00", "time": "14h30-99h00"}); assert e - s == two   # giờ rác
+    ics, n, _ = build_exam_ics([{"subjectCode": "IAP301", "date": "2026-07-27T00:00:00",
+                                 "time": "14h30-16h00", "roomNo": "BE-101"}])
+    assert n == 1 and "DTSTART;TZID=Asia/Ho_Chi_Minh:20260727T143000" in ics
+    assert "DTEND;TZID=Asia/Ho_Chi_Minh:20260727T160000" in ics
+
+def test_exam_line_shows_note():
+    import fapc.core.extras as E, fapc.core.subjects as S
+    S.set_index({})
+    r = {"subjectCode": "IAP301", "date": "2026-07-27T00:00:00", "time": "14h30-16h00", "roomNo": "BE-101",
+         "kythi": "FE", "note": "Mang th&#7867; SV " + "x" * 200, "note_Attendance": "KHONG_HIEN"}
+    line, dt = E._exam_line(r)
+    assert "📝 Mang thẻ SV" in line and "KHONG_HIEN" not in line      # entity đã giải; note_Attendance KHÔNG hiện
+    assert line.index("FE") < line.index("📝") and dt.hour == 14      # sau thẻ loại thi
+    note = line.split("📝 ", 1)[1]
+    assert len(note) <= 81 and note.endswith("…")                     # cắt ~80 ký tự
+    assert "📝" not in E._exam_line(dict(r, note=""))[0]
+
+def test_exam_changes_decisions():
+    import fapc.core.subjects as S
+    from fapc.core.extras import exam_changes, exam_key, exam_changes_text
+    A = {"subjectCode": "IAP301", "date": "2026-12-20T00:00:00", "time": "07h30-09h00", "roomNo": "BE-101", "kythi": "FE"}
+    B = {"subjectCode": "HOD402", "date": "2026-12-22T00:00:00", "time": "13h00-14h30", "roomNo": "BE-205", "kythi": "FE"}
+    tmr = datetime.date(2026, 12, 21)
+    assert exam_key(A) == "IAP301|2026-12-20T00:00:00|07h30-09h00|BE-101"
+    st, new, rm, due = exam_changes(None, [A], "Fall2026", tmr)        # lần đầu: ghi mốc IM LẶNG
+    assert (new, rm, due) == ([], [], []) and st == {"terms": {"Fall2026": {"rows": {exam_key(A): True}, "reminded": []}}}
+    assert exam_changes(st, [A], "Fall2026", tmr) == (st, [], [], [])  # không đổi
+    st3, new, rm, due = exam_changes(st, [A, B], "Fall2026", tmr)
+    assert new == [B] and rm == [] and due == []                       # dòng MỚI
+    A2 = dict(A, roomNo="BE-999")
+    _, new, rm, _ = exam_changes(st3, [A2, B], "Fall2026", tmr)
+    assert new == [A2] and rm == [exam_key(A)]                         # đổi phòng = mới + gỡ (trả KHOÁ dòng gỡ)
+    d22 = datetime.date(2026, 12, 22)
+    st5, new, rm, due = exam_changes(st3, [A, B], "Fall2026", d22)
+    assert due == [B] and new == [] and st5["terms"]["Fall2026"]["reminded"] == [exam_key(B)]
+    assert exam_changes(st5, [A, B], "Fall2026", d22) == (st5, [], [], [])  # nhắc ĐÚNG 1 lần
+    st7, new, rm, due = exam_changes(st5, [B], "Spring2027", d22)          # kỳ mới -> ghi mốc im lặng, kỳ cũ GIỮ
+    assert (new, rm, due) == ([], [], []) and st7["terms"]["Spring2027"]["reminded"] == []
+    assert st7["terms"]["Fall2026"] == st5["terms"]["Fall2026"]
+    assert exam_changes(st5, [], "Fall2026", tmr) == (st5, [], [], [])     # rỗng tạm thời -> GIỮ mốc
+    assert exam_changes({"sem": "Fall2026", "rows": [1]}, [A], "Fall2026", tmr)[1:] == ([], [], [])  # mốc sai dạng
+    old = {"sem": "Fall2026", "rows": {exam_key(A): True}, "reminded": []}  # dạng CŨ 1 kỳ -> vẫn so được
+    stm, new, rm, _ = exam_changes(old, [A, B], "Fall2026", tmr)
+    assert new == [B] and list(stm["terms"]) == ["Fall2026"]
+    S.set_index({})
+    txt = exam_changes_text("Fall2026", [B], [exam_key(A)], [A])
+    assert txt.startswith("📝") and "Fall2026" in txt and "HOD402" in txt and "🗑 1" in txt
+    assert "⏰" in txt and txt.index("⏰") < txt.rindex("IAP301")
+    gone = txt.split("🗑", 1)[1].split("⏰", 1)[0]                       # dòng gỡ có TÊN môn + ngày/giờ
+    assert "IAP301" in gone and "20/12/2026 07:30" in gone and "BE-101" not in gone
+    assert exam_changes_text("Fall2026", [], [], []) == ""
+
+def test_exam_changes_semester_flap():
+    """current_semester() rơi tạm về kỳ dự phòng rồi quay lại: KHÔNG mất dòng mới, KHÔNG nhắc lặp; giữ ≤4 kỳ."""
+    from fapc.core.extras import exam_changes, exam_key
+    A = {"subjectCode": "IAP301", "date": "2026-12-22T00:00:00", "time": "07h30-09h00", "roomNo": "BE-101"}
+    C = {"subjectCode": "PRN212", "date": "2026-12-28T00:00:00", "time": "13h00-14h30", "roomNo": "BE-301"}
+    X = {"subjectCode": "OLD101", "date": "2026-07-01T00:00:00", "time": "07h30-09h00", "roomNo": "AL-1"}
+    d22 = datetime.date(2026, 12, 22)
+    st, _, _, _ = exam_changes(None, [A], "Fall2026", datetime.date(2026, 12, 1))
+    st, _, _, due = exam_changes(st, [A], "Fall2026", d22)
+    assert due == [A]                                                  # nhắc ngày mai (1 lần)
+    stf, new, rm, due = exam_changes(st, [X], "Summer2026", d22)       # GetSemester hỏng -> kỳ dự phòng
+    assert (new, rm, due) == ([], [], []) and stf["terms"]["Fall2026"] == st["terms"]["Fall2026"]
+    st2, new, rm, due = exam_changes(stf, [A, C], "Fall2026", d22)     # quay lại kỳ thật, C xếp trong lúc chập
+    assert new == [C] and rm == [] and due == []                       # C KHÔNG mất, A KHÔNG nhắc lại
+    for s in ("Spring2025", "Summer2025", "Fall2025", "Spring2027"):
+        st2 = exam_changes(st2, [X], s, d22)[0]
+    assert list(st2["terms"]) == ["Spring2025", "Summer2025", "Fall2025", "Spring2027"]   # chỉ 4 kỳ ghi gần nhất
+
+def test_messenger_push_request():
+    """Kênh Messenger: POST <url>/v1/push, Bearer token, json {"text"}, timeout, KHÔNG theo redirect;
+    tin dài -> nhiều mẩu đúng thứ tự; lỗi KHÔNG in token/URL."""
+    import fapc.app.notify as N
+    from fapc import config as C
+    class _R:
+        def __init__(s, code): s.status_code = code
+    TOK = "push-SECRET-0123456789abcdef0123456789"
+    calls = []
+    def fake(url, **k):
+        calls.append((url, k)); return _R(200)
+    saved = (N.requests.post, C.MESSENGER_PUSH_URL, C.MESSENGER_PUSH_TOKEN, N.time.sleep, N._telegram, N._discord)
+    try:
+        N.time.sleep = lambda s: None
+        N.requests.post = fake
+        C.MESSENGER_PUSH_URL, C.MESSENGER_PUSH_TOKEN = "http://127.0.0.1:8787/", None
+        assert N._messenger("x") is False and calls == []                  # thiếu token -> kênh tắt
+        C.MESSENGER_PUSH_TOKEN = TOK
+        assert N._messenger("xin chào") is True
+        url, k = calls[0]
+        assert url == "http://127.0.0.1:8787/v1/push" and k["json"] == {"text": "xin chào"}
+        assert k["headers"]["Authorization"] == "Bearer " + TOK
+        assert k["timeout"] == 15 and k["allow_redirects"] is False
+        calls.clear()
+        long_msg = "\n".join("dòng %d " % i + "x" * 100 for i in range(400))
+        assert N._messenger(long_msg) is True and len(calls) == 2
+        assert "\n".join(c[1]["json"]["text"] for c in calls) == long_msg
+        assert all(len(c[1]["json"]["text"]) <= N.MESSENGER_LIMIT for c in calls)
+        res = []
+        N.requests.post = lambda url, **k: _R(401)
+        out = _cap(lambda: res.append(N._messenger("x")))
+        assert res == [False] and "401" in out and TOK not in out and "8787" not in out
+        def boom(url, **k):
+            raise N.requests.ConnectionError("refused " + url + "?t=" + TOK)
+        N.requests.post = boom
+        out = _cap(lambda: res.append(N._messenger("x")))
+        assert res[-1] is False and "ConnectionError" in out and TOK not in out and "8787" not in out
+        N.requests.post = fake
+        N._telegram = N._discord = lambda text: False
+        assert N.push("hi") == ["Messenger"]
+    finally:
+        (N.requests.post, C.MESSENGER_PUSH_URL, C.MESSENGER_PUSH_TOKEN, N.time.sleep,
+         N._telegram, N._discord) = saved
+
+def test_messenger_keys_not_inherited_by_profiles():
+    import fapc
+    assert {"MESSENGER_PUSH_URL", "MESSENGER_PUSH_TOKEN"} <= fapc._IDENTITY_KEYS
 
 # ---- runner không cần pytest ----
 def _run():

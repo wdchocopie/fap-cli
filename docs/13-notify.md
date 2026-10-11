@@ -1,7 +1,7 @@
 # Thông báo Telegram & Discord · Telegram & Discord notifications
 
-**VI —** Lệnh `fap notify` đẩy **lịch học, điểm danh, điểm, tổng quan...** (xem §1) lên Telegram và/hoặc Discord. Hai kênh hoàn toàn độc lập: bật một, cả hai, hoặc không kênh nào. Tất cả cấu hình nằm trong `.env` ở gốc repo.
-**EN —** The `fap notify` command pushes your **schedule, attendance, grades, overview...** (see §1) to Telegram and/or Discord. The two channels are fully independent: enable one, both, or neither. All config lives in `.env` at the repo root.
+**VI —** Lệnh `fap notify` đẩy **lịch học, điểm danh, điểm, tổng quan...** (xem §1) lên Telegram và/hoặc Discord — và vào **chat riêng của bot Messenger** (xem [§12](#12-messenger--chat-riêng-qua-bridge--private-chat-via-the-bridge)). Các kênh hoàn toàn độc lập: bật một, cả hai, hoặc không kênh nào. Tất cả cấu hình nằm trong `.env` ở gốc repo.
+**EN —** The `fap notify` command pushes your **schedule, attendance, grades, overview...** (see §1) to Telegram and/or Discord — and into the **Messenger bot's private chat** (see §12). The channels are fully independent: enable one, both, or neither. All config lives in `.env` at the repo root.
 
 > **VI —** Biến kênh để trống = kênh đó bị **bỏ qua âm thầm** (không lỗi, không gửi). Không có kênh nào cấu hình thì lệnh vẫn chạy và chỉ in lịch ra màn hình.
 > **EN —** An empty channel var means that channel is **silently skipped** (no error, no send). With no channel configured the command still runs and just prints the digest to the console.
@@ -21,8 +21,8 @@
 | `fap notify banrisk` | vi · gửi **cảnh báo cấm thi** (môn < 80%). en · push **exam-ban risk** (subjects < 80%). |
 | `fap notify grades` · `status` · `whatif [điểm]` | vi · điểm / tổng quan / mô phỏng GPA. en · grades / overview / GPA what-if. |
 | `fap notify grades-detail [MÔN]` | vi · điểm thành phần; kèm **mã hoặc tên môn** = chỉ 1 môn (kỳ 6 môn: **8 → 3 request**). en · component marks; naming a subject fetches only that one. |
-| `fap notify exams` | vi · gửi **lịch thi** (hẹn lịch để **nhắc trước ngày thi**). en · push the **exam schedule** (schedule it for exam reminders). |
-| `fap notify notifications` | vi · CHỈ đẩy **thông báo trường MỚI** + **đơn từ ĐỔI trạng thái** (cùng một lượt — xem [§10](#10-đơn-từ-đổi-trạng-thái--application-status-alerts)); lần đầu chỉ ghi mốc. en · push only **NEW school notifications** + **application status changes** (one round — see §10); the first run only records a baseline. |
+| `fap notify exams [kỳ]` | vi · gửi **lịch thi** (kỳ hiện tại; kèm `Summer2026`… = kỳ đó). en · push the **exam schedule** (current term; add `Summer2026`… for that term). |
+| `fap notify notifications` | vi · CHỈ đẩy **thông báo trường MỚI** + **đơn từ ĐỔI trạng thái** + **lịch thi mới/đổi + nhắc ngày mai thi** (cùng một lượt — xem [§10](#10-đơn-từ-đổi-trạng-thái--application-status-alerts), [§13](#13-lịch-thi-mớiđổi--nhắc-ngày-mai-thi--exam-alerts)); lần đầu chỉ ghi mốc. en · push only **NEW school notifications** + **application status changes** + **new/changed exams + a day-before reminder** (one round — see §10, §13); the first run only records a baseline. |
 
 **VI —** Mọi lệnh (trừ `test`) dùng **chung lõi với bot** (`bot_core`) rồi đẩy kết quả lên kênh đã cấu hình. Không đối số → mặc định `test`. Bản không cài đặt: `python -m fapc notify <lệnh>`.
 **EN —** Every command (except `test`) shares the **bot core** (`bot_core`) and pushes the result to your configured channels. No argument → defaults to `test`. Non-install: `python -m fapc notify <cmd>`.
@@ -107,6 +107,10 @@ TELEGRAM_CHAT=123456789
 
 # Discord (Server Settings → Integrations → Webhooks → Copy URL)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
+
+# Messenger — chat riêng qua bridge (xem §12) · private chat via the bridge (see §12)
+MESSENGER_PUSH_URL=http://127.0.0.1:8787
+MESSENGER_PUSH_TOKEN=same-value-as-BRIDGE_PUSH_TOKEN
 ```
 
 **VI —** Chỉ dùng Telegram? Để trống `DISCORD_WEBHOOK_URL`. Chỉ dùng Discord? Để trống cả `TELEGRAM_TOKEN` lẫn `TELEGRAM_CHAT`. Kênh để trống sẽ bị bỏ qua âm thầm.
@@ -190,6 +194,9 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/000000/your-webhook-token
 
 **VI —** Muốn nhận lịch mỗi sáng? Hẹn `fap notify today` chạy lúc 6:00 bằng Task Scheduler (Windows) hoặc `cron` (Linux/macOS). Nhớ chạy `fap refresh` trước để token còn hạn. Script sẵn dùng: [docs/14-deploy.md](14-deploy.md) + thư mục [`deploy/`](../deploy/).
 **EN —** Want a morning digest? Schedule `fap notify today` at 06:00 via Task Scheduler (Windows) or `cron` (Linux/macOS). Run `fap refresh` first so the token stays valid. Ready scripts: [docs/14-deploy.md](14-deploy.md) + the [`deploy/`](../deploy/) folder.
+
+> 🔔 **VI —** **`fap notify notifications` là CÔNG TẮC** bật ba loại cảnh báo: thông báo trường mới (§1), đơn từ đổi trạng thái (§10) và lịch thi mới/đổi + nhắc ngày mai thi (§13). **Không hẹn lệnh này chạy định kỳ thì KHÔNG nhận được cảnh báo nào trong ba loại đó.** Mẫu cron: mỗi 30 phút, 07:05–21:35 (dòng `notifications` trong [`deploy/crontab.example`](../deploy/crontab.example)) — nhẹ tay: ~3–4 request mỗi lượt (`GetSemester` nếu không đặt `FAP_SEMESTER`, `GetNotificationByRoll`, `GetApplication`, `GetScheduleExam`). Dòng mẫu chạy qua `deploy/run-notify.sh` = `fap refresh` trước mỗi lượt (token FAP chỉ sống ~1 giờ); nếu máy đã chạy `fap-watch`/`fap-gradewatch`/`fap-bot` cho **cùng profile** (chúng tự giữ token tươi) thì dùng dòng `fap notify notifications` trực tiếp để không thêm một nơi refresh giẫm lên chúng (refresh_token xoay vòng).
+> 🔔 **EN —** **`fap notify notifications` is THE SWITCH** for three alert types: new school notifications (§1), application status changes (§10) and new/changed exams + day-before reminders (§13). **If this command is not scheduled, none of those alerts arrive.** Cron sample: every 30 minutes, 07:05–21:35 (the `notifications` line in [`deploy/crontab.example`](../deploy/crontab.example)) — gentle: ~3–4 requests per round (`GetSemester` unless `FAP_SEMESTER` is set, `GetNotificationByRoll`, `GetApplication`, `GetScheduleExam`). The sample line goes through `deploy/run-notify.sh` = `fap refresh` before each round (FAP tokens live only ~1 h); if `fap-watch`/`fap-gradewatch`/`fap-bot` already run on that machine for the **same profile** (they keep the token fresh), use the direct `fap notify notifications` line instead so no extra refresher races them (refresh tokens rotate).
 
 ---
 
@@ -385,14 +392,14 @@ fap watch-attendance loop 15 --absent-only
 - **Lần đầu chỉ ghi mốc** (không báo dồn lịch sử). Mốc lưu `output/applications_state.json` (ghi nguyên tử, `chmod 0600`; file hỏng → cô lập `.corrupt` rồi ghi mốc lại).
 - Mã `3` (số) và `'3'` (chuỗi) là **một**. Đơn **biến mất** khỏi danh sách → bỏ khỏi mốc, **không** báo.
 - **Lỗi mạng / phản hồi lạ** → bỏ lượt, **giữ nguyên mốc**; danh sách rỗng trong khi mốc đang có đơn → coi là trục trặc tạm thời, giữ mốc. Đơn tạm mất trạng thái → giữ mã cũ, không báo.
-- Hai phần (thông báo · đơn từ) **cô lập lỗi**: phần này hỏng không làm mất phần kia; lỗi vẫn trả **exit ≠ 0** để cron/systemd thấy.
+- Ba phần (thông báo · đơn từ · lịch thi) **cô lập lỗi**: phần này hỏng không làm mất phần khác; lỗi vẫn trả **exit ≠ 0** để cron/systemd thấy.
 
 **EN —** Anti-false-alarm rules:
 - Each application is keyed by the **server's application id** (`w_APP_ID`; app 2.0.5 reads `w_app_id` — matched case-insensitively), **never** by list position or title. Rows without an id are not tracked.
 - **The first run only records a baseline** (no history replay). State lives in `output/applications_state.json` (atomic write, `chmod 0600`; a corrupt file is quarantined as `.corrupt` and re-baselined).
 - Code `3` (int) and `'3'` (string) are the **same**. An application that **disappears** is dropped from the baseline **silently**.
 - **Network error / odd response** → the round is skipped and the **baseline kept**; an empty list while the baseline has rows is treated as a transient glitch. A row that temporarily loses its status keeps its old code (no alert).
-- The two parts (notifications · applications) are **failure-isolated**; an error still exits **non-zero** so cron/systemd notice.
+- The three parts (notifications · applications · exams) are **failure-isolated**; an error still exits **non-zero** so cron/systemd notice.
 
 > ⚠️ **VI —** Như `seen_notifications.json`: `applications_state.json` là mốc **riêng từng máy** — đừng copy sang máy khác (sẽ báo trùng/báo sót).
 > ⚠️ **EN —** Like `seen_notifications.json`, `applications_state.json` is a **per-machine** baseline — don't copy it between machines (duplicate/missed alerts).
@@ -433,3 +440,63 @@ fap watch-attendance loop 15 --absent-only
 - Each source is **failure-isolated**: a failed source (network / token) prints `❔ Couldn't check: …` — it **never** claims "nothing to do" when nothing could be checked.
 - Available as `fap todo`, `/todo` (menu + slash), at the end of `/all`, and **appended to `fap notify today` ONLY when there is at least one item** (on a clear day the digest is unchanged). Costs **3 requests**; set `FAP_CACHE_MIN` to share the per-hour cache.
 - `GetStudentRate` is **not** used: its field meanings are unverified.
+
+---
+
+## 12. Messenger — chat riêng qua bridge · private chat via the bridge
+
+**VI —** Kênh thứ ba của `notify.push()`: đẩy tin vào **chat riêng** của bot Messenger thông qua **bridge** (repo "Messenger chat bot"). fap-cli gọi `POST <MESSENGER_PUSH_URL>/v1/push` với `Authorization: Bearer <MESSENGER_PUSH_TOKEN>` và thân `{"text": "..."}`; bridge trả **2xx = đã xếp hàng** rồi tự gửi vào chat riêng. Tin dài hơn 30000 ký tự được cắt thành nhiều mẩu theo thứ tự (bridge nhận tối đa 32000 ký tự/tin).
+**EN —** The third `notify.push()` channel: pushes into the Messenger bot's **private chat** through the **bridge** (the "Messenger chat bot" repo). fap-cli calls `POST <MESSENGER_PUSH_URL>/v1/push` with `Authorization: Bearer <MESSENGER_PUSH_TOKEN>` and body `{"text": "..."}`; the bridge answers **2xx = queued** and delivers it to the private chat. Messages over 30000 characters are split into ordered chunks (the bridge accepts up to 32000 per message).
+
+| fap-cli (`.env`) | bridge (`.env` của bridge · the bridge's `.env`) |
+|---|---|
+| `MESSENGER_PUSH_URL` = origin của bridge, vd `http://127.0.0.1:8787` · the bridge origin | — |
+| `MESSENGER_PUSH_TOKEN` | `BRIDGE_PUSH_TOKEN` (≥ 32 ký tự, **khác** `BRIDGE_API_TOKEN` · ≥ 32 chars, **not** `BRIDGE_API_TOKEN`) |
+| — | `BRIDGE_PUSH_THREAD` = chat riêng nhận tin (phải thuộc `BRIDGE_DIRECT_PEER_IDS`) · the private thread to deliver to (must be in `BRIDGE_DIRECT_PEER_IDS`) |
+
+**VI —**
+- Bật khi **cả hai** khoá có giá trị; thiếu một = tắt Messenger (bỏ qua âm thầm như kênh khác). Kiểm tra: `fap notify test` → `Đã gửi tới: [..., 'Messenger']`; `fap doctor` chỉ in **có/thiếu**, không bao giờ in URL hay token.
+- Lỗi chỉ in **mã HTTP** (401 sai token · 404 bridge chưa cấu hình push · 503 hàng đầy) hoặc **tên lớp lỗi mạng** — không in URL, không in token. Không theo redirect.
+- Hai khoá là **khoá kênh**: chế độ nhiều profile **không thừa kế** chúng từ `.env` gốc ([19-multi-profile](19-multi-profile.md)).
+
+**EN —**
+- Enabled only when **both** keys are set; missing either = Messenger off (silently skipped like the others). Verify: `fap notify test` → `Sent to: [..., 'Messenger']`; `fap doctor` only prints **set/missing**, never the URL or token.
+- Errors print only the **HTTP status** (401 wrong token · 404 bridge push not configured · 503 queue full) or the **network error class name** — never the URL or token. Redirects are not followed.
+- Both keys are **channel keys**: in multi-profile mode they are **never inherited** from the root `.env` ([19-multi-profile](19-multi-profile.md)).
+
+---
+
+## 13. Lịch thi mới/đổi + nhắc ngày mai thi · Exam alerts
+
+**VI —** Cùng lượt `fap notify notifications`, fap-cli dò `GetScheduleExam` của **kỳ hiện tại** (thêm 1 request, cộng `GetSemester` nếu không đặt `FAP_SEMESTER` — cả lượt ~3–4 request, cron mẫu mỗi 30 phút 07:05–21:35) và đẩy **một** tin khi:
+- có dòng lịch thi **MỚI** hoặc **ĐỔI** (khoá = môn · ngày · giờ · phòng — đổi giờ/phòng = 1 dòng mới + `🗑 N lịch thi cũ đã bị gỡ/đổi:` kèm **tên môn + ngày/giờ** từng dòng bị gỡ);
+- có môn thi **NGÀY MAI** (giờ Việt Nam) — nhắc `⏰ Ngày mai thi` **đúng 1 lần** mỗi môn.
+
+**EN —** In the same `fap notify notifications` round, fap-cli checks `GetScheduleExam` for the **current term** (one extra request, plus `GetSemester` unless `FAP_SEMESTER` is set — ~3–4 requests per round in total, sample cron every 30 min 07:05–21:35) and pushes **one** message when:
+- an exam row is **NEW** or **CHANGED** (key = subject · date · time · room — a time/room change = one new row + `🗑 N earlier exam entries removed/changed:` listing **subject + date/time** of each removed row);
+- an exam is **TOMORROW** (Vietnam time) — `⏰ Exam tomorrow` is sent **exactly once** per exam.
+
+```
+📝 Lịch thi mới/thay đổi — Fall2026  ·  2
+━━━━━━━━━━━━━━━━
+• CES202 — 13/10/2026 07:30  📍 AL-R201  · FE  📝 Mang thẻ SV…
+• PRN212 — 22/10/2026 07:30  📍 BE-301  · FE  📝 Mang thẻ SV…
+
+⏰ Ngày mai thi  ·  1
+━━━━━━━━━━━━━━━━
+• CES202 — 13/10/2026 07:30  📍 AL-R201  · FE  📝 Mang thẻ SV…
+```
+
+**VI —** Quy tắc:
+- **Lần đầu / kỳ chưa có mốc → chỉ ghi mốc kỳ đó**, không đẩy, **mốc kỳ khác giữ nguyên** — `GetSemester` chập chờn làm kỳ hiện tại tạm rơi về kỳ dự phòng rồi quay lại cũng không mất tin / không nhắc lặp. Mốc: `output/exams_state.json` (`{"terms": {kỳ: {"rows", "reminded"}}}`, giữ 4 kỳ ghi gần nhất; dạng cũ 1 kỳ tự chuyển; ghi nguyên tử, `chmod 0600`; file hỏng → cô lập `.corrupt` rồi ghi mốc lại).
+- **Lấy lịch hỏng** (mạng / HTTP ≠ 200 / code ≠ 200 / token hết hạn) → bỏ lượt, **giữ nguyên mốc**. Danh sách rỗng trong khi mốc đang có lịch → coi là trục trặc tạm thời, giữ mốc.
+- **Đẩy không tới kênh nào** → **không lưu mốc**, lượt sau báo lại (thà nhận trùng còn hơn sót lịch thi).
+- `fap exams` / `/exams` khi kỳ hiện tại **chưa có lịch** (trường chưa xếp) sẽ gợi ý xem kỳ trước: `/exams Summer2026` · `fap exams Summer2026`. Mỗi dòng lịch thi hiện thêm **ghi chú** của phòng khảo thí (`📝 …`, ~80 ký tự). File `.ics` của `fap exams-ics` dùng **giờ kết thúc thật** từ khoảng `07h30-09h00`.
+- `exams_state.json` là mốc **riêng từng máy** như `applications_state.json` — đừng copy sang máy khác.
+
+**EN —** Rules:
+- **First run / a term with no baseline yet → baseline that term only**, nothing pushed, **other terms' baselines untouched** — a flaky `GetSemester` briefly falling back to another term and back loses no alert and repeats no reminder. State: `output/exams_state.json` (`{"terms": {term: {"rows", "reminded"}}}`, the 4 most recently written terms; the old single-term shape is migrated; atomic write, `chmod 0600`; a corrupt file is quarantined as `.corrupt` and re-baselined).
+- **Failed fetch** (network / HTTP ≠ 200 / code ≠ 200 / expired token) → skip the round, **baseline untouched**. An empty list while the baseline has exams → treated as a transient glitch, baseline kept.
+- **Push reached no channel** → **baseline not saved**, the next round alerts again (a duplicate beats a missed exam).
+- `fap exams` / `/exams` on a current term with **no schedule yet** suggests the previous term: `/exams Summer2026` · `fap exams Summer2026`. Each exam row also shows the exam office **note** (`📝 …`, ~80 chars). The `fap exams-ics` file uses the **real end time** from a `07h30-09h00` range.
+- `exams_state.json` is a **per-machine** baseline like `applications_state.json` — don't copy it between machines.
