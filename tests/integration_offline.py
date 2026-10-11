@@ -14,6 +14,9 @@ import os, sys, io, contextlib, tempfile, importlib
 from urllib.parse import parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["FAP_SEMESTER"] = "Summer2026"; os.environ["FAP_LANG"] = "vi"
+# `fap selftest` thừa hưởng .env thật: cache API bật thì các mục đổi phản hồi giả giữa chừng nhận bản cũ.
+# `fap selftest` inherits the real .env: with the API cache on, sections that swap fake responses get stale ones.
+os.environ["FAP_CACHE_MIN"] = "0"
 # API v2 OPT-IN: ghim v1 + xoá khoá v2 TRƯỚC import fapc (đặt ở đây THẮNG .env thật). Mục [V2] tự bật bằng khoá GIẢ.
 os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
 
@@ -78,6 +81,16 @@ _REAL_MESSENGER = notify._messenger        # giữ hàm THẬT để [Q] kiểm 
 notify._telegram = lambda t: False; notify._discord = lambda t: False; notify._messenger = lambda t: False
 import fapc.app.attendwatch as aw, fapc.app.gradewatch as gw
 _tmp = tempfile.mkdtemp()
+
+def _ics_in_tmp(fn):
+    """exams_ics() ghi vào paths.out_dir(): trỏ tạm sang _tmp, kẻo selftest (update.sh chạy trên server) ghi đè
+    output/lichthi.ics THẬT bằng lịch thi giả · keep selftest from overwriting the real exam calendar."""
+    real = ex.paths.out_dir
+    ex.paths.out_dir = lambda: _tmp
+    try:
+        return fn()
+    finally:
+        ex.paths.out_dir = real
 aw.STATE = os.path.join(_tmp, "a.json"); gw.STATE = os.path.join(_tmp, "g.json"); notify._SEEN_NOTIF = os.path.join(_tmp, "s.json")
 notify._EXAM_STATE = os.path.join(_tmp, "e.json")       # `notify notifications` giờ dò cả lịch thi -> mốc ở thư mục tạm
 from fapc.app.bot_core import handle, COMMANDS
@@ -100,8 +113,9 @@ for c in COMMANDS:
     if c == "help": continue
     for a in ARGS.get(c, [None]):
         no_raise(f"handle/{c}" + (f" [{a}]" if a else ""), lambda c=c, a=a: handle(c, a))
-for lbl, fn in [("grades.report", g.report), ("grades.detail", g.detail), ("grades.detail.raw", lambda: g.detail(raw=True)), ("att.report", at.report), ("banrisk", at.banrisk), ("transcript", tr.report), ("gpa", tr.gpa_report), ("whatif", lambda: wi.run("8")), ("status", db.status), ("week", lambda: db.week(None)), ("exams", ex.exams), ("news", ex.news), ("fees", ex.fees), ("notifications", ex.notifications), ("exams_ics", ex.exams_ics)]:
+for lbl, fn in [("grades.report", g.report), ("grades.detail", g.detail), ("grades.detail.raw", lambda: g.detail(raw=True)), ("att.report", at.report), ("banrisk", at.banrisk), ("transcript", tr.report), ("gpa", tr.gpa_report), ("whatif", lambda: wi.run("8")), ("status", db.status), ("week", lambda: db.week(None)), ("exams", ex.exams), ("news", ex.news), ("fees", ex.fees), ("notifications", ex.notifications), ("exams_ics", lambda: _ics_in_tmp(ex.exams_ics))]:
     no_raise("ok:" + lbl, fn)
+check("exams_ics ghi vào thư mục tạm, KHÔNG đụng output/ thật", os.path.isfile(os.path.join(_tmp, "lichthi.ics")))
 # [C] token hết hạn
 MODE["v"] = "expired"; api._CACHE.clear()
 for lbl, fn in [("grades", g.report), ("att", at.report), ("gpa", tr.gpa_report), ("exams", ex.exams), ("fees", ex.fees), ("notif", ex.notifications)]:
