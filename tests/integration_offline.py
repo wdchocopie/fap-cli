@@ -74,10 +74,12 @@ import fapc.core.apiv2 as _V2M
 _V2M.TOKEN_JSON = os.path.join(tempfile.mkdtemp(), "token.json"); _V2M._SESSION_CACHE.clear()
 import fapc.app.notify as notify
 _REAL_TELEGRAM = notify._telegram          # giữ hàm THẬT để [I] kiểm việc cắt tin dài
-notify._telegram = lambda t: False; notify._discord = lambda t: False
+_REAL_MESSENGER = notify._messenger        # giữ hàm THẬT để [Q] kiểm kênh Messenger (requests.post GIẢ)
+notify._telegram = lambda t: False; notify._discord = lambda t: False; notify._messenger = lambda t: False
 import fapc.app.attendwatch as aw, fapc.app.gradewatch as gw
 _tmp = tempfile.mkdtemp()
 aw.STATE = os.path.join(_tmp, "a.json"); gw.STATE = os.path.join(_tmp, "g.json"); notify._SEEN_NOTIF = os.path.join(_tmp, "s.json")
+notify._EXAM_STATE = os.path.join(_tmp, "e.json")       # `notify notifications` giờ dò cả lịch thi -> mốc ở thư mục tạm
 from fapc.app.bot_core import handle, COMMANDS
 import fapc.core.grades as g, fapc.core.attendance as at, fapc.core.transcript as tr, fapc.core.whatif as wi
 import fapc.app.dashboard as db, fapc.core.extras as ex, fapc.core.schedule as sched
@@ -520,6 +522,7 @@ try:
     api._CACHE.clear()
     _cap(lambda: notify.run("notifications"))                 # lần đầu: ghi mốc (thông báo + đơn), KHÔNG đẩy
     check("apps: lần đầu chỉ ghi mốc", _pushed == [] and os.path.exists(notify._APP_STATE), str(_pushed)[:80])
+    check("exams: cùng nhịp `notify notifications` -> ghi mốc lịch thi, KHÔNG đẩy", os.path.exists(notify._EXAM_STATE))
     SUCCESS["GetApplication"] = [dict(SUCCESS["GetApplication"][0], studentStatus=3)]   # server gửi INT 3
     api._CACHE.clear()
     _cap(lambda: notify.run("notifications"))
@@ -650,6 +653,111 @@ finally:
     for _k, _v in _saved_l.items():
         if _v is None: SUCCESS.pop(_k, None)
         else: SUCCESS[_k] = _v
+    api._CACHE.clear()
+
+# [Q] lịch thi — ĐƯỜNG THẬT: requests (mock, tôn trọng tham số Semester) -> api.call -> exams_text / fetch_exams_checked
+#     -> exam_changes -> exams_state.json (thư mục tạm) -> push. Kỳ hiện tại Fall2026 RỖNG (trường chưa xếp, như đo
+#     thật 12/10/2026), Summer2026 có lịch. Ngày thi TƯƠNG ĐỐI theo giờ VN -> không thành bom hẹn giờ.
+#     + kênh Messenger đi qua notify.push với requests.post GIẢ.
+_vn_today = api._vn_now().date()
+def _exrow(code, days, room, note="Mang thẻ SV"):
+    d = _vn_today + datetime.timedelta(days=days)
+    return {"date": d.strftime("%Y-%m-%dT00:00:00"), "dateofPublication": "2026-07-01T00:00:00", "kythi": "FE",
+            "note": note, "note_Attendance": "", "realSubject": code, "roomNo": room, "slot": "1",
+            "subjectCode": code, "subjectName": "Môn " + code, "time": "07h30-09h00"}
+_EXQ = {"Summer2026": [_exrow("IAP301", -60, "BE-101"), _exrow("HOD402", -58, "BE-205")], "Fall2026": []}
+_QOVR = {}
+def _fake_get_q(url, **k):
+    ep = url.split("/MyFAP/")[1].split("?")[0]
+    if ep == "GetScheduleExam" and MODE["v"] == "success":
+        if "resp" in _QOVR: return _QOVR["resp"]
+        _sem = (parse_qs(url.split("?", 1)[1]).get("Semester") or [""])[0]
+        return _R(_EXQ.get(_sem, []))
+    return fake_get(url, **k)
+_saved_q = (notify._telegram, notify._EXAM_STATE, os.environ.get("FAP_SEMESTER"))
+_qpushed, _qok = [], {"v": True}
+notify._telegram = lambda t: (_qpushed.append(t), _qok["v"])[1]
+notify._EXAM_STATE = os.path.join(_tmp, "exams_q.json")
+def _qstate():
+    with open(notify._EXAM_STATE, encoding="utf-8") as _f: return _f.read()
+MODE["v"] = "success"; api.requests.get = _fake_get_q; os.environ["FAP_SEMESTER"] = "Fall2026"
+try:
+    api._CACHE.clear()
+    _e0 = _cap(lambda: handle("exams"))
+    check("exams: kỳ hiện tại rỗng -> gợi ý kỳ trước", "Fall2026" in _e0 and "/exams Summer2026" in _e0, _e0[:160])
+    _e1 = _cap(lambda: handle("exams", "summer2026"))
+    check("exams [kỳ]: chuẩn hoá + xem đúng kỳ đó", "Summer2026" in _e1 and "IAP301" in _e1 and "HOD402" in _e1
+          and "📝 Mang thẻ SV" in _e1 and "/exams Summer2026" not in _e1, _e1[:200])
+    _e2 = _cap(lambda: handle("exams", "rác"))
+    check("exams [tham số lạ] -> kỳ hiện tại", "Fall2026" in _e2 and "IAP301" not in _e2, _e2[:120])
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(io.StringIO()): ex.exams("SUMMER2026")
+    check("CLI `fap exams SUMMER2026`", "IAP301" in _buf.getvalue() and "Summer2026" in _buf.getvalue())
+    _help = handle("help")
+    check("/help gợi ý tham số kỳ cho /exams", "/exams [kỳ]" in _help or "/exams [term]" in _help)
+    # cảnh báo: lần đầu (kỳ rỗng) -> ghi mốc im lặng
+    _cap(notify.push_exam_changes)
+    check("exam alert: lần đầu chỉ ghi mốc", _qpushed == [] and '"Fall2026"' in _qstate(), str(_qpushed)[:80])
+    # trường XẾP LỊCH: 1 môn ngày mai + 1 môn 10 ngày nữa -> 1 tin (mới + ⏰ ngày mai)
+    _EXQ["Fall2026"] = [_exrow("CES202", 1, "AL-R201"), _exrow("PRN212", 10, "BE-301")]
+    _cap(notify.push_exam_changes)
+    check("exam alert: lịch MỚI + nhắc ngày mai trong 1 tin", len(_qpushed) == 1 and "CES202" in _qpushed[0]
+          and "PRN212" in _qpushed[0] and "⏰" in _qpushed[0], str(_qpushed)[:200])
+    _cap(notify.push_exam_changes)
+    check("exam alert: không báo lại, nhắc ngày mai ĐÚNG 1 lần", len(_qpushed) == 1, str(_qpushed[1:])[:120])
+    # đổi phòng nhưng đẩy THẤT BẠI -> giữ mốc, lượt sau báo lại
+    _EXQ["Fall2026"] = [_exrow("CES202", 1, "AL-R201"), _exrow("PRN212", 10, "BE-999")]
+    _before = _qstate(); _qok["v"] = False
+    _cap(notify.push_exam_changes)
+    check("exam alert: đẩy hỏng -> KHÔNG lưu mốc", _qstate() == _before and len(_qpushed) == 2)
+    _qok["v"] = True
+    _cap(notify.push_exam_changes)
+    check("exam alert: lượt sau báo lại dòng đổi + số dòng gỡ", len(_qpushed) == 3 and "BE-999" in _qpushed[2]
+          and "🗑 1" in _qpushed[2] and "PRN212" in _qpushed[2].split("🗑", 1)[1] and "⏰" not in _qpushed[2],
+          str(_qpushed[2:])[:200])
+    _cap(notify.push_exam_changes)
+    check("exam alert: đã lưu sau khi đẩy được", len(_qpushed) == 3)
+    # kỳ CHẬP CHỜN: rơi về kỳ dự phòng (Summer2026) trong lúc trường xếp thêm SWP391 rồi quay lại Fall2026
+    _EXQ["Fall2026"] = _EXQ["Fall2026"] + [_exrow("SWP391", 20, "BE-401")]
+    os.environ["FAP_SEMESTER"] = "Summer2026"; api._CACHE.clear()
+    _cap(notify.push_exam_changes)
+    os.environ["FAP_SEMESTER"] = "Fall2026"; api._CACHE.clear()
+    _cap(notify.push_exam_changes)
+    check("exam alert: kỳ chập chờn -> không mất dòng mới, không nhắc lặp", len(_qpushed) == 4
+          and "SWP391" in _qpushed[3] and "⏰" not in _qpushed[3] and '"Summer2026"' in _qstate(), str(_qpushed[3:])[:200])
+    # lấy lịch HỎNG: mất mạng / code ≠ 200 / token hết hạn -> không đụng mốc, không đẩy
+    _before = _qstate()
+    MODE["v"] = "netdown"; api._CACHE.clear()
+    no_raise("exam alert: mất mạng không sập", notify.push_exam_changes)
+    MODE["v"] = "success"; _QOVR["resp"] = _R(None, "500"); api._CACHE.clear()
+    no_raise("exam alert: code 500 không sập", notify.push_exam_changes)
+    _QOVR.clear(); MODE["v"] = "expired"; api._CACHE.clear()
+    raises_exit("exam alert: token hết hạn -> SystemExit", notify.push_exam_changes)
+    check("exam alert: lấy hỏng -> GIỮ nguyên mốc, không đẩy", _qstate() == _before and len(_qpushed) == 4)
+    MODE["v"] = "success"
+    # kênh Messenger qua notify.push (requests.post GIẢ)
+    _mposts = []
+    class _MR: status_code = 200
+    def _mpost(url, **k): _mposts.append((url, k)); return _MR()
+    _saved_m2 = (notify._messenger, notify.requests.post, notify.config.MESSENGER_PUSH_URL, notify.config.MESSENGER_PUSH_TOKEN)
+    try:
+        notify._messenger, notify.requests.post = _REAL_MESSENGER, _mpost
+        notify.config.MESSENGER_PUSH_URL, notify.config.MESSENGER_PUSH_TOKEN = "http://127.0.0.1:8787", "T" * 40
+        _sent = _cap(lambda: notify.push("📝 thử Messenger"))
+        check("messenger: notify.push liệt kê Messenger", "Messenger" in _sent, str(_sent))
+        check("messenger: POST /v1/push + Bearer + json text", len(_mposts) == 1
+              and _mposts[0][0] == "http://127.0.0.1:8787/v1/push"
+              and _mposts[0][1]["headers"]["Authorization"] == "Bearer " + "T" * 40
+              and _mposts[0][1]["json"] == {"text": "📝 thử Messenger"} and _mposts[0][1]["allow_redirects"] is False)
+    finally:
+        (notify._messenger, notify.requests.post, notify.config.MESSENGER_PUSH_URL,
+         notify.config.MESSENGER_PUSH_TOKEN) = _saved_m2
+finally:
+    MODE["v"] = "success"; _QOVR.clear()
+    api.requests.get = fake_get
+    notify._telegram, notify._EXAM_STATE = _saved_q[0], _saved_q[1]
+    if _saved_q[2] is None: os.environ.pop("FAP_SEMESTER", None)
+    else: os.environ["FAP_SEMESTER"] = _saved_q[2]
     api._CACHE.clear()
 
 total = OK["n"] + FAIL["n"]

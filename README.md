@@ -61,7 +61,7 @@ Mục lục đầy đủ · full index: **[docs/README.md](docs/README.md)**.
 |---|---|
 | `FAP_LANG` | `vi` (mặc định) \| `en` — ngôn ngữ thông báo · notification language |
 | `FAP_SEMESTER` | để trống = tự dò · empty = auto-detect; ép · force: `Spring2026` |
-| `TELEGRAM_TOKEN` / `TELEGRAM_CHAT` / `DISCORD_WEBHOOK_URL` | kênh notify · notify channels |
+| `TELEGRAM_TOKEN` / `TELEGRAM_CHAT` / `DISCORD_WEBHOOK_URL` / `MESSENGER_PUSH_URL` + `MESSENGER_PUSH_TOKEN` | kênh notify (Messenger = chat riêng qua bridge, [docs/13](docs/13-notify.md) §12) · notify channels (Messenger = private chat via the bridge) |
 | `FAP_API_VERSION` / `FAP_V2_KEY` | trống = v1 (mặc định); `v2` = opt-in, thử nghiệm — `FAP_V2_KEY` là **bí mật**, không commit · empty = v1; `v2` = opt-in, experimental; the key is a **secret** ([docs/21](docs/21-api-v2.md) §5) |
 | Console Windows lỗi font | `chcp 65001` hoặc · or `PYTHONUTF8=1` (package cũng tự `reconfigure utf-8`) |
 

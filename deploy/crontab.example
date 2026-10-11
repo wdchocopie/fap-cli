@@ -9,6 +9,22 @@
 0  21 * * 0-4  /home/you/fap-cli/deploy/run-notify.sh tomorrow    # 21:00 CN–T5: xem trước ngày mai
 0  20 * * 0    /home/you/fap-cli/deploy/run-notify.sh weekly      # 20:00 Chủ nhật: tổng quan tuần tới
 0  18 * * 5    /home/you/fap-cli/deploy/run-notify.sh banrisk     # 18:00 Thứ 6: cảnh báo cấm thi
+# CÔNG TẮC cảnh báo · ALERT SWITCH: `notify notifications` = thông báo trường MỚI + đơn từ đổi trạng thái +
+# lịch thi mới/đổi + nhắc ngày mai thi (docs/13-notify.md §10, §13). Không có dòng này = KHÔNG nhận 3 loại đó.
+# = new school notifications + application status changes + new/changed exams + day-before reminder.
+# Mỗi 30' từ 07:05 tới 21:35 (~3–4 request/lượt — nhẹ tay) · every 30 min 07:05–21:35 (~3–4 requests/round).
+# Phút 5/35 (không phải 0/30): tránh trùng phút với các dòng run-notify.sh khác — 2 lần `fap refresh` cùng lúc dễ giẫm nhau.
+# Minutes 5/35 (not 0/30) so it never shares a minute with the other run-notify.sh lines — two concurrent refreshes can collide.
+# Mặc định qua run-notify.sh: `fap refresh` trước mỗi lượt (token FAP chỉ sống ~1 giờ) — chạy được cả trên máy
+# KHÔNG có watcher/bot. NẾU máy này đã chạy fap-watch/fap-gradewatch/fap-bot cho CÙNG profile (chúng tự giữ token
+# tươi) -> dùng dòng `fap notify notifications` trực tiếp bên dưới thay vào: refresh_token XOAY VÒNG, thêm 1 nơi
+# refresh mỗi 30' dễ giẫm lên chúng.
+# Default via run-notify.sh: `fap refresh` before each round (FAP tokens live only ~1 h) — works on machines WITHOUT
+# watchers/bot. IF fap-watch/fap-gradewatch/fap-bot already run on this machine for the SAME profile (they keep the
+# token fresh) -> use the direct `fap notify notifications` line below instead: refresh tokens ROTATE, so an extra
+# 30-min refresher can race them.
+5,35 7-21 * * *  /home/you/fap-cli/deploy/run-notify.sh notifications
+# 5,35 7-21 * * *  cd /home/you/fap-cli && ./.venv/bin/fap notify notifications >> output/deploy.log 2>&1
 #
 # ===== TÙY CHỌN · OPTIONAL =====
 # 0 12 * * 1   /home/you/fap-cli/deploy/run-notify.sh attendance  # 12:00 T2: bảng điểm danh đầu tuần

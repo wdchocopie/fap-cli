@@ -18,6 +18,7 @@ Read this before running, sharing, or publishing the source.
 | `credentials.json` | OAuth client "Desktop app" của Google (bạn tải về) · your Google OAuth client |
 | `output/api/*.json` | Dữ liệu cá nhân: điểm, điểm danh, học phí, CCCD, thông tin phụ huynh... · grades, attendance, fees, national ID, parent info |
 | `output/applications_state.json` | Trạng thái cá nhân: mã đơn từ + mã trạng thái xử lý (mốc cảnh báo của `fap notify notifications`, ghi `0600`, riêng từng máy — không chia sẻ/copy) · personal state: application ids + status codes (alert baseline, written `0600`, per-machine — don't share or copy) |
+| `output/exams_state.json` | Lịch thi đã thấy theo từng kỳ (môn · ngày · giờ · phòng) + môn đã nhắc (mốc cảnh báo lịch thi của `fap notify notifications`, ghi `0600`, riêng từng máy — không chia sẻ/copy) · exams seen per term (subject · date · time · room) + reminded keys (exam-alert baseline, written `0600`, per-machine — don't share or copy) |
 | `.env` | Token Telegram, webhook Discord, cấu hình — và **`FAP_V2_KEY`** nếu bạn bật API v2 (opt-in) · bot token, webhook, config — and **`FAP_V2_KEY`** if you opted into API v2 |
 
 > **VI —** Bất kỳ ai có `output/oauth_tokens.json` hoặc `output/token.json` đều có thể truy cập dữ liệu FAP của bạn.

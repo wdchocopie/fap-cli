@@ -37,6 +37,8 @@ _IDENTITY_KEYS = frozenset({
     "DISCORD_BOT_TOKEN",        # bot Discord nào
     "DISCORD_ALLOWED_USER_ID",  # bot chỉ trả lời user nào
     "DISCORD_ALLOW_ANYONE",     # nới quyền của bot — thừa kế = mở toang bot của người khác
+    "MESSENGER_PUSH_URL",       # đẩy qua bridge Messenger nào
+    "MESSENGER_PUSH_TOKEN",     # token push của bridge = chat riêng của chủ máy
     "GCAL_CALENDAR_ID",         # ghi vào lịch Google nào
 })
 
@@ -126,7 +128,7 @@ def load_env():
         # .env gốc bị lọc hết khóa danh tính ⇒ KHÔNG có file này thì mọi kênh gửi TẮT ÂM THẦM
         # (đúng về mặt an toàn, nhưng người dùng phải biết vì sao bot im lặng).
         _sys.stderr.write(
-            "⚠️  FAP_PROFILE=%s nhưng KHÔNG thấy %s — mọi kênh gửi (Telegram/Discord/Calendar) sẽ TẮT.\n"
+            "⚠️  FAP_PROFILE=%s nhưng KHÔNG thấy %s — mọi kênh gửi (Telegram/Discord/Messenger/Calendar) sẽ TẮT.\n"
             "    Tạo file đó rồi khai khóa riêng của profile này (xem docs/19-multi-profile.md).\n"
             "⚠️  FAP_PROFILE=%s but %s is MISSING — every delivery channel will be OFF.\n"
             % (prof, _PROFILE_ENV_FMT.format(prof), prof, _PROFILE_ENV_FMT.format(prof)))

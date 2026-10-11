@@ -14,7 +14,7 @@ from ..core.courses import courses_text
 from ..core import subjects
 from ..core.attendance import fetch as fetch_att, _at_risk, attendance_lines, recorded_by_subject
 from ..core.whatif import _split, needed_average, WHATIF_STEPS, MARK_MAX
-from ..core.extras import exams_text, notifications_text, profile_text, applications_text, countdown_text, todo_text
+from ..core.extras import exams_text, notifications_text, profile_text, applications_text, countdown_text, todo_text, norm_term
 from ..core.transcript import gpa_text, trend_text, credits_overview, fetch as _fetch_transcript
 from ..core.conduct import conduct_text
 from ..i18n import t
@@ -81,6 +81,7 @@ def arg_hint(name):
         "grades-detail": t(" [mã môn]", " [subject]"),
         "notifications": t(" [số|từ khoá]", " [number|keyword]"),
         "semester":      " [pattern|weeks|list|" + t("kỳ", "term") + "]",
+        "exams":         t(" [kỳ]", " [term]"),
     }.get(name, "")
 
 def command_groups():
@@ -299,7 +300,7 @@ def handle(cmd, arg=None):
         if cmd == "banrisk":       return _banrisk_text(token, campus, roll, sem)
         if cmd == "whatif":        return _whatif_text(token, campus, roll, sem, arg)
         if cmd == "status":        return _status_text(token, campus, roll, sem)
-        if cmd == "exams":         return exams_text(token, campus, roll, sem)
+        if cmd == "exams":         return exams_text(token, campus, roll, sem, norm_term(arg))   # 'Summer2026' = kỳ đó; khác -> kỳ hiện tại
         if cmd == "exam-countdown":return countdown_text(token, campus, roll, sem)
         if cmd == "gpa":           return gpa_text(token, campus, roll)
         if cmd == "gpa-trend":     return trend_text(_fetch_transcript(token, campus, roll))

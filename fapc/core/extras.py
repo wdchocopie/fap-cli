@@ -362,6 +362,9 @@ _EX_SUBJ  = ("subjectcode", "subject", "examsubject", "realsubject", "subjectnam
 _EX_ROOM  = ("examroom", "room", "roomno", "phongthi", "examroomname")
 _EX_TYPE  = ("examtype", "type", "publicexamtype", "kythi")
 _EX_FORM  = ("examform", "form", "method", "examformat")
+_EX_NOTE  = ("note",)                     # ghi chú phòng khảo thí (đo thật: có ở 8/8 dòng); KHÔNG gồm note_Attendance
+_EX_DATE  = ("examdate", "date")
+_EX_TIME  = ("examtime", "time")
 
 def _exam_get(r, keys):
     """Giá trị đầu tiên KHÁC RỖNG trong các key ứng viên (không phân biệt hoa/thường). '' nếu không có."""
@@ -382,10 +385,10 @@ def _exam_line(r):
     if dt:
         when = dt[0].strftime("%d/%m/%Y %H:%M")
     else:                                                    # không parse được -> hiện thô cái đang có
-        when = " ".join(x for x in (_exam_get(r, ("examdate", "date")),
-                                    _exam_get(r, ("examtime", "time"))) if x)
+        when = " ".join(x for x in (_exam_get(r, _EX_DATE), _exam_get(r, _EX_TIME)) if x)
     room = _exam_get(r, _EX_ROOM)
     tags = [b for b in (_exam_get(r, _EX_TYPE), _exam_get(r, _EX_FORM)) if b]
+    note = _preview(fmt.unescape(_exam_get(r, _EX_NOTE)), 80)
     line = f"• {subjects.label(subj)}"
     if when:
         line += f" — {when}"
@@ -393,27 +396,148 @@ def _exam_line(r):
         line += f"  📍 {room}"
     if tags:
         line += "  · " + " · ".join(tags)
+    if note:
+        line += f"  📝 {note}"
     return line, (dt[0] if dt else None)
 
-def exams_text(token, campus, roll, sem):
+def _exam_lines(rows):
+    """Các dòng _exam_line, sớm nhất trước; dòng không parse được ngày xuống cuối."""
+    rendered = sorted((_exam_line(r) for r in rows), key=lambda x: x[1] or datetime.datetime.max)
+    return [ln for ln, _ in rendered]
+
+# ---------- TÊN KỲ: 'fall2026' -> 'Fall2026', kỳ trước (FPT: Spring → Summer → Fall) ----------
+_TERM_RE = re.compile(r"^(spring|summer|fall)(\d{4})$", re.I)
+_SEASONS = ("Spring", "Summer", "Fall")
+
+def norm_term(s):
+    """THUẦN: 'FALL2026'/'fall2026' -> 'Fall2026'; chuỗi không đúng dạng kỳ -> None."""
+    m = _TERM_RE.match(str(s or "").strip())
+    return m.group(1).capitalize() + m.group(2) if m else None
+
+def prev_term(name):
+    """THUẦN: kỳ NGAY TRƯỚC: Fall2026→Summer2026, Summer2026→Spring2026, Spring2026→Fall2025. Tên lạ -> None."""
+    n = norm_term(name)
+    if not n:
+        return None
+    i, year = _SEASONS.index(n[:-4]), int(n[-4:])
+    return f"{_SEASONS[i - 1]}{year - 1 if i == 0 else year}"
+
+def exams_text(token, campus, roll, sem, term=None):
+    """Lịch thi của `term` (vd 'Summer2026' từ `/exams Summer2026`); None = kỳ hiện tại `sem`.
+    Kỳ HIỆN TẠI rỗng (trường chưa xếp lịch) -> kèm gợi ý xem kỳ trước."""
+    q = term or sem
     http, data = call("GetScheduleExam",
-        [("campusCode", campus), ("rollNumber", roll), ("Semester", sem), ("Authen", token)], roll, campus)
+        [("campusCode", campus), ("rollNumber", roll), ("Semester", q), ("Authen", token)], roll, campus)
     check_auth(http, data)        # token hết hạn -> raise rõ, KHÔNG báo nhầm "chưa có lịch thi"
     rows = [r for r in as_list(data) if isinstance(r, dict)]
     if not rows:
-        return t(f"📝 Chưa có lịch thi kỳ {sem} (sẽ hiện khi trường xếp lịch).",
-                 f"📝 No exam schedule for {sem} yet (appears once scheduled).")
+        msg = t(f"📝 Chưa có lịch thi kỳ {q} (sẽ hiện khi trường xếp lịch).",
+                f"📝 No exam schedule for {q} yet (appears once scheduled).")
+        p = prev_term(q) if q == sem else None
+        if p:
+            msg += "\n" + t(f"💡 Xem kỳ trước: /exams {p}  (CLI: fap exams {p})",
+                            f"💡 Previous term: /exams {p}  (CLI: fap exams {p})")
+        return msg
     subjects.load()                                          # tên môn từ cache (nếu đã `fap subjects`)
-    rendered = [_exam_line(r) for r in rows]
-    rendered.sort(key=lambda x: x[1] or datetime.datetime.max)   # sớm nhất trước; không-parse-được xuống cuối
-    lines = [fmt.header("📝", t(f"Lịch thi {sem}", f"Exam schedule {sem}"),
+    lines = [fmt.header("📝", t(f"Lịch thi {q}", f"Exam schedule {q}"),
                         t(f"{len(rows)} môn", f"{len(rows)} exams"))]
-    lines += [ln for ln, _ in rendered]
-    return "\n".join(lines)
+    return "\n".join(lines + _exam_lines(rows))
 
-def exams():
+def exams(term=None):
+    """`fap exams [Kỳ]` — tham số không đúng dạng kỳ (Spring/Summer/Fall + năm) bị bỏ qua -> kỳ hiện tại."""
     token, campus, roll = creds()
-    print(exams_text(token, campus, roll, current_semester(token, campus, roll)))
+    print(exams_text(token, campus, roll, current_semester(token, campus, roll), norm_term(term)))
+
+# ---------- CẢNH BÁO LỊCH THI (đẩy cùng nhịp `fap notify notifications`) ----------
+def fetch_exams_checked(token, campus, roll, sem):
+    """Lịch thi cho cảnh báo: list dict khi lấy ĐƯỢC (rỗng = trường chưa xếp), None khi KHÔNG BIẾT
+    (mạng / HTTP ≠ 200 / code ≠ '200'). Token hết hạn -> raise qua check_auth (như _fetch_ok)."""
+    http, data = call("GetScheduleExam",
+        [("campusCode", campus), ("rollNumber", roll), ("Semester", sem), ("Authen", token)], roll, campus)
+    check_auth(http, data)
+    if http != 200 or not isinstance(data, dict) or str(data.get("code")) != "200":
+        return None
+    d = data.get("data")
+    if d is None:
+        return []
+    return [r for r in d if isinstance(r, dict)] if isinstance(d, list) else None
+
+def exam_key(r):
+    """Khoá 1 dòng lịch thi = môn|ngày|giờ|phòng — đổi giờ/phòng = 1 dòng MỚI + 1 dòng cũ bị gỡ."""
+    return "|".join(_exam_get(r, k) for k in (_EX_SUBJ, _EX_DATE, _EX_TIME, _EX_ROOM))
+
+_EXAM_TERMS_KEEP = 4      # mốc giữ tối đa 4 kỳ GHI GẦN NHẤT (kỳ thật + kỳ dự phòng khi GetSemester chập chờn)
+
+def exam_terms(prev):
+    """THUẦN: mốc lịch thi -> {kỳ: {"rows": {key: true}, "reminded": [key]}} (thứ tự = thứ tự ghi).
+    Nhận cả dạng CŨ 1 kỳ {"sem","rows","reminded"} (chuyển sang dạng theo kỳ); kỳ sai dạng bị bỏ (= chưa ghi mốc)."""
+    if not isinstance(prev, dict):
+        return {}
+    terms = prev.get("terms") if "terms" in prev else {prev.get("sem"): prev}
+    if not isinstance(terms, dict):
+        return {}
+    out = {}
+    for s, e in terms.items():
+        if isinstance(s, str) and isinstance(e, dict) and isinstance(e.get("rows"), dict):
+            rem = e.get("reminded")
+            out[s] = {"rows": e["rows"], "reminded": [k for k in rem if isinstance(k, str)] if isinstance(rem, list) else []}
+    return out
+
+def exam_changes(prev, rows, sem, tomorrow):
+    """THUẦN: so lịch thi lượt này với mốc CỦA KỲ `sem` -> (state, new_rows, removed_keys, due_rows).
+      prev     : {"terms": {kỳ: {"rows": {key: true}, "reminded": [key]}}} (hoặc dạng cũ 1 kỳ) / None
+      rows     : GetScheduleExam của kỳ `sem` lấy THÀNH CÔNG lượt này
+      tomorrow : date giờ VN — môn thi đúng ngày đó, chưa nhắc -> due_rows (nhắc 1 LẦN)
+    Mốc THEO KỲ: kỳ chưa có mốc (lần đầu / kỳ mới / current_semester() tạm rơi về kỳ dự phòng) -> ghi mốc
+    IM LẶNG kỳ đó, KHÔNG đụng kỳ khác — kỳ thật quay lại vẫn so đúng, không mất tin / không nhắc lặp.
+    Danh sách RỖNG khi mốc kỳ đó đang có dòng = trục trặc tạm thời -> GIỮ mốc (như app_changes).
+    'reminded' chỉ giữ key còn trên lịch; chỉ giữ _EXAM_TERMS_KEEP kỳ ghi gần nhất."""
+    cur = {}
+    for r in rows or []:
+        if isinstance(r, dict):
+            cur.setdefault(exam_key(r), r)
+    terms = exam_terms(prev)
+    old = terms.get(sem)
+    if old is not None and not cur and old["rows"]:
+        return {"terms": terms}, [], [], []
+    new, removed, due, rem = [], [], {}, []
+    if old is not None:
+        rem = [k for k in old["reminded"] if k in cur]
+        new = [r for k, r in cur.items() if k not in old["rows"]]
+        removed = [k for k in old["rows"] if k not in cur]
+        for k, r in cur.items():
+            dt = _exam_dt(r)
+            if k not in rem and dt and dt[0].date() == tomorrow:
+                due[k] = r
+    terms.pop(sem, None)                                    # kỳ vừa ghi xuống CUỐI (thứ tự = mới ghi gần nhất)
+    terms[sem] = {"rows": dict.fromkeys(cur, True), "reminded": sorted(rem + list(due))}
+    return {"terms": dict(list(terms.items())[-_EXAM_TERMS_KEEP:])}, new, removed, list(due.values())
+
+def _removed_exam_lines(keys):
+    """Dòng lịch thi ĐÃ GỠ dựng lại từ khoá 'môn|ngày|giờ|phòng' -> môn + ngày/giờ (sớm nhất trước)."""
+    rows = []
+    for k in keys:
+        p = (str(k).split("|") + ["", "", ""])[:3]
+        rows.append({"subjectCode": p[0], "date": p[1], "time": p[2]})
+    return _exam_lines(rows)
+
+def exam_changes_text(sem, new, removed, due):
+    """THUẦN: tin đẩy lịch thi mới/đổi (+ tên các lịch đã gỡ) + nhắc 'ngày mai thi' ('' nếu không có gì)."""
+    out = []
+    if new or removed:
+        out.append(fmt.header("📝", t(f"Lịch thi mới/thay đổi — {sem}", f"New/changed exams — {sem}"),
+                              str(len(new)) if new else None))
+        out += _exam_lines(new)
+        if removed:
+            n = len(removed)
+            out.append(t(f"🗑 {n} lịch thi cũ đã bị gỡ/đổi:", f"🗑 {n} earlier exam entries removed/changed:"))
+            out += _removed_exam_lines(removed)
+    if due:
+        if out:
+            out.append("")
+        out.append(fmt.header("⏰", t("Ngày mai thi", "Exam tomorrow"), str(len(due))))
+        out += _exam_lines(due)
+    return "\n".join(out)
 
 # ---------- TIN TỨC ----------
 def fetch_news(token, campus, roll, keyword=None, type="1"):
@@ -684,6 +808,12 @@ def _exam_dt(r):
         if c and c != (0, 0):            # bỏ '00:00' GIẢ từ field ngày dạng '...T00:00:00'
             hh, mm = c; break
     s = datetime.datetime(day.year, day.month, day.day, hh, mm)
+    # field giờ dạng KHOẢNG 'HHhMM-HHhMM' (đo thật) -> giờ KẾT THÚC thật; không có / vô lý -> +2h như cũ
+    m = re.search(r"[-–]\s*(\d{1,2})\s*[h:]\s*(\d{2})", str(tv or ""))
+    if m and int(m.group(1)) <= 23 and int(m.group(2)) <= 59:
+        e = s.replace(hour=int(m.group(1)), minute=int(m.group(2)))
+        if e > s:
+            return s, e
     return s, s + datetime.timedelta(hours=2)
 
 # ---------- ĐẾM NGƯỢC LỊCH THI (exam-countdown) ----------
