@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # API v2 là OPT-IN: ghim v1 + XOÁ khoá v2 TRƯỚC khi import fapc (loader .env dùng setdefault -> giá trị đặt ở đây
 # THẮNG .env thật). Test v2 tự bật/tắt qua os.environ với khoá GIẢ "test-key" — khoá thật không bao giờ vào test.
 os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
+# Gọi thoại nhắc tiết là THẬT (CallMeBot): selftest trên máy thật thừa hưởng .env -> luôn TẮT trong test.
+os.environ["CALLMEBOT_USER"] = ""
 # Dấu phiên v1/v2 KHÔNG được đọc từ output/token.json THẬT: người đã bật v2 có dấu 'v2' -> mọi api.call()
 # SystemExit -> selftest hỏng -> tự cập nhật/`/update` bị chặn. Trỏ sang file tạm KHÔNG tồn tại (= không kiểm).
 import tempfile as _tempfile
@@ -3913,6 +3915,90 @@ def test_discord_legacy_menu_buttons_still_route():
     assert D._legacy_pick("fap:today") == "today" and D._legacy_pick("fap:grades_detail") == "grades_detail"
     for cid in ("fap:menu:0", "fap:", "", None, "other:today"):
         assert D._legacy_pick(cid) is None, cid
+
+
+# ---- Gọi thoại nhắc tiết qua CallMeBot (CALLMEBOT_USER) ----
+def test_callmebot_text_and_params_carry_only_the_time():
+    import fapc.app.reminders as R
+    st = datetime.datetime(2026, 10, 13, 7, 30)
+    assert R.call_text(st, 30) == "Còn 30 phút nữa vào lớp, lúc 7 giờ 30."
+    assert R.call_text(datetime.datetime(2026, 10, 13, 9, 0), 0) == "Lớp học bắt đầu ngay bây giờ, lúc 9 giờ."
+    p = R.call_params("@me", st, 30)
+    assert p == {"user": "@me", "text": "Còn 30 phút nữa vào lớp, lúc 7 giờ 30.", "lang": "vi-VN-Standard-A",
+                 "rpt": "2", "cc": "no"}
+    import fapc
+    assert "CALLMEBOT_USER" in fapc._IDENTITY_KEYS            # profile KHÔNG thừa kế người nhận cuộc gọi
+
+def test_callmebot_claim_is_once_per_class_and_prunes_old_marks():
+    import fapc.app.reminders as R, tempfile, os as _os
+    tmp = tempfile.mkdtemp(); orig = R.paths.out
+    R.paths.out = lambda *p: _os.path.join(tmp, *p)
+    try:
+        assert R._claim_call("2026-10-13T07:30|IAP301|1") is True
+        assert R._claim_call("2026-10-13T07:30|IAP301|1") is False      # tiến trình/lượt thứ 2: không gọi trùng
+        assert R._claim_call("2026-10-13T09:30|CES202|2") is True
+        marks = _os.listdir(_os.path.join(tmp, "call_marks"))
+        assert len(marks) == 2 and all("IAP" not in m and len(m) == 40 for m in marks)   # tên = sha1, không lộ môn
+        old = _os.path.join(tmp, "call_marks", marks[0]); _os.utime(old, (1, 1))
+        R._claim_call("x", now_ts=3 * 86400 + 10)
+        assert not _os.path.exists(old)                                   # dấu cũ > 2 ngày bị dọn
+    finally:
+        R.paths.out = orig
+
+def test_callmebot_call_reminder_off_on_dedupe_and_errors():
+    import fapc.app.reminders as R, fapc.config as C, tempfile, os as _os, types
+    tmp = tempfile.mkdtemp()
+    saved = (R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get)
+    rung = []
+    R.paths.out = lambda *p: _os.path.join(tmp, *p)
+    R.threading.Thread = lambda target, args, **k: types.SimpleNamespace(start=lambda: target(*args))
+    st = datetime.datetime(2026, 10, 13, 7, 30)
+    try:
+        C.CALLMEBOT_USER = "  "
+        assert R.call_reminder("k1", st, 30) is False and not _os.path.exists(_os.path.join(tmp, "call_marks"))
+        C.CALLMEBOT_USER = "@me"
+        R.requests.get = lambda url, params=None, **k: (rung.append((url, params, k)), types.SimpleNamespace(status_code=200))[1]
+        assert R.call_reminder("k1", st, 30) is True and R.call_reminder("k1", st, 30) is False
+        assert len(rung) == 1 and rung[0][0] == R.CALLMEBOT_URL and rung[0][1]["user"] == "@me"
+        assert rung[0][2]["allow_redirects"] is False and rung[0][2]["timeout"] > 30
+        def boom(*a, **k): raise R.requests.ConnectionError("GET https://api.callmebot.com/start.php?user=%40me failed")
+        R.requests.get = boom
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert R.call_reminder("k2", st, 30) is True                # lỗi mạng: không raise, chỉ in tên lớp lỗi
+            R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=500)
+            R.call_reminder("k3", st, 30)
+        assert "ConnectionError" in out.getvalue() and "HTTP 500" in out.getvalue()
+        assert "@me" not in out.getvalue() and "%40me" not in out.getvalue() and "callmebot.com" not in out.getvalue()
+        R.paths.out = lambda *p: _os.path.join(tmp, "file-not-dir", *p)
+        open(_os.path.join(tmp, "file-not-dir"), "w").close()           # không ghi được dấu -> KHÔNG gọi
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert R.call_reminder("k4", st, 30) is False
+    finally:
+        R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get = saved
+
+def test_callmebot_tick_calls_once_alongside_the_text():
+    import fapc.app.reminders as R, fapc.config as C, tempfile, os as _os, types
+    tmp = tempfile.mkdtemp()
+    saved = (R.paths.out, C.CALLMEBOT_USER, R._ring, R.threading.Thread, R.creds, R.current_semester, R.fetch_sessions, R._vn_now)
+    calls = []
+    R.paths.out = lambda *p: _os.path.join(tmp, *p)
+    R.threading.Thread = lambda target, args, **k: types.SimpleNamespace(start=lambda: target(*args))
+    R._ring = lambda params: calls.append(params)
+    R.creds = lambda: ("t", "c", "r"); R.current_semester = lambda *a, **k: "Fall2026"
+    R.fetch_sessions = lambda *a, **k: [_sess("10/13/2026", "(07:30 - 09:50)", "IAP301", room="BE-304", slot="1")]
+    R._vn_now = lambda: datetime.datetime(2026, 10, 13, 7, 0)
+    try:
+        C.CALLMEBOT_USER = "@me"
+        rem = R.ClassReminder(lead=30); rem._last_refresh = 9e18
+        texts = rem.tick()
+        assert texts and "IAP301" in texts[0] and len(calls) == 1
+        assert "IAP301" not in calls[0]["text"] and "BE-304" not in calls[0]["text"] and "7 giờ 30" in calls[0]["text"]
+        again = R.ClassReminder(lead=30); again._last_refresh = 9e18   # bot vừa restart / bot thứ 2 cùng profile
+        assert again.tick() and len(calls) == 1                         # chữ vẫn nhắc, cuộc gọi KHÔNG lặp
+    finally:
+        (R.paths.out, C.CALLMEBOT_USER, R._ring, R.threading.Thread, R.creds, R.current_semester,
+         R.fetch_sessions, R._vn_now) = saved
 
 # ---- runner không cần pytest ----
 def _run():

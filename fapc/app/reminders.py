@@ -9,11 +9,17 @@ phút thì đẩy 1 lời nhắc — MỖI TIẾT CHỈ NHẮC 1 LẦN (nhớ tr
 Lõi `due_reminders()`/`reminder_text()` là THUẦN (không mạng/IO) -> test offline được. `ClassReminder.tick()`
 lo phần có mạng: nạp lại TKB trong ngày (cache), tự refresh token ~50' để bot sống lâu, sinh lời nhắc.
 """
-import random, time
+import hashlib, os, random, threading, time
+import requests
 from .. import config, fmt
 from ..i18n import t
+from ..core import paths
 from ..core.api import _vn_now, creds, current_semester
 from ..core.schedule import fetch_sessions, sessions_on_day
+
+# Gọi thoại Telegram nhắc tiết qua CallMeBot (bật bằng CALLMEBOT_USER) — docs/13-notify.md §8.
+CALLMEBOT_URL = "https://api.callmebot.com/start.php"
+_CALL_KEEP_S = 2 * 86400       # dấu "đã gọi" cũ hơn 2 ngày bị dọn
 
 # Lệch giờ refresh token lúc KHỞI ĐỘNG — bảng phân dải dùng chung ở fapc/app/_stagger.py.
 # reminders chạy TRONG bot (tick ~20–60s) nên KHÔNG ngủ chặn như 2 watcher: chỉ seed mốc, tick dày
@@ -63,6 +69,71 @@ def reminder_text(start, end, s, mins):
     gv = s.get("lecturer")
     line += t(f"  ·  GV {gv}", f"  ·  lecturer {gv}") if gv else ""
     return head + "\n" + fmt.with_meet(line, s, label=t("Vào lớp: ", "Join: "))
+
+
+def call_text(start, mins):
+    """THUẦN: câu đọc trong cuộc gọi. CHỈ có giờ vào lớp — mã môn/phòng/link KHÔNG đi sang dịch vụ bên
+    thứ ba (chi tiết đã nằm trong tin nhắc chữ)."""
+    at_vi = f"{start.hour} giờ" + (f" {start.minute:02d}" if start.minute else "")
+    if mins > 0:
+        return t(f"Còn {mins} phút nữa vào lớp, lúc {at_vi}.", f"Class starts in {mins} minutes, at {start:%H:%M}.")
+    return t(f"Lớp học bắt đầu ngay bây giờ, lúc {at_vi}.", f"Class is starting now, at {start:%H:%M}.")
+
+
+def call_params(user, start, mins):
+    """THUẦN: query của CallMeBot. cc=no: không nhắn bù chữ — tin nhắc chữ của bot đã có rồi."""
+    return {"user": user, "text": call_text(start, mins)[:256],
+            "lang": t("vi-VN-Standard-A", "en-US-Standard-B"), "rpt": "2", "cc": "no"}
+
+
+def _claim_call(key, now_ts=None):
+    """Chiếm quyền gọi cho 1 tiết, NGUYÊN TỬ giữa các tiến trình (bot Telegram + Discord cùng profile, hay
+    bot vừa restart): ai tạo được file đánh dấu (O_EXCL) trước thì gọi, người sau bỏ qua. Tên file = sha1
+    của khoá nên không lộ môn/giờ. Dọn dấu cũ hơn _CALL_KEEP_S."""
+    d = paths.out("call_marks")
+    os.makedirs(d, exist_ok=True)
+    now_ts = time.time() if now_ts is None else now_ts
+    for name in os.listdir(d):
+        p = os.path.join(d, name)
+        try:
+            if now_ts - os.path.getmtime(p) > _CALL_KEEP_S:
+                os.remove(p)
+        except OSError:
+            pass
+    mark = os.path.join(d, hashlib.sha1(key.encode("utf-8")).hexdigest())
+    try:
+        os.close(os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        return True
+    except FileExistsError:
+        return False
+
+
+def _ring(params):
+    """Gọi API. Lỗi CHỈ in HTTP status / TÊN lớp lỗi: thông điệp lỗi của requests chứa URL (có username)."""
+    try:
+        r = requests.get(CALLMEBOT_URL, params=params, timeout=90, allow_redirects=False)
+    except requests.RequestException as e:
+        print(t("  CallMeBot lỗi mạng:", "  CallMeBot network error:"), type(e).__name__)
+        return
+    if not 200 <= r.status_code < 300:
+        print(t(f"  CallMeBot lỗi: HTTP {r.status_code}", f"  CallMeBot error: HTTP {r.status_code}"))
+
+
+def call_reminder(key, start, mins):
+    """Gọi thoại Telegram nhắc tiết (CALLMEBOT_USER trống = tắt). Chạy THREAD NỀN: API có thể giữ kết nối tới
+    hết cuộc gọi (~30 s) — không được chặn vòng bot (getUpdates, nhắc tiết). Trả True nếu đã phát lệnh gọi."""
+    user = str(getattr(config, "CALLMEBOT_USER", None) or "").strip()
+    if not user:
+        return False
+    try:
+        if not _claim_call(key):
+            return False
+    except OSError as e:                     # không ghi được dấu -> KHÔNG gọi (thà thiếu còn hơn gọi trùng)
+        print(t("  CallMeBot: không ghi được dấu đã gọi —", "  CallMeBot: cannot write the call mark —"),
+              type(e).__name__)
+        return False
+    threading.Thread(target=_ring, args=(call_params(user, start, mins),), name="fap-call", daemon=True).start()
+    return True
 
 
 class ClassReminder:
@@ -123,4 +194,5 @@ class ClassReminder:
         for start, end, s, mins, k in due_reminders(self._sessions, now, self.lead, self.sent):
             self.sent.add(k)
             texts.append(reminder_text(start, end, s, mins))
+            call_reminder(k, start, mins)        # gọi thoại (nếu bật) — chạy nền, không chặn
         return texts

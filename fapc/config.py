@@ -30,6 +30,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 # URL = origin của bridge (vd http://127.0.0.1:8787); TOKEN = BRIDGE_PUSH_TOKEN bên bridge — BÍ MẬT, không in.
 MESSENGER_PUSH_URL   = os.environ.get("MESSENGER_PUSH_URL")
 MESSENGER_PUSH_TOKEN = os.environ.get("MESSENGER_PUSH_TOKEN")
+CALLMEBOT_USER       = os.environ.get("CALLMEBOT_USER")     # @username Telegram nhận cuộc gọi nhắc tiết
 
 # Google Calendar
 GCAL_CALENDAR_ID = os.environ.get("GCAL_CALENDAR_ID", "primary")
