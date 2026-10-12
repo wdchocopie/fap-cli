@@ -12,7 +12,7 @@ lỗi token ('Token invalid') và lỗi CHECKSUM ('Thông tin checksum không ch
   • 201 khác                                    -> check_auth báo lỗi (không đoán là "chưa có")
 ⚠️ errorMessage của ca NullReference có thể nhắc chữ 'checksum' (vết stack / chữ ký hàm có tham số
 `checksum`) -> CHỈ đọc 'checksum' ở `message`, không đọc ở `errorMessage`.
-Cột render generic theo đúng field server trả (chưa xác minh tên field → không bịa cột).
+Render generic theo đúng field server trả (chưa xác minh tên field → không bịa nhãn).
 """
 from .api import creds, call, as_list, current_semester, check_auth, _err_code
 from ..i18n import t
@@ -54,7 +54,7 @@ def conduct_text(token, campus, roll, sem):
                  "🎖️ No conduct/movement points this term yet (FAP hasn't posted them, or none earned).")
     out = [fmt.header("🎖️", t(f"Điểm rèn luyện · {sem}", f"Conduct points · {sem}"),
                       t(f"{len(rows)} mục", f"{len(rows)} items"))]
-    out.append(fmt.table(rows))                        # generic — đúng field server, không bịa cột
+    out.append(fmt.bullets(rows))                      # generic — đúng field server, không bịa nhãn
     return "\n".join(out)
 
 def report():

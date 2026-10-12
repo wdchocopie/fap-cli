@@ -387,7 +387,7 @@ def run(cmd="test"):
     if name == "today":                         # digest hằng ngày: kèm "Việc cần làm" CHỈ khi có việc
         tail = _todo_tail()
         if tail:
-            msg += "\n\n" + fmt.RULE + "\n\n" + tail
+            msg += "\n\n" + tail                 # khối to-do có header + RULE riêng -> không kẻ thêm
     print(msg)
     sent = push(msg)
     print(t("→ Đã gửi tới:", "→ Sent to:"),

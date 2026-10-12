@@ -229,7 +229,7 @@ def weekly_text(token, campus, roll, sem):
         _banrisk_text(token, campus, roll, sem, rows=att, sessions=sessions),
         _grades_text(token, campus, roll, sem, rows=marks),
     ]
-    return ("\n\n" + fmt.RULE + "\n\n").join(parts)
+    return "\n\n".join(parts)          # mỗi mục đã có header + RULE riêng -> RULE ở đây = 2 đường kẻ liền nhau
 
 def all_text(token, campus, roll, sem):
     """Gộp MỌI mục vào 1 tin: hôm nay → tuần → điểm → điểm thành phần → điểm danh → cấm thi → lịch thi →
@@ -249,7 +249,7 @@ def all_text(token, campus, roll, sem):
         exams_text(token, campus, roll, sem),
         todo_text(token, campus, roll),
     ]
-    return ("\n\n" + fmt.RULE + "\n\n").join(parts)
+    return "\n\n".join(parts)          # như weekly_text: header + RULE của từng mục đã đủ ngăn cách
 
 def semester_arg(arg, sem):
     """THUẦN: tham số của /semester -> (view, kỳ).
