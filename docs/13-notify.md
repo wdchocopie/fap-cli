@@ -310,12 +310,12 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 #### Discord
 
 **VI —**
-- **`/login [campus]`** (slash, câu trả lời **chỉ bạn thấy** — ephemeral) hoặc **`!login [campus]`** (trả lời ngay trong kênh). Device flow: bot tự báo `✅ Đăng nhập xong` khi bạn duyệt xong (slash: vào đúng tin ẩn đó; `!login`: vào kênh).
+- **`/login [campus]`** (slash, câu trả lời **chỉ bạn thấy** — ephemeral) hoặc **`!login [campus]`** (chỉ trong **DM** với bot). Device flow: bot tự báo `✅ Đăng nhập xong` khi bạn duyệt xong (slash: vào đúng tin ẩn đó; `!login`: vào DM).
 - Đường PKCE: an toàn nhất là **`/login-finish <URL>`** (ẩn). Dán **URL trần** (hoặc `!login-finish <URL>`) vào kênh cũng được — bot **xoá tin trước khi đổi mã**; xoá được trong kênh server khi bot có quyền **Manage Messages**, **không** xoá được trong DM → bot nhắc bạn tự xoá.
 - **Chỉ chủ bot** (`DISCORD_ALLOWED_USER_ID`) — y như `/update`. Chế độ mở `DISCORD_ALLOW_ANYONE=1` **cấm hẳn** `/login`: đăng nhập gắn tài khoản FAP của bot.
-- `!login` đăng link + mã xác nhận ngay trong kênh — ở kênh nhiều người, dùng `/login` (ẩn) hoặc DM bot.
+- `!login` gõ trong **kênh server** bị từ chối (link + mã sẽ lộ cho cả kênh) — bot nhắc dùng `/login` (ẩn) hoặc DM.
 
-**EN —** `/login [campus]` (slash, **ephemeral** reply) or `!login [campus]` (reply in the channel); device flow reports `✅ Signed in` by itself. PKCE fallback: `/login-finish <URL>` (ephemeral) is safest; a bare URL (or `!login-finish <URL>`) pasted in the channel is **deleted before the exchange** — works in server channels with **Manage Messages**, not in DMs (the bot then asks you to delete it). **Bot owner only**, like `/update`; refused entirely under `DISCORD_ALLOW_ANYONE=1`. In a shared channel prefer `/login` (ephemeral) or a DM, since `!login` posts the link + code publicly.
+**EN —** `/login [campus]` (slash, **ephemeral** reply) or `!login [campus]` (in a **DM** with the bot); device flow reports `✅ Signed in` by itself. PKCE fallback: `/login-finish <URL>` (ephemeral) is safest; a bare URL (or `!login-finish <URL>`) pasted in the channel is **deleted before the exchange** — works in server channels with **Manage Messages**, not in DMs (the bot then asks you to delete it). **Bot owner only**, like `/update`; refused entirely under `DISCORD_ALLOW_ANYONE=1`. `!login` typed in a **server channel** is refused (the link + code would be public) — the bot points you to `/login` (ephemeral) or a DM.
 
 #### `fap web` (dashboard cục bộ · local dashboard)
 
