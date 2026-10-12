@@ -125,29 +125,50 @@ def gpa_val(g):
     from .i18n import t                       # import trong hàm: fmt KHÔNG import i18n ở top (tránh vòng)
     return g if g is not None else t("chưa có", "n/a")
 
+_LEAD_BLANK = re.compile(r"^(?:[^\S\n]*\n)+")    # các dòng TRỐNG ở đầu (giữ thụt lề của dòng có chữ)
+
 def chunks(text, limit):
     """THUẦN: cắt `text` thành các mẩu ≤ `limit` ký tự để gửi NHIỀU tin thay vì cắt cụt.
 
-    Ưu tiên cắt ở RANH GIỚI DÒNG (chat đọc mới xuôi); dòng đơn dài hơn `limit` mới cắt cứng.
+    Chỗ cắt ưu tiên: RANH GIỚI MỤC (dòng trống — mỗi tin là trọn mục, không xé đôi một danh sách)
+    → ranh giới dòng → cắt cứng (dòng đơn dài hơn `limit`). Mẩu không mở/đóng bằng dòng trống.
     Luôn trả ≥1 phần tử (text rỗng -> ['']), không mẩu nào vượt `limit` -> gọi thẳng vào API chat
     được mà không sợ mất chữ. `limit` <= 0 -> trả nguyên văn (không cắt)."""
     text = "" if text is None else str(text)
     if limit is None or limit <= 0 or len(text) <= limit:
         return [text]
-    out, cur = [], ""
-    for line in text.split("\n"):
-        while len(line) > limit:                  # 1 dòng dài quá khổ -> buộc phải cắt cứng
-            if cur:
-                out.append(cur); cur = ""
-            out.append(line[:limit]); line = line[limit:]
-        add = line if not cur else cur + "\n" + line
-        if len(add) <= limit:
-            cur = add
-        else:
-            out.append(cur); cur = line
-    if cur or not out:
-        out.append(cur)
+    out, rest = [], text
+    while True:
+        rest = _LEAD_BLANK.sub("", rest).rstrip()
+        if len(rest) <= limit:
+            break
+        win = rest[:limit + 1]                    # '\n' ngay ở vị trí `limit` vẫn là chỗ cắt hợp lệ
+        # Dòng trống nằm trong 1/3 đầu khung thì bỏ qua: cắt ở đó ra một tin cụt lủn -> cắt ở dòng cuối vừa khung.
+        cut = win.rfind("\n\n", limit // 3)
+        if cut <= 0:
+            cut = win.rfind("\n")
+        if cut <= 0:
+            cut = limit                           # 1 dòng dài quá khổ -> buộc phải cắt cứng
+        piece = rest[:cut].rstrip()
+        if piece:
+            out.append(piece)
+        rest = rest[cut:]
+    if rest or not out:
+        out.append(rest)
     return out
+
+def bullets(rows):
+    """THUẦN: mỗi dòng dữ liệu -> 1 bullet '• khoá: giá trị · khoá: giá trị' cho CHAT. Bảng căn cột của
+    table() vỡ hàng trên điện thoại (font không đều, màn hẹp). Giữ ĐÚNG tên field server trả (không bịa
+    nhãn), bỏ ô rỗng; dòng không phải dict -> in thô."""
+    out = []
+    for r in rows:
+        if r is None:
+            continue
+        if isinstance(r, dict):
+            r = " · ".join(f"{k}: {v}" for k, v in r.items() if v not in (None, ""))
+        out.append(f"  • {r}")
+    return "\n".join(out)
 
 
 def table(rows):

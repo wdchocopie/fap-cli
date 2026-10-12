@@ -132,6 +132,30 @@ def fetch_components(token, campus, roll, cid, subj=None):
         return None
     return _normalize_components(data)
 
+def component_lines(comps):
+    """THUẦN: điểm thành phần -> dòng bullet cho chat, vd '  • Progress test 1: 9.7 · trọng số 10%'.
+    Tên/giá trị/trọng số dò bằng CÙNG bộ khoá với predict_course (whatif) -> dòng hiển thị và dòng 📊 dự
+    đoán không thể lệch nhau. Không nhận ra tên đầu điểm -> liệt kê thô field server (không bịa nhãn)."""
+    from .whatif import _field, _num, _NAME_KEYS, _VALUE_KEYS, _WEIGHT_KEYS   # import trễ: whatif import grades
+    out = []
+    for c in comps:
+        name = _field(c, _NAME_KEYS) if isinstance(c, dict) else None
+        if name is None:
+            out.append(fmt.bullets([c]))
+            continue
+        cat = str(c.get("category") or "").strip()            # nhóm từ bảng HTML; thường đã nằm trong tên mục
+        if cat and cat.lower() not in str(name).lower():
+            name = f"{cat} › {name}"
+        val = _field(c, _VALUE_KEYS)
+        line = f"  • {name}: {val if val is not None else fmt.gpa_val(None)}"
+        w = _field(c, _WEIGHT_KEYS)
+        if w is not None:
+            ws, n = str(w).strip(), _num(w)
+            ws = f"{n:g}%" if "%" in ws and n is not None else ws   # '10.0 %' -> '10%'; không có % thì giữ nguyên
+            line += t(f" · trọng số {ws}", f" · weight {ws}")
+        out.append(line)
+    return "\n".join(out)
+
 def _no_subject_text(query, cands, codes, sem):
     """THUẦN: chuỗi song ngữ khi `only=` không ra đúng 1 môn. Mơ hồ (ứng viên ÍT hơn cả kỳ) → bảo gõ rõ
     hơn; không khớp → liệt kê môn trong kỳ. LUÔN có chữ (đừng bao giờ im lặng)."""
@@ -143,7 +167,7 @@ def _no_subject_text(query, cands, codes, sem):
              f"🧮 No subject “{query}” in {sem}.\nSubjects this term: {lst}")
 
 def detail_text(token, campus, roll, sem, rows=None, only=None):
-    """Điểm thành phần từng môn — TRẢ chuỗi (dùng cho `fap all` / web). Generic, không bịa cột.
+    """Điểm thành phần từng môn — TRẢ chuỗi (dùng cho `fap all` / web / bot). Dòng bullet, không bịa field.
     rows: truyền sẵn GetStudentMark để khỏi gọi lại (vd từ all_text).
     only: mã/tên môn (vd 'IAP301', 'iap') → CHỈ lấy thành phần của 1 môn đó. Kỳ 6 môn: 8 request → 3."""
     from .whatif import predict_course, predict_line       # import trễ: tránh vòng grades↔whatif
@@ -177,7 +201,7 @@ def detail_text(token, campus, roll, sem, rows=None, only=None):
             out.append(t("   ⚠ lỗi tải điểm thành phần (thử lại / fap refresh)",
                          "   ⚠ failed to load components (retry / fap refresh)"))
         elif comps:
-            out.append(fmt.table(comps))
+            out.append(component_lines(comps))
             out.append(predict_line(predict_course(comps)))  # 'cần X/10 ở phần còn lại để qua' (rỗng nếu thiếu trọng số)
         else:
             out.append(t("   (chưa có điểm thành phần)", "   (no component marks yet)"))

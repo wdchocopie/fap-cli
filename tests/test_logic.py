@@ -684,6 +684,10 @@ def test_botcore_all_offline():
     E.call = lambda *a, **k: (200, {"data": []})          # exams_text dùng tên trong module extras -> rỗng
     out = B.handle("all")
     assert "EXE101" in out and "GPA" in out and "Điểm danh" in out   # gộp nhiều mục
+    # mục ngăn bằng dòng trống: đường kẻ CHỈ nằm ngay dưới tiêu đề mục, không có đường kẻ "đứng một mình"
+    for txt in (out, B.handle("weekly")):
+        ls = txt.split("\n")
+        assert all(ls[i - 1].strip() for i, l in enumerate(ls) if l == B.fmt.RULE and i), txt
 
 def test_botcore_handle_catches_systemexit():
     import fapc.app.bot_core as B
@@ -1481,6 +1485,47 @@ def test_fmt_chunks_no_data_loss():
     hard = chunks(long_line, 100)
     assert len(hard) == 5 and max(len(p) for p in hard) <= 100
     assert "".join(hard) == long_line                         # cắt cứng cũng KHÔNG mất ký tự nào
+
+def test_fmt_chunks_prefers_section_breaks():
+    """Tin dài (vd /all) tách ở RANH GIỚI MỤC (dòng trống) thay vì xé đôi một mục; mẩu không mở/đóng bằng
+    dòng trống. Bất biến (ngẫu nhiên, seed cố định): ≤ limit, ≥1 mẩu, đúng thứ tự, không mất ký tự có nghĩa.
+    Long replies split at section breaks; no chunk starts/ends blank; no content lost or reordered."""
+    import random
+    from fapc.fmt import chunks
+    sec = lambda n, k: "\n".join([f"📊 Mục {n}", "━" * 16] + [f"  • dòng {i} " + "x" * 10 for i in range(k)])
+    text = "\n\n".join([sec(1, 4), sec(2, 4), sec(3, 4)])     # mỗi mục ~100 ký tự
+    parts = chunks(text, 230)
+    assert parts == [sec(1, 4) + "\n\n" + sec(2, 4), sec(3, 4)], parts   # cắt ĐÚNG giữa mục, không giữa dòng
+    # dòng trống quá sớm (< limit//3) -> bỏ qua, nhồi đầy theo ranh giới dòng thay vì ra tin cụt
+    early = "A\n\n" + "\n".join("b" * 9 for _ in range(30))
+    assert len(chunks(early, 100)[0]) > 50
+    # khối trống thừa ở chỗ cắt không thành mẩu mở/đóng bằng dòng trống
+    for p in chunks("a" * 50 + "\n\n\n\n" + "  b" * 30, 60):
+        assert p and p == p.rstrip() and not p.startswith("\n"), repr(p)
+    rnd = random.Random(7)
+    for _ in range(300):
+        lines = ["".join(rnd.choice("ab cd") for _ in range(rnd.randint(0, 40))) for _ in range(rnd.randint(1, 40))]
+        text, limit = "\n".join(lines), rnd.randint(10, 120)
+        parts = chunks(text, limit)
+        assert parts and all(len(p) <= limit for p in parts)
+        assert "".join("".join(parts).split()) == "".join(text.split())   # không mất / đảo ký tự có nghĩa
+        if len(parts) > 1:
+            assert all(p == p.rstrip() and not p.startswith("\n") for p in parts)
+
+def test_fmt_bullets_and_component_lines():
+    """Chat (font không đều, màn hẹp) KHÔNG dùng bảng căn cột: mỗi dòng dữ liệu = 1 bullet đọc được.
+    Điểm thành phần dùng ĐÚNG ngữ nghĩa bảng HTML GetMarkByCourse (item/weight/value), không bịa field."""
+    from fapc.fmt import bullets
+    from fapc.core.grades import component_lines
+    assert bullets([{"a": "1", "b": "", "c": None, "d": "x"}, None, "raw"]) == "  • a: 1 · d: x\n  • raw"
+    out = component_lines([{"category": "Progress test", "item": "Progress test 1", "weight": "10.0 %", "value": "9.7"},
+                           {"category": "Final exam", "item": "Final exam", "weight": "50.0 %", "value": ""},
+                           {"category": "Lab", "item": "Report", "weight": "0.2", "value": "7"},
+                           {"x": "1"}]).splitlines()
+    assert out[0] == "  • Progress test 1: 9.7 · trọng số 10%"
+    assert out[1] == "  • Final exam: chưa có · trọng số 50%"                 # chưa có điểm -> nói rõ
+    assert out[2] == "  • Lab › Report: 7 · trọng số 0.2"                     # không có '%' -> giữ nguyên, không bịa
+    assert out[3] == "  • x: 1"                                                # không nhận ra tên -> field thô
 
 def test_paths_profile_resolution():
     """FAP_PROFILE chưa đặt ⇒ đường dẫn ra ĐÚNG chuỗi cũ <root>/output/<file> — đây là CAM KẾT tương

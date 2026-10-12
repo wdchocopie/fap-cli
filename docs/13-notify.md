@@ -161,8 +161,8 @@ MESSENGER_PUSH_TOKEN=same-value-as-BRIDGE_PUSH_TOKEN
 > **VI —** Ngôn ngữ tin (vi/en) theo `FAP_LANG` trong `.env` (mặc định `vi`). Ngày "hôm nay/ngày mai" tính theo **giờ VN (Asia/Ho_Chi_Minh)** — cố định trong code, không phải biến `.env`.
 > **EN —** Message language (vi/en) follows `FAP_LANG` in `.env` (default `vi`). "Today/tomorrow" is computed in **VN time (Asia/Ho_Chi_Minh)** — hard-coded, not an `.env` key.
 
-> **VI —** Mỗi tin có trần 4000 ký tự (Telegram) / 1900 (Discord) — lịch một ngày luôn nằm dưới mức này. Tin **dài hơn** (vd `/grades-detail`, `/all` nhiều môn) **không còn bị cắt cụt**: nó được **chia thành nhiều tin** gửi liên tiếp (nghỉ ~0.4s giữa các mẩu, ưu tiên cắt ở ranh giới dòng). Nhận 2–3 tin liền nhau là **bình thường**.
-> **EN —** Each message is capped at 4000 chars (Telegram) / 1900 (Discord) — one day's digest is always well under. **Longer** replies (e.g. `/grades-detail`, `/all` with many courses) are **no longer truncated**: they are **split across several messages** sent back-to-back (~0.4s apart, cut at line boundaries). Getting 2–3 messages in a row is **expected**.
+> **VI —** Mỗi tin có trần 4000 ký tự (Telegram) / 1900 (Discord) — lịch một ngày luôn nằm dưới mức này. Tin **dài hơn** (vd `/grades-detail`, `/all` nhiều môn) **không còn bị cắt cụt**: nó được **chia thành nhiều tin** gửi liên tiếp (nghỉ ~0.4s giữa các mẩu, ưu tiên cắt ở ranh giới mục — dòng trống — rồi mới đến ranh giới dòng, nên mỗi tin là trọn mục). Nhận 2–3 tin liền nhau là **bình thường**.
+> **EN —** Each message is capped at 4000 chars (Telegram) / 1900 (Discord) — one day's digest is always well under. **Longer** replies (e.g. `/grades-detail`, `/all` with many courses) are **no longer truncated**: they are **split across several messages** sent back-to-back (~0.4s apart, cut at section breaks — blank lines — before line boundaries, so each message holds whole sections). Getting 2–3 messages in a row is **expected**.
 
 ---
 
