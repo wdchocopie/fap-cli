@@ -809,6 +809,120 @@ finally:
     api.requests.get = fake_get
     api._CACHE.clear()
 
+# [S] `fap web` /login — ĐƯỜNG THẬT: http.client -> ThreadingHTTPServer(127.0.0.1:0) -> _H -> botlogin -> auth.login_*
+# (STUB: không bao giờ chạm FE Identity). File token/oauth trỏ sang thư mục TẠM — không đọc output/ thật.
+import json as _json, threading as _th, http.client as _hc, http.server as _hs, base64 as _b64
+import fapc.app.webui as W, fapc.core.auth as _A
+_rtmp = tempfile.mkdtemp()
+_saved_r = (_A.TOKEN_JSON, _A.OAUTH_JSON, W.TOKEN_JSON, _A.login_start, _A.login_finish_device, _A.login_finish_code)
+_A.TOKEN_JSON = W.TOKEN_JSON = os.path.join(_rtmp, "token.json")
+_A.OAUTH_JSON = os.path.join(_rtmp, "oauth.json")
+with open(_A.TOKEN_JSON, "w", encoding="utf-8") as _f:
+    _json.dump({"rollnumber": "HE190000", "campus": "AP<b>HL", "fullname": "X"}, _f)
+_jwt = lambda exp: "h." + _b64.urlsafe_b64encode(_json.dumps({"exp": exp}).encode()).decode().rstrip("=") + ".s"
+with open(_A.OAUTH_JSON, "w", encoding="utf-8") as _f:
+    _json.dump({"access_token": _jwt(1000)}, _f)                       # exp năm 1970 -> đã hết hạn
+_srv = _hs.ThreadingHTTPServer(("127.0.0.1", 0), W._H)
+_port = _srv.server_address[1]
+_th.Thread(target=_srv.serve_forever, daemon=True).start()
+_HOST = f"127.0.0.1:{_port}"
+
+def _req(method, path, body=None, host=_HOST, headers=None):
+    c = _hc.HTTPConnection("127.0.0.1", _port, timeout=10)
+    c.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+    c.putheader("Host", host)
+    for k, v in (headers or {}).items():
+        c.putheader(k, v)
+    data = body.encode("utf-8") if body is not None else None
+    if data is not None and "Content-Length" not in (headers or {}):
+        c.putheader("Content-Type", "application/x-www-form-urlencoded")
+        c.putheader("Content-Length", str(len(data)))
+    c.endheaders(data)
+    r = c.getresponse()
+    out = (r.status, r.read().decode("utf-8"))
+    c.close()
+    return out
+
+def _form(**kv):
+    from urllib.parse import urlencode
+    kv.setdefault("csrf", W._CSRF)
+    return urlencode(kv)
+
+def _reset_login():
+    W._LOGIN.clear(); W._DEVICE.update(state="idle", msg="")
+
+try:
+    for _m, _p in (("GET", "/"), ("GET", "/login"), ("GET", "/login/status"), ("POST", "/login/start")):
+        _st = _req(_m, _p, body=_form(campus="APHL") if _m == "POST" else None, host=f"evil.example:{_port}")[0]
+        check(f"web: Host lạ -> 403 ({_m} {_p})", _st == 403, str(_st))
+    _st, _home = _req("GET", "/login")
+    check("web /login: 200 + mã CSRF + campus điền sẵn ĐÃ escape", _st == 200 and W._CSRF in _home
+          and "AP&lt;b&gt;HL" in _home and "AP<b>HL" not in _home, _home[:200])
+    check("web /login: báo token HẾT HẠN (cờ từ claim exp)", "HẾT HẠN" in _home or "EXPIRED" in _home)
+    _st, _me = _req("GET", "/me")
+    check("web /me: cờ expired, KHÔNG lộ token", _json.loads(_me).get("expired") is True and "access_token" not in _me
+          and _jwt(1000) not in _me, _me)
+    _st, _dash = _req("GET", "/")
+    check("web /: nút 🔐 dẫn tới /login", 'href=/login' in _dash and "__LOGIN__" not in _dash)
+
+    # CSRF / Origin / kích thước thân
+    _A.login_start = lambda campus: (_ for _ in ()).throw(AssertionError("không được tới đây"))
+    check("web POST thiếu CSRF -> 403", _req("POST", "/login/start", body="campus=APHL")[0] == 403)
+    check("web POST CSRF sai -> 403", _req("POST", "/login/start", body=_form(campus="APHL", csrf="x" * 43))[0] == 403)
+    check("web POST Origin khác gốc -> 403", _req("POST", "/login/start", body=_form(campus="APHL"),
+                                                  headers={"Origin": "http://evil.example"})[0] == 403)
+    check("web POST thân quá lớn -> 413", _req("POST", "/login/start", body="x",
+                                               headers={"Content-Length": str(W.BODY_MAX + 1)})[0] == 413)
+    check("web POST đường lạ -> 404", _req("POST", "/q", body=_form())[0] == 404)
+
+    # Device flow: trang có link + mã (escape), /login/status pending -> done (thread nền), không lộ device_code
+    _gate = _th.Event()
+    _A.login_start = lambda campus: {"mode": "device", "campus": campus, "url": "https://feid.example/device?u=AB",
+                                     "user_code": "AB<CD", "device_code": "DEVSECRET", "interval": 1, "expires_in": 60}
+    def _fin_dev(d, roll=""):
+        _gate.wait(10)
+        return True, "✅ Đăng nhập xong · HE190000 · APHL"
+    _A.login_finish_device = _fin_dev
+    _reset_login()
+    _st, _pg = _req("POST", "/login/start", body=_form(campus="APHL"), headers={"Origin": "http://" + _HOST})
+    check("web device: link https + mã xác nhận ĐÃ escape, không lộ device_code", _st == 200
+          and 'href="https://feid.example/device?u=AB"' in _pg and "AB&lt;CD" in _pg and "DEVSECRET" not in _pg, _pg[:300])
+    check("web device: trang có khung chờ + hỏi /login/status", "/login/status" in _pg and "id=st" in _pg)
+    check("web device: status = pending", _json.loads(_req("GET", "/login/status")[1]) == {"state": "pending", "msg": ""})
+    _st2, _busy = _req("POST", "/login/start", body=_form(campus="APHL"))
+    check("web device: phiên thứ hai bị từ chối (đang bận)", "dở" in _busy or "progress" in _busy, _busy[:200])
+    _gate.set()
+    import time as _time
+    for _ in range(50):
+        _s = _json.loads(_req("GET", "/login/status")[1])
+        if _s["state"] == "done":
+            break
+        _time.sleep(0.05)
+    check("web device: status = done + roll", _s["state"] == "done" and "HE190000" in _s["msg"], str(_s))
+
+    # PKCE: link scheme lạ KHÔNG thành href; dán sai không đóng phiên; dán đúng -> không echo URL/mã
+    _A.login_start = lambda campus: {"mode": "pkce", "campus": campus, "url": "javascript:alert(1)"}
+    _A.login_finish_code = lambda pasted, roll="": (True, "✅ Đăng nhập xong · HE190000 · APHL")
+    _reset_login()
+    _st, _pg = _req("POST", "/login/start", body=_form(campus="APHL"))
+    check("web pkce: có ô dán + KHÔNG có href javascript:", "name=url" in _pg and 'href="javascript' not in _pg, _pg[:300])
+    _st, _pg = _req("POST", "/login/finish", body=_form(url="<script>x</script>"))
+    check("web pkce: dán thứ không phải redirect -> nhắc, phiên VẪN chờ, không echo",
+          W._LOGIN.waiting_paste() and "<script>x" not in _pg and "&lt;script&gt;x" not in _pg, _pg[:200])
+    _st, _pg = _req("POST", "/login/finish", body=_form(url="io.identityserver.demo:/oauthredirect?code=SECRETCODE&state=s"))
+    check("web pkce: dán đúng -> xong, KHÔNG echo URL/mã", "HE190000" in _pg and "SECRETCODE" not in _pg
+          and not W._LOGIN.waiting_paste(), _pg[:200])
+
+    # Máy chỉ-đọc (FAP_TOKEN_READONLY): PermissionError -> hiện đúng thông điệp
+    def _ro(campus): raise PermissionError("READONLY-HOST <x>")
+    _A.login_start = _ro
+    _reset_login()
+    _st, _pg = _req("POST", "/login/start", body=_form(campus="APHL"))
+    check("web: FAP_TOKEN_READONLY -> hiện thông điệp (escape)", "READONLY-HOST &lt;x&gt;" in _pg and not W._LOGIN.busy, _pg[:200])
+finally:
+    _srv.shutdown(); _srv.server_close(); _reset_login()
+    (_A.TOKEN_JSON, _A.OAUTH_JSON, W.TOKEN_JSON, _A.login_start, _A.login_finish_device, _A.login_finish_code) = _saved_r
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)
