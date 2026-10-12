@@ -3992,6 +3992,25 @@ def test_callmebot_ring_retries_once_then_gives_up():
     finally:
         R.requests.get, R.time.sleep = saved
 
+def test_callmebot_unauthorized_200_is_a_failure_without_retry():
+    """CallMeBot trả HTTP 200 + 'User not authorized' khi người nhận chưa /start bot (đo thật 12/10/2026)."""
+    import fapc.app.reminders as R, types
+    saved = (R.requests.get, R.time.sleep)
+    hits, slept = [], []
+    R.time.sleep = slept.append
+    body = "Checking Authorization for @someone... Authorization for user @someone is not received. Warning! User not authorized."
+    R.requests.get = lambda *a, **k: (hits.append(1), types.SimpleNamespace(status_code=200, text=body))[1]
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert R._ring({"user": "@someone"}) is False
+        assert len(hits) == 1 and slept == []                                  # vô ích -> KHÔNG thử lại
+        assert "@CallMeBot_txtbot" in out.getvalue() and "@someone" not in out.getvalue()
+        R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=200, text="Call queued")
+        assert R._ring({"user": "@someone"}) is True
+    finally:
+        R.requests.get, R.time.sleep = saved
+
 def test_callmebot_english_plural():
     import fapc.app.reminders as R, fapc.i18n as I
     saved = I.FAP_LANG
