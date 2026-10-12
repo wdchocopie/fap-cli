@@ -774,6 +774,41 @@ finally:
     else: os.environ["FAP_SEMESTER"] = _saved_q[2]
     api._CACHE.clear()
 
+# [R] CSDL của FAP sập — ĐƯỜNG THẬT: requests (mock) -> api.call -> check_auth -> handle/CLI/watcher.
+#     FAP trả HTTP 200 + code '201' + message None + errorMessage là SqlException. Phải báo "máy chủ FAP đang lỗi",
+#     KHÔNG báo token hết hạn (kể cả khi ngoại lệ nhắc 'Login failed for user'), KHÔNG chép nguyên văn ngoại lệ.
+_SQL_NET = ("System.Data.SqlClient.SqlException (0x80131904): A network-related or instance-specific error occurred "
+            "while establishing a connection to SQL Server. The server was not found or was not accessible.")
+_SQL_LOGIN = "System.Data.SqlClient.SqlException (0x80131904): Login failed for user 'fapuser'."
+_RQ = {"body": None}
+api.requests.get = lambda url, **k: _RespL(200, _RQ["body"])
+try:
+    for _lbl, _body in [("SqlException mạng", {"code": "201", "message": None, "errorMessage": _SQL_NET, "data": None}),
+                        ("SqlException 'Login failed' ở errorMessage", {"code": "201", "message": None, "errorMessage": _SQL_LOGIN, "data": None}),
+                        ("SqlException 'Login failed' ở message", {"code": "201", "message": _SQL_LOGIN, "errorMessage": None, "data": None})]:
+        _RQ["body"] = _body; api._CACHE.clear()
+        for _c in ("grades", "attendance", "all"):
+            _o = _cap(lambda c=_c: handle(c))
+            check(f"server error [{_lbl}] /{_c}: báo máy chủ FAP lỗi", "Máy chủ FAP đang lỗi" in _o)
+            check(f"server error [{_lbl}] /{_c}: KHÔNG bảo hết hạn / refresh", "hết hạn" not in _o and "fap refresh" not in _o)
+            check(f"server error [{_lbl}] /{_c}: KHÔNG chép ngoại lệ thô, không 'None'",
+                  "SqlException" not in _o and "Login failed" not in _o and "0x8013" not in _o and "None" not in _o)
+        _http, _data = api.call("GetStudentMark", [("Authen", "SECRETTOKEN123")], "HE190000", "FPTU")
+        check(f"server error [{_lbl}]: is_session_expired = False (không refresh/đăng nhập lại)",
+              not api.is_session_expired(_http, _data))
+        try:
+            _cap(g.report); check(f"server error [{_lbl}]: CLI grades raise", False, "không raise")
+        except SystemExit as _e:
+            check(f"server error [{_lbl}]: CLI grades báo máy chủ lỗi", str(_e) == api._SERVER_MSG, str(_e)[:80])
+        # watcher: lấy hỏng -> None (giữ mốc, thử lại lượt sau), không raise, không coi là rỗng
+        check(f"server error [{_lbl}]: attendwatch chi tiết -> None",
+              _cap(lambda: aw._course_detail("SECRETTOKEN123", "FPTU", "HE190000", "Summer2026", "IAP301", "G")) is None)
+        check(f"server error [{_lbl}]: gradewatch thành phần -> None",
+              _cap(lambda: g.fetch_components("SECRETTOKEN123", "FPTU", "HE190000", "2", "IAP301")) is None)
+finally:
+    api.requests.get = fake_get
+    api._CACHE.clear()
+
 total = OK["n"] + FAIL["n"]
 print(f"=== integration_offline: {OK['n']}/{total} PASS, {FAIL['n']} FAIL ===")
 sys.exit(1 if FAIL["n"] else 0)

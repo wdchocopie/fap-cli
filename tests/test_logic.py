@@ -400,6 +400,41 @@ def test_is_session_expired_table():
     assert not X(200, {"code": "201", "message": "Thành công", "data": None})             # conduct 201-null ≠ hết phiên
     assert not X(500, {}) and not X(500, "<html/>") and not X(None, "Lỗi mạng")
     assert not X(200, {"code": "200", "data": []}) and not X(404, {"Message": "No HTTP resource"})
+    # ngoại lệ SQL của FAP nhắc 'Login failed for user' -> KHÔNG phải hết phiên (không refresh/đăng nhập lại vô ích)
+    sql = "System.Data.SqlClient.SqlException (0x80131904): Login failed for user 'fap'."
+    assert not X(200, {"code": "201", "message": sql})
+    assert not X(200, {"code": "201", "message": None, "errorMessage": sql})
+
+def test_check_auth_server_exception():
+    """code 201 + ngoại lệ .NET phía server (CSDL FAP sập) -> 'máy chủ FAP đang lỗi', KHÔNG báo token hết hạn,
+    KHÔNG chép nguyên văn ngoại lệ. Message nói rõ token/checksum vẫn thắng (tín hiệu server cố ý trả).
+    A server-side .NET exception is a FAP outage, never 'token expired', and its raw text is never echoed."""
+    from fapc.core.api import check_auth, _EXPIRED_MSG, _SERVER_MSG, _is_server_error as S
+    def _msg(fn):
+        try: fn()
+        except SystemExit as e: return str(e)
+        return None
+    net = ("System.Data.SqlClient.SqlException (0x80131904): A network-related or instance-specific error "
+           "occurred while establishing a connection to SQL Server.")
+    login = "Microsoft.Data.SqlClient.SqlException (0x80131904): Login failed for user 'fap'."
+    for body in ({"code": "201", "message": None, "errorMessage": net},
+                 {"code": "201", "message": None, "errorMessage": login},
+                 {"code": "201", "message": login, "errorMessage": None},
+                 {"code": "201", "message": "", "errorMessage": "System.InvalidOperationException: boom"}):
+        m = _msg(lambda b=body: check_auth(200, b))
+        assert m == _SERVER_MSG, (body, m)
+        assert "SqlException" not in m and "0x8013" not in m and "None" not in m
+    assert S({"code": "201", "message": None, "errorMessage": net})
+    # message nói rõ token / checksum -> giữ nguyên ý nghĩa dù errorMessage có ngoại lệ
+    assert _msg(lambda: check_auth(200, {"code": "201", "message": "Token invalid", "errorMessage": net})) == _EXPIRED_MSG
+    assert "checksum" in _msg(lambda: check_auth(200, {"code": "201", "message": "Thông tin checksum không chính xác",
+                                                       "errorMessage": net}))
+    # không phải ngoại lệ: chữ 'exception' trong câu thường, code ≠ 201 -> không tính
+    assert not S({"code": "201", "message": "no exception: retry", "errorMessage": "something went wrong"})
+    assert not S({"code": "200", "errorMessage": net}) and not S(None) and not S("text")
+    # 201 chung không có message -> KHÔNG in chữ 'None'
+    m = _msg(lambda: check_auth(200, {"code": "201", "message": None, "errorMessage": None}))
+    assert "code 201" in m and "None" not in m
 
 def test_classify_drift_table():
     """Bảng phân loại THUẦN: chỉ tín hiệu mức route. 404 CÓ thân JSON (GeFeeByRoll/GetCourseOfSemester) KHÔNG phải drift."""

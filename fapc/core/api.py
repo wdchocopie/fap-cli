@@ -21,7 +21,7 @@ Cơ chế (reverse từ app com.fuct, React Native + Hermes):
 ⚠️ SECRET/LOGIN_PREFIX dưới đây trích từ APK CÔNG KHAI của app — đây là dự án KHÔNG chính thức,
    chỉ dùng cho TÀI KHOẢN CỦA CHÍNH BẠN. Đừng dùng để giả mạo / truy cập dữ liệu người khác.
 """
-import os, sys, json, sqlite3, hmac, hashlib, base64, datetime, time, urllib.parse
+import os, re, sys, json, sqlite3, hmac, hashlib, base64, datetime, time, urllib.parse
 import requests
 from . import paths
 
@@ -297,14 +297,35 @@ def _mentions_login(data):
     low = str(data.get("message") or "").lower() if isinstance(data, dict) else ""
     return "token" in low or "authen" in low or "đăng nhập" in low or "login" in low
 
+# Ngoại lệ .NET in theo Exception.ToString(): '<Kiểu>Exception (0xHRESULT): …' hoặc '<Kiểu>Exception: …' —
+# vd 'System.Data.SqlClient.SqlException (0x80131904): A network-related …' khi CSDL của FAP sập.
+_SERVER_EXC = re.compile(r"[A-Za-z_][\w.]*Exception(?: \(0x[0-9A-Fa-f]+\))?:")
+_SERVER_MSG = ("⚠️ Máy chủ FAP đang lỗi (lỗi phía trường, không phải do token của bạn) — thử lại sau ít phút.\n"
+               "⚠️ The FAP server is failing (on the school's side, not your token) — try again in a few minutes.")
+
+def _is_server_error(data):
+    """THUẦN: code '201' mà nội dung là NGOẠI LỆ .NET phía server (vd SqlException khi CSDL FAP sập) — KHÔNG
+    phải hết phiên. Phải xét TRƯỚC _mentions_login: SqlException 'Login failed for user …' chứa chữ 'login'
+    -> sẽ bị báo nhầm token hết hạn (đăng nhập lại vô ích). Ngoại lệ nằm trong message -> lỗi server; message
+    nói rõ token/checksum -> tin message (tín hiệu server cố ý trả); còn lại mới xét errorMessage."""
+    if _err_code(data) != "201":
+        return False
+    msg = str(data.get("message") or "")
+    if _SERVER_EXC.search(msg):
+        return True
+    if _mentions_login(data) or "checksum" in msg.lower():
+        return False
+    return bool(_SERVER_EXC.search(str(data.get("errorMessage") or "")))
+
 def is_session_expired(http, data):
     """THUẦN: True nếu phản hồi báo PHIÊN/token hết hạn — đúng những ca check_auth raise _EXPIRED_MSG
     (HTTP 401/403 · thân kiểu v2 · code '201' + message nhắc token). Cho nơi KHÔNG muốn raise (watcher
     trả None, conduct…) dùng chung một luật. HTTP 500 KHÔNG tính: app chính thức đăng xuất khi gặp 500,
-    nhưng với fap-cli làm vậy = vòng refresh vô ích mỗi lần server trục trặc."""
+    nhưng với fap-cli làm vậy = vòng refresh vô ích mỗi lần server trục trặc. Ngoại lệ server (SqlException…)
+    cũng KHÔNG tính, kể cả khi nó nhắc 'login' (xem _is_server_error)."""
     if http in (401, 403) or _is_v2_session_error(data):
         return True
-    return _err_code(data) == "201" and _mentions_login(data)
+    return _err_code(data) == "201" and _mentions_login(data) and not _is_server_error(data)
 
 def check_auth(http, data):
     """Raise thông điệp RÕ khi phản hồi báo lỗi XÁC THỰC, thay vì để fetch_* trả [] im lặng
@@ -314,11 +335,14 @@ def check_auth(http, data):
       • checksum sai        -> message 'Thông tin checksum không chính xác'
     Phân biệt bằng message (call() đã tự thử lại ±1h cho checksum trước khi tới đây).
     Thêm (chuẩn bị API v2): thân `code '401'` / `errorMessage 'Unauthorized'` -> cũng là hết phiên.
-    HTTP 500 -> KHÔNG coi là hết phiên (xem is_session_expired)."""
+    HTTP 500 -> KHÔNG coi là hết phiên (xem is_session_expired). Ngoại lệ .NET phía server (vd SqlException
+    khi CSDL FAP sập) -> báo "máy chủ FAP đang lỗi", KHÔNG chép nguyên văn ngoại lệ ra chat."""
     if http in (401, 403) or _is_v2_session_error(data):
         raise SystemExit(_EXPIRED_MSG)
     if _err_code(data) == "201":
         low = str(data.get("message") or "").lower()
+        if _is_server_error(data):             # TRƯỚC check login: 'Login failed for user …' của SqlException
+            raise SystemExit(_SERVER_MSG)
         if _mentions_login(data):
             raise SystemExit(_EXPIRED_MSG)
         if "checksum" in low:                  # call() đã retry ±1h mà vẫn lỗi -> đồng hồ máy lệch nhiều
@@ -326,8 +350,10 @@ def check_auth(http, data):
                              "Chỉnh lại giờ hệ thống rồi thử lại.\n"
                              "⚠️ Checksum error — your clock may be off from Vietnam time (UTC+7). "
                              "Fix the system time and retry.")
-        raise SystemExit(f"⚠️ FAP từ chối yêu cầu (code 201): {data.get('message')}\n"
-                         f"⚠️ FAP rejected the request (code 201): {data.get('message')}")
+        why = str(data.get("message") or "").strip()
+        why = f": {why}" if why else "."        # message None -> đừng in chữ 'None'
+        raise SystemExit(f"⚠️ FAP từ chối yêu cầu (code 201){why}\n"
+                         f"⚠️ FAP rejected the request (code 201){why}")
 
 
 # ---------- học kỳ ----------
