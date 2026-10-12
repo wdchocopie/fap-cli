@@ -3907,6 +3907,13 @@ def test_discord_login_routing():
     assert r("!login-finish " + fap, "222", None)[0] == "command"         # -> nhánh !login từ chối (_owner_only)
     assert r("  ", OWNER, OWNER) == ("ignore", None) and r(None, OWNER, OWNER) == ("ignore", None)
 
+def test_discord_legacy_menu_buttons_still_route():
+    """Nút của tin !menu CŨ (custom_id 'fap:<lệnh>') vẫn ra tên lệnh; Select mới và id lạ -> None (để view store lo)."""
+    import fapc.app.discordbot as D
+    assert D._legacy_pick("fap:today") == "today" and D._legacy_pick("fap:grades_detail") == "grades_detail"
+    for cid in ("fap:menu:0", "fap:", "", None, "other:today"):
+        assert D._legacy_pick(cid) is None, cid
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

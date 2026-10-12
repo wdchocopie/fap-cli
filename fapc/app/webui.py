@@ -18,6 +18,7 @@ thân POST bị kẹp BODY_MAX, mọi chữ đều html.escape, KHÔNG bao giờ
 import os, json, html, hmac, secrets, http.server, urllib.parse, webbrowser
 from .bot_core import handle, COMMANDS, command_groups
 from . import botlogin
+from .gcal import looks_like_gredirect
 from ..core import auth
 from ..core.api import TOKEN_JSON
 from ..i18n import t
@@ -235,7 +236,9 @@ def _device_done(msg):
 
 def _login_finish(form):
     pasted = (form.get("url") or [""])[0].strip()
-    if not auth.looks_like_redirect(pasted):             # dán nhầm -> nhắc, KHÔNG đóng phiên đang chờ
+    # dán nhầm -> nhắc, KHÔNG đóng phiên đang chờ. URL Google (calendar) cũng khớp mẫu FAP -> chặn, kẻo mã
+    # Google bị gửi sang FE Identity.
+    if not auth.looks_like_redirect(pasted) or looks_like_gredirect(pasted):
         return _login_page("<pre>" + _e(t(
             "Không thấy URL redirect — dán NGUYÊN URL trên thanh địa chỉ (io.identityserver.demo:/oauthredirect?code=…).",
             "That is not a redirect URL — paste the WHOLE address-bar URL "
