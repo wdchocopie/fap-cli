@@ -121,6 +121,12 @@ def _ring(params, tries=2, gap=10):
             print(t("  CallMeBot lỗi mạng:", "  CallMeBot network error:"), type(e).__name__)
             continue
         if 200 <= r.status_code < 300:
+            # CallMeBot trả 200 KỂ CẢ khi người nhận chưa cho phép gọi (đo thật 12/10/2026) -> phải đọc thân trả lời.
+            # Thử lại cũng vô ích nên dừng luôn.
+            if "not authorized" in str(getattr(r, "text", "") or "").lower():
+                print(t("  CallMeBot: tài khoản Telegram chưa cho phép gọi — gửi /start cho @CallMeBot_txtbot.",
+                        "  CallMeBot: the Telegram account has not allowed calls — send /start to @CallMeBot_txtbot."))
+                return False
             return True
         print(t(f"  CallMeBot lỗi: HTTP {r.status_code}", f"  CallMeBot error: HTTP {r.status_code}"))
     return False
