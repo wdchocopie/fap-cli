@@ -107,6 +107,7 @@ DISCORD_WEBHOOK_URL=
 # Messenger: the bot's private chat via the bridge (POST /v1/push) — URL = bridge origin, TOKEN = BRIDGE_PUSH_TOKEN
 MESSENGER_PUSH_URL=
 MESSENGER_PUSH_TOKEN=
+CALLMEBOT_USER=
 
 # Google Calendar (primary = lịch chính · main calendar)
 GCAL_CALENDAR_ID=primary

@@ -3948,8 +3948,9 @@ def test_callmebot_claim_is_once_per_class_and_prunes_old_marks():
 def test_callmebot_call_reminder_off_on_dedupe_and_errors():
     import fapc.app.reminders as R, fapc.config as C, tempfile, os as _os, types
     tmp = tempfile.mkdtemp()
-    saved = (R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get)
+    saved = (R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get, R.time.sleep)
     rung = []
+    R.time.sleep = lambda s: None                                       # _ring thử lại sau 10 s -> bỏ chờ trong test
     R.paths.out = lambda *p: _os.path.join(tmp, *p)
     R.threading.Thread = lambda target, args, **k: types.SimpleNamespace(start=lambda: target(*args))
     st = datetime.datetime(2026, 10, 13, 7, 30)
@@ -3975,7 +3976,58 @@ def test_callmebot_call_reminder_off_on_dedupe_and_errors():
         with contextlib.redirect_stdout(io.StringIO()):
             assert R.call_reminder("k4", st, 30) is False
     finally:
-        R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get = saved
+        R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.requests.get, R.time.sleep = saved
+
+def test_callmebot_ring_retries_once_then_gives_up():
+    import fapc.app.reminders as R, types
+    saved = (R.requests.get, R.time.sleep)
+    codes, slept = [500, 200], []
+    R.time.sleep = slept.append
+    R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=codes.pop(0))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert R._ring({"user": "@me"}) is True and slept == [10] and not codes   # 500 rồi 200: lần 2 thành công
+            codes[:] = [503, 503, 200]
+            assert R._ring({"user": "@me"}) is False and codes == [200]              # đúng 2 lần thử, không hơn
+    finally:
+        R.requests.get, R.time.sleep = saved
+
+def test_callmebot_english_plural():
+    import fapc.app.reminders as R, fapc.i18n as I
+    saved = I.FAP_LANG
+    I.FAP_LANG = "en"
+    try:
+        st = datetime.datetime(2026, 10, 13, 7, 30)
+        assert R.call_text(st, 1) == "Class starts in 1 minute, at 07:30."
+        assert R.call_text(st, 30) == "Class starts in 30 minutes, at 07:30."
+        assert R.call_params("@me", st, 30)["lang"] == "en-US-Standard-B"
+    finally:
+        I.FAP_LANG = saved
+
+def test_callmebot_failure_never_eats_the_text_reminder():
+    """Regression (review): lỗi ngoài OSError trong đường gọi (vd không tạo được thread) từng thoát khỏi tick()
+    SAU khi key đã vào `sent` -> tin nhắc CHỮ của tiết đó mất hẳn."""
+    import fapc.app.reminders as R, fapc.config as C, tempfile, os as _os
+    tmp = tempfile.mkdtemp()
+    saved = (R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.creds, R.current_semester, R.fetch_sessions, R._vn_now)
+    class _NoThread:
+        def __init__(self, *a, **k): pass
+        def start(self): raise RuntimeError("can't start new thread")
+    R.paths.out = lambda *p: _os.path.join(tmp, *p)
+    R.threading.Thread = _NoThread
+    R.creds = lambda: ("t", "c", "r"); R.current_semester = lambda *a, **k: "Fall2026"
+    R.fetch_sessions = lambda *a, **k: [_sess("10/13/2026", "(07:30 - 09:50)", "IAP301", room="BE-304", slot="1")]
+    R._vn_now = lambda: datetime.datetime(2026, 10, 13, 7, 0)
+    try:
+        C.CALLMEBOT_USER = "@me"
+        rem = R.ClassReminder(lead=30); rem._last_refresh = 9e18
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            texts = rem.tick()
+        assert texts and "IAP301" in texts[0] and "RuntimeError" in out.getvalue() and "@me" not in out.getvalue()
+    finally:
+        (R.paths.out, C.CALLMEBOT_USER, R.threading.Thread, R.creds, R.current_semester,
+         R.fetch_sessions, R._vn_now) = saved
 
 def test_callmebot_tick_calls_once_alongside_the_text():
     import fapc.app.reminders as R, fapc.config as C, tempfile, os as _os, types

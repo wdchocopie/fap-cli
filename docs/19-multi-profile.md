@@ -87,7 +87,7 @@ fap-cli/
 
 ### 🔒 Khóa KHÔNG BAO GIỜ được thừa kế · Keys that are never inherited
 
-`FAP_PROFILE` · `TELEGRAM_TOKEN` · `TELEGRAM_CHAT` · `DISCORD_WEBHOOK_URL` · `DISCORD_BOT_TOKEN` · `DISCORD_ALLOWED_USER_ID` · `DISCORD_ALLOW_ANYONE` · `MESSENGER_PUSH_URL` · `MESSENGER_PUSH_TOKEN` · `GCAL_CALENDAR_ID` · `FAP_ALLOW_UPDATE`
+`FAP_PROFILE` · `TELEGRAM_TOKEN` · `TELEGRAM_CHAT` · `DISCORD_WEBHOOK_URL` · `DISCORD_BOT_TOKEN` · `DISCORD_ALLOWED_USER_ID` · `DISCORD_ALLOW_ANYONE` · `MESSENGER_PUSH_URL` · `MESSENGER_PUSH_TOKEN` · `CALLMEBOT_USER` · `GCAL_CALENDAR_ID` · `FAP_ALLOW_UPDATE`
 
 **VI —** Profile nào **không tự khai** một khóa gửi thì kênh đó **TẮT HẲN** — đó là **thiết kế, không phải bug**. Thà không gửi còn hơn bắn điểm của alice vào chat của chủ máy.
 **EN —** A profile that **doesn't declare** a delivery key simply has that channel **switched off** — that is **by design, not a bug**. Silence beats pushing alice's marks into the owner's chat.
