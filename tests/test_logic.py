@@ -432,6 +432,11 @@ def test_check_auth_server_exception():
     # không phải ngoại lệ: chữ 'exception' trong câu thường, code ≠ 201 -> không tính
     assert not S({"code": "201", "message": "no exception: retry", "errorMessage": "something went wrong"})
     assert not S({"code": "200", "errorMessage": net}) and not S(None) and not S("text")
+    # chuỗi chữ liền rất dài (không phải ngoại lệ) phải xét NHANH — regex không được O(n²)
+    import time as _time
+    t0 = _time.time()
+    assert not S({"code": "201", "message": None, "errorMessage": "a" * 50000})
+    assert _time.time() - t0 < 1.0
     # 201 chung không có message -> KHÔNG in chữ 'None'
     m = _msg(lambda: check_auth(200, {"code": "201", "message": None, "errorMessage": None}))
     assert "code 201" in m and "None" not in m
@@ -3699,7 +3704,9 @@ def test_messenger_push_request():
         assert k["timeout"] == 15 and k["allow_redirects"] is False
         calls.clear()
         long_msg = "\n".join("dòng %d " % i + "x" * 100 for i in range(400))
-        assert N._messenger(long_msg) is True and len(calls) == 2
+        assert N._messenger(long_msg) is True and len(calls) > 1
+        # bridge tự cắt >1800 ký tự CHỈ theo dòng -> fap-cli phải cắt trước (theo mục) để bridge không xé lại
+        assert N.MESSENGER_LIMIT <= 1800
         assert "\n".join(c[1]["json"]["text"] for c in calls) == long_msg
         assert all(len(c[1]["json"]["text"]) <= N.MESSENGER_LIMIT for c in calls)
         res = []

@@ -299,7 +299,8 @@ def _mentions_login(data):
 
 # Ngoại lệ .NET in theo Exception.ToString(): '<Kiểu>Exception (0xHRESULT): …' hoặc '<Kiểu>Exception: …' —
 # vd 'System.Data.SqlClient.SqlException (0x80131904): A network-related …' khi CSDL của FAP sập.
-_SERVER_EXC = re.compile(r"[A-Za-z_][\w.]*Exception(?: \(0x[0-9A-Fa-f]+\))?:")
+# (?<![\w.]): chỉ thử từ ĐẦU tên kiểu — không có nó, 1 chuỗi chữ liền dài (vd 50k ký tự) tốn O(n²) ~7s.
+_SERVER_EXC = re.compile(r"(?<![\w.])[A-Za-z_][\w.]*Exception(?: \(0x[0-9A-Fa-f]+\))?:")
 _SERVER_MSG = ("⚠️ Máy chủ FAP đang lỗi (lỗi phía trường, không phải do token của bạn) — thử lại sau ít phút.\n"
                "⚠️ The FAP server is failing (on the school's side, not your token) — try again in a few minutes.")
 

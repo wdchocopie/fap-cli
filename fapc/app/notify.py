@@ -35,7 +35,7 @@ _EXAM_STATE = paths.out("exams_state.json")          # {"terms": {kỳ: {"rows":
 # Tin dài hơn được CẮT THÀNH NHIỀU MẨU (fmt.chunks) rồi gửi lần lượt — KHÔNG cắt cụt làm mất chữ.
 TELEGRAM_LIMIT = 4000
 DISCORD_LIMIT  = 1900
-MESSENGER_LIMIT = 30000   # bridge nhận 1..32000 ký tự/tin (POST /v1/push)
+MESSENGER_LIMIT = 1800    # = cỡ mẩu bridge tự cắt (enqueue_text, chỉ theo dòng) -> fap-cli cắt trước theo MỤC, bridge khỏi cắt lại
 _GAP = 0.4      # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩu rất nhỏ: 2–3)
 
 # ---------- kênh ----------
