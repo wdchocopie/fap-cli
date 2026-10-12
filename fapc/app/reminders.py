@@ -9,7 +9,7 @@ phút thì đẩy 1 lời nhắc — MỖI TIẾT CHỈ NHẮC 1 LẦN (nhớ tr
 Lõi `due_reminders()`/`reminder_text()` là THUẦN (không mạng/IO) -> test offline được. `ClassReminder.tick()`
 lo phần có mạng: nạp lại TKB trong ngày (cache), tự refresh token ~50' để bot sống lâu, sinh lời nhắc.
 """
-import hashlib, os, random, threading, time
+import hashlib, os, random, re, threading, time
 import requests
 from .. import config, fmt
 from ..i18n import t
@@ -109,9 +109,29 @@ def _claim_call(key, now_ts=None):
         return False
 
 
-def _ring(params, tries=2, gap=10):
-    """Gọi API, lỗi thì thử lại 1 lần (dấu đã chiếm nên không lượt nào khác gọi bù). Lỗi CHỈ in HTTP status /
-    TÊN lớp lỗi: thông điệp lỗi của requests chứa URL (có username)."""
+_CM_ERR = re.compile(r"\berror:\s*(.+?)(?:\s+End\.|$)", re.I)
+
+
+def _callmebot_error(text, user=""):
+    """THUẦN: lý do thất bại trong thân trả lời HTTP 200 của CallMeBot ('' = đã gọi). CallMeBot luôn trả 200 rồi
+    viết lỗi vào thân (đo thật 12/10/2026): 'User not authorized', 'Error: Someone reported CallMeBot as
+    spammer…', 'ERROR: Two calls to the same user … within 65 seconds…'. Username bị che trước khi trả."""
+    s = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", str(text or "")))
+    if "not authorized" in s.lower():
+        return "not-authorized"
+    m = _CM_ERR.search(s)
+    if not m:
+        return ""
+    why = m.group(1).strip()
+    for u in filter(None, {str(user or ""), str(user or "").lstrip("@")}):
+        why = why.replace(u, "…")
+    return why[:220]
+
+
+def _ring(params, tries=2, gap=70):
+    """Gọi API, lỗi thì thử lại 1 lần sau `gap` giây — CallMeBot cấm gọi cùng người 2 lần trong 65 s (dấu đã
+    chiếm nên không lượt nào khác gọi bù). Lỗi mạng CHỈ in HTTP status / TÊN lớp lỗi: thông điệp lỗi của requests
+    chứa URL (có username)."""
     for i in range(tries):
         if i:
             time.sleep(gap)
@@ -121,13 +141,19 @@ def _ring(params, tries=2, gap=10):
             print(t("  CallMeBot lỗi mạng:", "  CallMeBot network error:"), type(e).__name__)
             continue
         if 200 <= r.status_code < 300:
-            # CallMeBot trả 200 KỂ CẢ khi người nhận chưa cho phép gọi (đo thật 12/10/2026) -> phải đọc thân trả lời.
-            # Thử lại cũng vô ích nên dừng luôn.
-            if "not authorized" in str(getattr(r, "text", "") or "").lower():
-                print(t("  CallMeBot: tài khoản Telegram chưa cho phép gọi — gửi /start cho @CallMeBot_txtbot.",
-                        "  CallMeBot: the Telegram account has not allowed calls — send /start to @CallMeBot_txtbot."))
+            why = _callmebot_error(getattr(r, "text", ""), params.get("user"))
+            if not why:
+                return True
+            if why == "not-authorized":              # thử lại vô ích
+                print(t("  CallMeBot: tài khoản Telegram chưa cho phép gọi — mở https://api2.callmebot.com/txt/auth.php "
+                        "và đăng nhập Telegram.",
+                        "  CallMeBot: the Telegram account has not allowed calls — open "
+                        "https://api2.callmebot.com/txt/auth.php and log in with Telegram."))
                 return False
-            return True
+            print(t("  CallMeBot từ chối:", "  CallMeBot refused:"), why)
+            if "spammer" in why.lower():             # phải thêm bot gọi vào danh bạ + nhắn nó trước — thử lại vô ích
+                return False
+            continue
         print(t(f"  CallMeBot lỗi: HTTP {r.status_code}", f"  CallMeBot error: HTTP {r.status_code}"))
     return False
 

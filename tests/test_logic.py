@@ -3986,7 +3986,7 @@ def test_callmebot_ring_retries_once_then_gives_up():
     R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=codes.pop(0))
     try:
         with contextlib.redirect_stdout(io.StringIO()):
-            assert R._ring({"user": "@me"}) is True and slept == [10] and not codes   # 500 rồi 200: lần 2 thành công
+            assert R._ring({"user": "@me"}) is True and slept == [70] and not codes   # 500 rồi 200: lần 2 thành công
             codes[:] = [503, 503, 200]
             assert R._ring({"user": "@me"}) is False and codes == [200]              # đúng 2 lần thử, không hơn
     finally:
@@ -4005,9 +4005,39 @@ def test_callmebot_unauthorized_200_is_a_failure_without_retry():
         with contextlib.redirect_stdout(out):
             assert R._ring({"user": "@someone"}) is False
         assert len(hits) == 1 and slept == []                                  # vô ích -> KHÔNG thử lại
-        assert "@CallMeBot_txtbot" in out.getvalue() and "@someone" not in out.getvalue()
+        assert "auth.php" in out.getvalue() and "@someone" not in out.getvalue()
         R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=200, text="Call queued")
         assert R._ring({"user": "@someone"}) is True
+    finally:
+        R.requests.get, R.time.sleep = saved
+
+def test_callmebot_error_bodies_from_the_live_api():
+    """Thân trả lời THẬT (12/10/2026, username thay bằng @someone): CallMeBot luôn HTTP 200, lỗi nằm trong thân."""
+    import fapc.app.reminders as R, types
+    pre = 'window.dataLayer = window.dataLayer || []; gtag("config", "UA-149177385-1"); Checking Authorization for @someone... '
+    spam = pre + ("Autorization OK User:@someone Text to speech:x Converting mp3 file. Starting Telegram Audio Call. "
+                  "Script started! Script ended before Timeout. Error: Someone reported CallMeBot as spammer. Please, add "
+                  "@CallMeBot_API16 into your contacts and send it a text message to initiate a conversation. End.-")
+    busy = pre + "ERROR: Two calls to the same user (@someone) within 65 seconds is not allowed. This is to prevent overload."
+    ok = pre + "Autorization OK User:@someone Starting Telegram Audio Call. Script started! Script ended before Timeout. End."
+    assert R._callmebot_error(ok, "@someone") == ""
+    assert R._callmebot_error(pre + "User not authorized.", "@someone") == "not-authorized"
+    why = R._callmebot_error(spam, "@someone")
+    assert why.startswith("Someone reported CallMeBot as spammer") and "@CallMeBot_API16" in why and "someone" not in why
+    assert "65 seconds" in R._callmebot_error(busy, "@someone") and "someone" not in R._callmebot_error(busy, "@someone")
+    saved = (R.requests.get, R.time.sleep)
+    hits, slept = [], []
+    R.time.sleep = slept.append
+    try:
+        R.requests.get = lambda *a, **k: (hits.append(1), types.SimpleNamespace(status_code=200, text=spam))[1]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert R._ring({"user": "@someone"}) is False                      # spammer: thử lại vô ích
+        assert len(hits) == 1 and slept == [] and "@CallMeBot_API16" in out.getvalue() and "@someone" not in out.getvalue()
+        bodies = [busy, ok]
+        R.requests.get = lambda *a, **k: types.SimpleNamespace(status_code=200, text=bodies.pop(0))
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert R._ring({"user": "@someone"}) is True and slept == [70]     # 65 s rule: chờ 70 s rồi gọi lại được
     finally:
         R.requests.get, R.time.sleep = saved
 
