@@ -76,7 +76,8 @@ def call_text(start, mins):
     thứ ba (chi tiết đã nằm trong tin nhắc chữ)."""
     at_vi = f"{start.hour} giờ" + (f" {start.minute:02d}" if start.minute else "")
     if mins > 0:
-        return t(f"Còn {mins} phút nữa vào lớp, lúc {at_vi}.", f"Class starts in {mins} minutes, at {start:%H:%M}.")
+        return t(f"Còn {mins} phút nữa vào lớp, lúc {at_vi}.",
+                 f"Class starts in {mins} minute{'s' if mins != 1 else ''}, at {start:%H:%M}.")
     return t(f"Lớp học bắt đầu ngay bây giờ, lúc {at_vi}.", f"Class is starting now, at {start:%H:%M}.")
 
 
@@ -108,15 +109,21 @@ def _claim_call(key, now_ts=None):
         return False
 
 
-def _ring(params):
-    """Gọi API. Lỗi CHỈ in HTTP status / TÊN lớp lỗi: thông điệp lỗi của requests chứa URL (có username)."""
-    try:
-        r = requests.get(CALLMEBOT_URL, params=params, timeout=90, allow_redirects=False)
-    except requests.RequestException as e:
-        print(t("  CallMeBot lỗi mạng:", "  CallMeBot network error:"), type(e).__name__)
-        return
-    if not 200 <= r.status_code < 300:
+def _ring(params, tries=2, gap=10):
+    """Gọi API, lỗi thì thử lại 1 lần (dấu đã chiếm nên không lượt nào khác gọi bù). Lỗi CHỈ in HTTP status /
+    TÊN lớp lỗi: thông điệp lỗi của requests chứa URL (có username)."""
+    for i in range(tries):
+        if i:
+            time.sleep(gap)
+        try:
+            r = requests.get(CALLMEBOT_URL, params=params, timeout=90, allow_redirects=False)
+        except requests.RequestException as e:
+            print(t("  CallMeBot lỗi mạng:", "  CallMeBot network error:"), type(e).__name__)
+            continue
+        if 200 <= r.status_code < 300:
+            return True
         print(t(f"  CallMeBot lỗi: HTTP {r.status_code}", f"  CallMeBot error: HTTP {r.status_code}"))
+    return False
 
 
 def call_reminder(key, start, mins):
@@ -194,5 +201,8 @@ class ClassReminder:
         for start, end, s, mins, k in due_reminders(self._sessions, now, self.lead, self.sent):
             self.sent.add(k)
             texts.append(reminder_text(start, end, s, mins))
-            call_reminder(k, start, mins)        # gọi thoại (nếu bật) — chạy nền, không chặn
+            try:                                 # gọi thoại (nếu bật): kênh PHỤ — lỗi gì cũng không được nuốt mất tin chữ
+                call_reminder(k, start, mins)
+            except Exception as e:               # noqa: BLE001 — vd không tạo được thread
+                print(t("  CallMeBot lỗi:", "  CallMeBot error:"), type(e).__name__)
         return texts

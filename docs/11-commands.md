@@ -307,6 +307,7 @@ fap notify semester              # đẩy lên Telegram/Discord · push to chat
 | `TELEGRAM_CHAT` | chat id Telegram · Telegram chat id | `notify` |
 | `DISCORD_WEBHOOK_URL` | webhook Discord · Discord webhook | `notify` |
 | `MESSENGER_PUSH_URL` · `MESSENGER_PUSH_TOKEN` | bridge Messenger (chat riêng, `POST /v1/push`) · Messenger bridge (private chat) — [13-notify §12](13-notify.md) | `notify` |
+| `CALLMEBOT_USER` | gọi thoại Telegram nhắc tiết qua CallMeBot · Telegram voice-call class reminder via CallMeBot — [13-notify §8](13-notify.md) | `telegram-bot` · `discord-bot` |
 | `GCAL_CALENDAR_ID` | lịch đích, mặc định `primary` · target calendar, default `primary` | `calendar-sync` |
 
 > **VI —** Múi giờ `Asia/Ho_Chi_Minh` được gắn cứng trong mã, **không** phải khóa `.env`.
