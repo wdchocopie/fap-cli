@@ -3820,6 +3820,8 @@ def test_telegram_callback_navigation_and_dispatch():
             tap("a:exams:prev"); assert ran[-1] == ("exams", "Summer2026")   # kỳ trước của kỳ HIỆN TẠI
             TG.creds = lambda: (_ for _ in ()).throw(SystemExit("chưa đăng nhập"))
             tap("a:exams:prev"); assert ran[-1] == ("exams", None)           # chưa login -> handle tự báo lỗi
+            TG.creds = lambda: (_ for _ in ()).throw(ValueError("token.json hỏng"))
+            tap("a:exams:prev"); assert ran[-1] == ("exams", None)           # token hỏng: KHÔNG sập vòng bot
             tap("l"); assert ran[-1] == ("login", None)                      # Đăng nhập = /login campus mặc định
             # /menu gõ tay: MỘT tin ngắn + nút nhóm; /help: chữ đầy đủ + nút nhóm ở mẩu cuối
             del calls[:]; TG._dispatch("42", "/menu")

@@ -168,7 +168,9 @@ def _preset_arg(cmd, arg):
     if cmd == "exams" and arg == "prev":
         try:
             return prev_term(current_semester(*creds()))
-        except SystemExit:                     # chưa đăng nhập -> để handle() tự báo đúng lỗi đó
+        # Chưa đăng nhập (SystemExit) / token.json hỏng (ValueError…) -> để handle() tự báo đúng lỗi đó.
+        # Hàm này chạy NGOÀI try của _dispatch: lọt lỗi ra là sập cả vòng getUpdates (bot chết).
+        except (Exception, SystemExit):        # noqa: BLE001
             return None
     return arg
 
