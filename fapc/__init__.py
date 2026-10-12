@@ -39,6 +39,7 @@ _IDENTITY_KEYS = frozenset({
     "DISCORD_ALLOW_ANYONE",     # nới quyền của bot — thừa kế = mở toang bot của người khác
     "MESSENGER_PUSH_URL",       # đẩy qua bridge Messenger nào
     "MESSENGER_PUSH_TOKEN",     # token push của bridge = chat riêng của chủ máy
+    "CALLMEBOT_USER",           # gọi thoại vào tài khoản Telegram của ai
     "GCAL_CALENDAR_ID",         # ghi vào lịch Google nào
 })
 

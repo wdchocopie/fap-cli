@@ -154,6 +154,8 @@ def doctor():
     # Messenger CHỈ in có/thiếu — KHÔNG in URL/token của bridge.
     print("Messenger   :", "✓ có · set" if config.MESSENGER_PUSH_URL and config.MESSENGER_PUSH_TOKEN else
           "— thiếu · missing (MESSENGER_PUSH_URL + MESSENGER_PUSH_TOKEN)")
+    print("Gọi nhắc    :", "✓ CallMeBot (Telegram)" if (config.CALLMEBOT_USER or "").strip() else
+          "— tắt · off (CALLMEBOT_USER)")
     # API v1/v2 + khoá v2 CHỈ in có/không — KHÔNG BAO GIỜ in giá trị khoá.
     from ..core import apiv2
     ver = apiv2.api_version()

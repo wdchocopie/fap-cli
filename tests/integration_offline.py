@@ -19,6 +19,8 @@ os.environ["FAP_SEMESTER"] = "Summer2026"; os.environ["FAP_LANG"] = "vi"
 os.environ["FAP_CACHE_MIN"] = "0"
 # API v2 OPT-IN: ghim v1 + xoá khoá v2 TRƯỚC import fapc (đặt ở đây THẮNG .env thật). Mục [V2] tự bật bằng khoá GIẢ.
 os.environ["FAP_API_VERSION"] = "v1"; os.environ["FAP_V2_KEY"] = ""
+# Gọi thoại nhắc tiết là THẬT (CallMeBot): selftest trên máy thật thừa hưởng .env -> luôn TẮT trong test.
+os.environ["CALLMEBOT_USER"] = ""
 
 OK = {"n": 0}; FAIL = {"n": 0}
 def _cap(fn):
