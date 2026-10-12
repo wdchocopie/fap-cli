@@ -539,6 +539,12 @@ def run():
             if ck == "login-finish":                            # có URL thật thì _route đã đưa sang lối dán
                 await message.channel.send(_login_finish_hint())
                 return
+            if getattr(message, "guild", None) is not None:     # kênh server: link + mã sẽ lộ cho cả kênh
+                await message.channel.send(t("🔐 Đừng đăng nhập trong kênh chung — dùng /login (chỉ bạn thấy) "
+                                             "hoặc nhắn !login trong DM với bot.",
+                                             "🔐 Don't sign in in a shared channel — use /login (only you see it) "
+                                             "or send !login in a DM with the bot."))
+                return
             await _login_start(message.channel.send, arg)
             return
         if cmd.strip().lower() == "update":                     # !update — chỉ CHỦ tài khoản
