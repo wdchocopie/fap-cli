@@ -909,6 +909,9 @@ try:
     _st, _pg = _req("POST", "/login/finish", body=_form(url="<script>x</script>"))
     check("web pkce: dán thứ không phải redirect -> nhắc, phiên VẪN chờ, không echo",
           W._LOGIN.waiting_paste() and "<script>x" not in _pg and "&lt;script&gt;x" not in _pg, _pg[:200])
+    _st, _pg = _req("POST", "/login/finish", body=_form(url="http://127.0.0.1:8085/?state=s&code=4/GOOGLECODE&scope=x"))
+    check("web pkce: dán URL Google (calendar) -> KHÔNG gửi sang FE Identity, phiên VẪN chờ, không echo",
+          W._LOGIN.waiting_paste() and "GOOGLECODE" not in _pg, _pg[:200])
     _st, _pg = _req("POST", "/login/finish", body=_form(url="io.identityserver.demo:/oauthredirect?code=SECRETCODE&state=s"))
     check("web pkce: dán đúng -> xong, KHÔNG echo URL/mã", "HE190000" in _pg and "SECRETCODE" not in _pg
           and not W._LOGIN.waiting_paste(), _pg[:200])

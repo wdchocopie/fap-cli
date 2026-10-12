@@ -245,14 +245,14 @@ fap discord-bot      # bot Discord (cần · needs: pip install -e ".[bot]")
 **VI —**
 1. [Developer Portal](https://discord.com/developers/applications) → **New Application** → tab **Bot** → **Reset Token** → copy vào `DISCORD_BOT_TOKEN` (token bot, **khác** webhook URL ở §3).
 2. Vẫn ở tab **Bot**: bật **MESSAGE CONTENT INTENT** (bắt buộc để bot đọc nội dung lệnh).
-3. Tab **OAuth2 → URL Generator**: chọn scope **`bot` + `applications.commands`** (scope thứ 2 cho **slash command** `/`), quyền *Send Messages* → mở URL để mời bot vào server.
+3. Tab **OAuth2 → URL Generator**: chọn scope **`bot` + `applications.commands`** (scope thứ 2 cho **slash command** `/`), quyền *Send Messages* (+ *Manage Messages* nếu muốn bot tự xoá tin bạn dán URL đăng nhập — §8.4) → mở URL để mời bot vào server.
 4. Lấy **id user của bạn** (bật Developer Mode → chuột phải avatar → Copy User ID) → `DISCORD_ALLOWED_USER_ID`.
 5. `pip install -e ".[bot]"` rồi `fap discord-bot`. Gõ **`!`** (`!today`, `!grades`, `!whatif 8`) **hoặc** **slash** `/today` (gõ `/` để hiện gợi ý; lần đầu Discord có thể mất tới ~1h để slash xuất hiện).
 
 **EN —**
 1. [Developer Portal](https://discord.com/developers/applications) → **New Application** → **Bot** tab → **Reset Token** → copy into `DISCORD_BOT_TOKEN` (the bot token, **not** the webhook URL from §3).
 2. Same **Bot** tab: enable **MESSAGE CONTENT INTENT** (required so the bot can read command text).
-3. **OAuth2 → URL Generator**: pick scopes **`bot` + `applications.commands`** (the 2nd scope enables **slash commands** `/`) + *Send Messages* → open the URL to invite the bot to your server.
+3. **OAuth2 → URL Generator**: pick scopes **`bot` + `applications.commands`** (the 2nd scope enables **slash commands** `/`) + *Send Messages* (+ *Manage Messages* if the bot should delete a pasted sign-in URL itself — §8.4) → open the URL to invite the bot to your server.
 4. Get **your user id** (enable Developer Mode → right-click your avatar → Copy User ID) → `DISCORD_ALLOWED_USER_ID`.
 5. `pip install -e ".[bot]"`, then `fap discord-bot`. Type `!`-prefixed commands (`!today`, `!grades`, `!whatif 8`) **or** **slash** `/today` (type `/` to see suggestions; Discord may take up to ~1h to show new slash commands the first time).
 

@@ -92,6 +92,12 @@ def _route(content, author_id, allow):
             return "login-paste", body
     return ("command", s) if prefixed else ("ignore", None)
 
+def _legacy_pick(custom_id):
+    """THUẦN: custom_id nút của bảng !menu CŨ ('fap:<lệnh>', trước menu thả xuống) -> tên lệnh; khác -> None.
+    Tin !menu cũ còn nằm trong kênh mà không view nào nhận nút đó nữa -> Discord báo 'interaction failed'."""
+    cid = str(custom_id or "")
+    return cid[4:] if cid.startswith("fap:") and not cid.startswith("fap:menu:") and len(cid) > 4 else None
+
 def _paste_warn(cmd):
     return t(f"⚠️ Không xoá được tin chứa link — bạn tự xoá giúp (có mã đăng nhập). "
              f"Lần sau dùng /{cmd} (ẩn) cho an toàn.",
@@ -387,8 +393,9 @@ def run():
                 return
             await interaction.response.defer(thinking=True, ephemeral=True)
             # Không giống URL redirect -> chỉ nhắc, KHÔNG đụng phiên (finish_paste sẽ đóng phiên dù dán sai).
+            # URL Google (calendar) cũng khớp mẫu FAP -> chặn, kẻo mã Google bị gửi sang FE Identity.
             msg = (await client.loop.run_in_executor(None, botlogin.finish_paste, _LOGIN, url))[1] \
-                if looks_like_redirect(url) else _login_finish_hint()
+                if looks_like_redirect(url) and not looks_like_gredirect(url) else _login_finish_hint()
             await _send_rich(lambda *a, **k: interaction.followup.send(*a, ephemeral=True, **k), msg)
         tree.command(name="login-finish", description=t("Hoàn tất đăng nhập FAP: dán URL redirect",
                                                         "Finish FAP sign-in: paste redirect URL")[:100])(_login_finish_cmd)
@@ -493,6 +500,13 @@ def run():
             print(f"  🔄 Tự cập nhật khi đang chạy: BẬT mỗi {autoupdate_min()}' (FAP_AUTOUPDATE_MIN).")
         print(f"🤖 Discord bot online: {client.user}  (prefix '{PREFIX}'"
               + (f", chỉ user {allow})" if allow else ", MỞ cho mọi user)"))
+
+    @client.event
+    async def on_interaction(interaction):
+        # Nút của tin !menu CŨ: chạy lệnh như trước (kiểm quyền trong _on_pick) và đổi tin đó sang menu mới.
+        name = _legacy_pick((interaction.data or {}).get("custom_id"))
+        if name:
+            await _on_pick(interaction, _make_view(), name)
 
     @client.event
     async def on_message(message):
