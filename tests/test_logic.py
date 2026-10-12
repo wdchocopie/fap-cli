@@ -3729,6 +3729,123 @@ def test_messenger_keys_not_inherited_by_profiles():
     import fapc
     assert {"MESSENGER_PUSH_URL", "MESSENGER_PUSH_TOKEN"} <= fapc._IDENTITY_KEYS
 
+# ---- Telegram: menu nút bấm theo nhóm (callback_data m / g:<i> / c:<lệnh> / a:<lệnh>:<tham số> / h / l) ----
+def test_telegram_menu_reaches_every_command_within_64_bytes():
+    import fapc.app.telegrambot as TG, fapc.app.bot_core as B
+    groups = B.command_groups()
+    _, root = TG._menu_view()
+    datas = [d for row in root for _, d in row]
+    assert [d for d in datas if d.startswith("g:")] == [f"g:{i}" for i in range(len(groups))]   # MỌI nhóm
+    assert "l" in datas and "h" in datas
+    reached = set()
+    for i in range(len(groups)):
+        text, rows = TG._menu_view(i)
+        assert text.startswith(TG._MENU_TAG)                     # trang nhóm vẫn là "tin menu" -> sửa tại chỗ được
+        assert rows[-1] == [(rows[-1][0][0], "m")]              # hàng cuối = Quay lại
+        datas += [d for row in rows for _, d in row]
+        reached |= {d[2:] for row in rows for _, d in row if d.startswith("c:")}
+        assert all(len(row) <= TG._MENU_COLS for row in rows)
+    assert reached == set(B.COMMANDS)                            # không lệnh nào bị bỏ ngoài menu (bản cũ: 12/24)
+    for c in B.COMMANDS:
+        datas += [d for row in TG._reply_buttons(c) for _, d in row]
+    for d in datas:
+        assert len(d.encode("utf-8")) <= TG._CB_MAX, d
+        assert TG._parse_cb(d) is not None, d                    # bot nhận lại được mọi nút chính nó sinh ra
+    assert TG._parse_cb("m") == ("nav", None) and TG._parse_cb("g:1") == ("nav", 1)
+    assert all(len(TG._short(d)) <= TG._LABEL_MAX for _, items in groups for _, _, d in items)
+    assert TG._short("Một mô tả rất rất dài vượt quá trần nhãn nút").endswith("…")
+
+def test_telegram_parse_cb_rejects_garbage_keeps_legacy():
+    import fapc.app.telegrambot as TG
+    for bad in ("", "x", "g:", "g:99", "g:-1", "g:abc", "c:", "c:update", "c:login", "c:nope",
+                "a:semester:rm -rf", "a:exams:Fall2020", "a:today:x", "a:nope:prev", "menu", "update"):
+        assert TG._parse_cb(bad) is None, bad
+    assert TG._parse_cb("today") == ("run", "today", None)                  # nút CŨ: tên lệnh trần
+    assert TG._parse_cb("grades_detail") == ("run", "grades-detail", None)  # tên kiểu menu Telegram ('_')
+    assert TG._parse_cb("h") == ("run", "help", None) and TG._parse_cb("l") == ("run", "login", None)
+    from fapc.app.bot_core import semester_arg
+    for _, arg in TG._presets("semester"):                       # preset /semester = đúng từ khoá view
+        assert semester_arg(arg, "Fall2026") == (arg, "Fall2026")
+
+def test_telegram_callback_navigation_and_dispatch():
+    import fapc.app.telegrambot as TG
+    class _R:
+        def __init__(s, code=200, text='{"ok":true}'): s.status_code = code; s.ok = 200 <= code < 300; s.text = text
+    calls, edit = [], {"r": _R()}
+    def fake(url, json=None, **k):
+        m = url.rsplit("/", 1)[-1]
+        calls.append((m, json))
+        return edit["r"] if m == "editMessageText" else _R()
+    ran = []
+    saved = (TG.requests.post, TG.handle, TG.creds, TG.current_semester, TG._login_start)
+    menu_msg = {"message_id": 7, "chat": {"id": 42}, "text": TG._MENU_TAG + " · Menu\n…"}
+    reply_msg = {"message_id": 8, "chat": {"id": 42}, "text": "📊 Điểm · Fall2026"}
+    def tap(data, msg=menu_msg):
+        del calls[:]
+        TG._on_callback({"id": "q", "data": data, "message": msg}, "42")
+        return [m for m, _ in calls]
+    try:
+        TG.requests.post = fake
+        TG.handle = lambda cmd, arg=None: (ran.append((cmd, arg)), f"R:{cmd}")[1]
+        TG.creds = lambda: ("test-key", "FPTU", "HE000000")
+        TG.current_semester = lambda *a: "Fall2026"
+        TG._login_start = lambda chat, arg: ran.append(("login", arg))
+        with contextlib.redirect_stdout(io.StringIO()):
+            # chat LẠ: chỉ ack, im lặng (không chữ), không chạy gì
+            assert tap("today", {"message_id": 1, "chat": {"id": 666}, "text": "x"}) == ["answerCallbackQuery"]
+            assert "text" not in calls[0][1] and not ran
+            # nút hỏng/cũ trong chat chủ: ack KÈM ghi chú, ngoài ra không làm gì
+            assert tap("g:99") == ["answerCallbackQuery"] and calls[0][1].get("text")
+            # vào nhóm: ack TRƯỚC rồi SỬA chính tin menu, không đẻ tin mới
+            assert tap("g:1") == ["answerCallbackQuery", "editMessageText"]
+            body = calls[1][1]
+            assert body["message_id"] == 7 and body["text"].startswith(TG._MENU_TAG)
+            assert body["reply_markup"]["inline_keyboard"][-1][0]["callback_data"] == "m"
+            assert tap("m")[1:] == ["editMessageText"]                 # Quay lại = sửa tại chỗ
+            edit["r"] = _R(400, '{"ok":false,"description":"Bad Request: message is not modified"}')
+            assert tap("g:0")[1:] == ["editMessageText"]               # 'not modified' = xong, KHÔNG gửi trùng
+            edit["r"] = _R(400, '{"ok":false,"description":"Bad Request: message to edit not found"}')
+            assert tap("g:0")[1:] == ["editMessageText", "sendMessage"]   # sửa hỏng -> gửi menu mới
+            assert calls[-1][1]["reply_markup"]["inline_keyboard"]
+            # '☰ Menu' dưới KẾT QUẢ lệnh: KHÔNG sửa đè kết quả, gửi menu mới
+            assert tap("m", reply_msg)[1:] == ["sendMessage"]
+            # chạy lệnh: kết quả là TIN MỚI + bàn phím nhỏ ☰ Menu
+            assert tap("c:grades")[1:] == ["sendMessage"] and ran[-1] == ("grades", None)
+            assert calls[-1][1]["text"] == "R:grades"
+            assert calls[-1][1]["reply_markup"]["inline_keyboard"] == [[{"text": "☰ Menu", "callback_data": "m"}]]
+            assert tap("grades_detail")[1:] == ["sendMessage"] and ran[-1] == ("grades-detail", None)  # nút CŨ
+            tap("a:semester:weeks"); assert ran[-1] == ("semester", "weeks")
+            presets = [b["callback_data"] for row in calls[-1][1]["reply_markup"]["inline_keyboard"] for b in row]
+            assert "a:semester:list" in presets and "m" in presets
+            tap("a:exams:prev"); assert ran[-1] == ("exams", "Summer2026")   # kỳ trước của kỳ HIỆN TẠI
+            TG.creds = lambda: (_ for _ in ()).throw(SystemExit("chưa đăng nhập"))
+            tap("a:exams:prev"); assert ran[-1] == ("exams", None)           # chưa login -> handle tự báo lỗi
+            tap("l"); assert ran[-1] == ("login", None)                      # Đăng nhập = /login campus mặc định
+            # /menu gõ tay: MỘT tin ngắn + nút nhóm; /help: chữ đầy đủ + nút nhóm ở mẩu cuối
+            del calls[:]; TG._dispatch("42", "/menu")
+            assert [m for m, _ in calls] == ["sendMessage"] and calls[0][1]["text"].startswith(TG._MENU_TAG)
+            assert len(calls[0][1]["text"].splitlines()) == 2
+            del calls[:]; TG._dispatch("42", "/help")
+            assert calls[-1][1]["text"] == "R:help"
+            assert calls[-1][1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "g:0"
+    finally:
+        TG.requests.post, TG.handle, TG.creds, TG.current_semester, TG._login_start = saved
+
+def test_telegram_register_menu_lists_menu_first():
+    import fapc.app.telegrambot as TG
+    sent = []
+    class _R:
+        ok, status_code = True, 200
+    saved = TG.requests.post
+    try:
+        TG.requests.post = lambda url, json=None, **k: (sent.append(json), _R())[1]
+        with contextlib.redirect_stdout(io.StringIO()):
+            TG._register_menu()
+        names = [c["command"] for c in sent[0]["commands"]]
+        assert names[0] == "menu" and names.count("menu") == 1 and "today" in names and "login" in names
+    finally:
+        TG.requests.post = saved
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

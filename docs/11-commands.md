@@ -89,8 +89,8 @@
 
 > Bot **chỉ trả lời chủ tài khoản** (Telegram: `TELEGRAM_CHAT`; Discord: `DISCORD_ALLOWED_USER_ID`). Mỗi lệnh gọi API FAP live. Chi tiết: [13-notify.md §8](13-notify.md). · Bots answer **only the account owner**; each command hits the live FAP API. See [13-notify.md §8](13-notify.md).
 
-> 🎛️ **VI —** Cả hai bot có **bảng NÚT BẤM**: gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) để chạy lệnh bằng một chạm, khỏi gõ. Nút sinh từ chính `COMMAND_INFO`. Chi tiết + giới hạn số nút: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
-> 🎛️ **EN —** Both bots ship a **BUTTON panel**: send `/menu` (Telegram) or `!menu` / `/menu` (Discord) to run a command with one tap. The buttons are generated from `COMMAND_INFO`. Details + button caps: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
+> 🎛️ **VI —** Cả hai bot có **bảng NÚT BẤM**: gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) để chạy lệnh bằng một chạm, khỏi gõ. Nút sinh từ chính `COMMAND_INFO`; Telegram xếp theo **nhóm** (chạm nhóm → hiện lệnh ngay trong tin đó) nên **đủ mọi lệnh**, kèm nút 🔐 Đăng nhập. Chi tiết + giới hạn số nút: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
+> 🎛️ **EN —** Both bots ship a **BUTTON panel**: send `/menu` (Telegram) or `!menu` / `/menu` (Discord) to run a command with one tap. The buttons are generated from `COMMAND_INFO`; Telegram arranges them in **groups** (tap a group → its commands appear in that same message) so **every command** is reachable, plus a 🔐 Log in button. Details + button caps: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
 
 ### Khác · Misc
 

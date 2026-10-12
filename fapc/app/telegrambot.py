@@ -10,11 +10,13 @@ cho người lạ. Lấy TELEGRAM_TOKEN từ @BotFather, TELEGRAM_CHAT = id chat
 import os, sys, time
 import requests
 from .. import config, fmt
-from .bot_core import handle, menu_commands
+from .bot_core import handle, menu_commands, command_groups, COMMANDS
 from .reminders import ClassReminder
 from . import botlogin, botgcal
 from .gcal import looks_like_gredirect, destinations_text, add_destination, remove_destination
 from ..core.auth import looks_like_redirect
+from ..core.api import creds, current_semester
+from ..core.extras import prev_term
 from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min, owner_checkout
 from ..i18n import t
 
@@ -24,8 +26,11 @@ _TIMEOUT = 30   # long-poll: Telegram giữ kết nối tới 30s nếu chưa c�
 _LIMIT = 4000
 _GAP   = 0.4    # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩu rất nhỏ: 2–3)
 _CB_MAX = 64    # callback_data của Telegram tối đa 64 BYTE (utf-8) — dài hơn là API từ chối cả tin
-_MENU_MAX  = 12 # số nút trên bảng menu — nhiều hơn thì bàn phím dài lê thê, che hết màn hình
-_MENU_COLS = 3  # Telegram cho tối đa 8 nút/hàng; 3 nút/hàng vừa mắt trên điện thoại
+_MENU_COLS = 2  # 2 nút/hàng: nhãn chữ ~20 ký tự vẫn đọc trọn trên điện thoại (3 nút/hàng là bị cắt "…")
+_LABEL_MAX = 26 # nhãn nút lệnh (chưa kể emoji): vừa mô tả dài nhất hiện nay ('Tiến độ tín chỉ tốt nghiệp')
+# Tin MENU luôn mở đầu bằng dấu này. Nút điều hướng chỉ SỬA tin mang dấu (khỏi đẻ tin mới); bấm từ tin
+# khác (help, kết quả lệnh) thì gửi menu MỚI — sửa vào đó là XOÁ MẤT nội dung người dùng đang đọc.
+_MENU_TAG = "☰ FAP bot"
 
 # MỘT phiên đăng nhập cho cả tiến trình: đăng nhập là việc hiếm và phải tuần tự (2 phiên song song
 # sẽ ghi đè .pkce_state.json của nhau). Xem fapc/app/botlogin.py.
@@ -56,10 +61,11 @@ def _api(method):
 def _register_menu():
     """Đăng ký danh sách lệnh GỢI Ý — Telegram hiện nút "Menu" ☰ + tự gợi ý khi gõ '/'.
     Không sống-còn: lỗi mạng thì bot vẫn chạy bình thường (chỉ thiếu menu gợi ý)."""
-    cmds = [{"command": n, "description": d[:256]} for n, d in menu_commands()]
-    cmds.append({"command": "menu",                         # lệnh thường-trú (không có ở web/notify)
-                 "description": t("Bảng nút bấm nhanh", "Quick button panel")[:256]})
-    cmds.append({"command": "login",                         # đăng nhập FAP ngay trong chat
+    # "menu" ĐỨNG ĐẦU: là lối vào dễ nhất (chọn mọi lệnh bằng nút) nên phải thấy ngay khi mở ☰.
+    cmds = [{"command": "menu",                             # lệnh thường-trú (không có ở web/notify)
+             "description": t("Menu nút bấm — chọn mọi lệnh", "Button menu — pick any command")[:256]}]
+    cmds += [{"command": n, "description": d[:256]} for n, d in menu_commands()]
+    cmds.append({"command": "login",                        # đăng nhập FAP ngay trong chat
                  "description": t("Đăng nhập lại FAP (token hết hạn)", "Re-login to FAP (token expired)")[:256]})
     cmds.append({"command": "calendar_auth",                 # cài Google Calendar ngay trong chat
                  "description": t("Cài Google Calendar (đăng nhập)", "Set up Google Calendar (sign in)")[:256]})
@@ -87,7 +93,7 @@ def _partial(done, total):
 
 def _cb_data(name):
     """callback_data tối đa 64 BYTE utf-8 (không phải ký tự) — cắt theo BYTE cho chắc.
-    Tên lệnh dài nhất hiện nay là 'exam_countdown' (14) nên thực tế không bao giờ chạm trần."""
+    Dài nhất hiện nay là 'a:semester:pattern' (18) nên thực tế không bao giờ chạm trần."""
     raw = str(name).encode("utf-8")[:_CB_MAX]
     return raw.decode("utf-8", "ignore")
 
@@ -97,16 +103,74 @@ def _keyboard(buttons):
             for row in (buttons or []) if row]
     return {"inline_keyboard": rows} if rows else None
 
-def _menu_buttons():
-    """Bàn phím nút bấm, DẪN XUẤT từ bot_core.menu_commands() -> không thể lệch COMMAND_INFO.
-    Nhãn = tên lệnh có dấu '/' cho dễ nhận; callback_data = chính tên lệnh (handle() tự chuẩn hoá
-    '_' -> '-'). Cắt còn _MENU_MAX nút, xếp _MENU_COLS nút/hàng."""
-    cells = [("/" + name.replace("_", "-"), name) for name, _ in menu_commands()[:_MENU_MAX]]
+# ---------- menu nút bấm — callback_data: m=gốc · g:<i>=nhóm · c:<lệnh> · a:<lệnh>:<tham số> · h=help · l=login ----------
+def _rows(cells):
     return [cells[i:i + _MENU_COLS] for i in range(0, len(cells), _MENU_COLS)]
 
-def _menu_text():
-    return handle("help") + "\n\n" + t("👇 Chạm nút bên dưới để chạy lệnh (khỏi gõ tay).",
-                                       "👇 Tap a button below to run a command (no typing).")
+def _short(desc):
+    """Nhãn nút gọn từ mô tả COMMAND_INFO: bỏ phần '(…)' giải thích, còn dài thì cắt ở ranh giới từ."""
+    s = desc.split(" (")[0].strip()
+    return s if len(s) <= _LABEL_MAX else s[:_LABEL_MAX - 1].rsplit(" ", 1)[0] + "…"
+
+def _menu_view(idx=None):
+    """(chữ, nút) của MỘT trang menu: None -> trang gốc (các nhóm), số -> các lệnh của nhóm đó.
+    SINH TỪ command_groups() -> lệnh mới trong COMMAND_INFO tự có nút, không lệnh nào bị bỏ ngoài menu."""
+    groups = command_groups()
+    if idx is None:
+        cells = [(f"{items[0][1]} {title}", f"g:{i}") for i, (title, items) in enumerate(groups)]
+        return (f"{_MENU_TAG} · Menu\n" + t("👇 Chọn nhóm lệnh bên dưới.", "👇 Pick a command group below."),
+                _rows(cells) + [[(t("🔐 Đăng nhập", "🔐 Log in"), "l"), (t("❓ Hướng dẫn", "❓ Help"), "h")]])
+    title, items = groups[idx]
+    cells = [(f"{emoji} {_short(d)}", "c:" + name) for name, emoji, d in items]
+    return (f"{_MENU_TAG} · {items[0][1]} {title}\n" + t("👇 Chạm lệnh để chạy.", "👇 Tap a command to run it."),
+            _rows(cells) + [[(t("◀ Quay lại", "◀ Back"), "m")]])
+
+def _presets(cmd):
+    """[(nhãn, tham số)] chạy nhanh cho lệnh CÓ tham số — chỉ những giá trị cố định, chắc chắn hợp lệ."""
+    if cmd == "semester":                      # từ khoá của bot_core.semester_arg / VIEW_WORDS
+        return [(t("🧩 Mẫu lặp", "🧩 Pattern"), "pattern"), (t("📆 Theo tuần", "📆 By week"), "weeks"),
+                (t("📋 Từng buổi", "📋 List"), "list")]
+    if cmd == "exams":                         # 'prev' dò ra tên kỳ LÚC BẤM — xem _preset_arg
+        return [(t("◀ Kỳ trước", "◀ Previous term"), "prev")]
+    return []
+
+def _reply_buttons(cmd):
+    """Bàn phím nhỏ dưới MẨU CUỐI câu trả lời: tham số hay dùng + '☰ Menu' (mở menu MỚI, không sửa tin này)."""
+    return _rows([(label, f"a:{cmd}:{arg}") for label, arg in _presets(cmd)] + [("☰ Menu", "m")])
+
+def _parse_cb(data):
+    """THUẦN: callback_data -> ('nav', None|số nhóm) | ('run', lệnh, tham số) | None (lạ/hỏng/quá hạn).
+    Dữ liệu nút KHÔNG đáng tin: chỉ nhận đúng các dạng chính bot sinh ra, tham số chỉ từ _presets."""
+    data = data or ""
+    if data == "m":
+        return ("nav", None)
+    if data in ("h", "l"):
+        return ("run", "help" if data == "h" else "login", None)
+    head, _, rest = data.partition(":")
+    if head == "g":
+        try:
+            i = int(rest)
+        except ValueError:
+            return None
+        return ("nav", i) if 0 <= i < len(command_groups()) else None
+    if head == "c":
+        return ("run", rest, None) if rest in COMMANDS else None
+    if head == "a":
+        cmd, _, arg = rest.partition(":")
+        return ("run", cmd, arg) if arg in [a for _, a in _presets(cmd)] else None
+    # Nút kiểu CŨ (bảng 12 nút trước bản menu nhóm) còn trong lịch sử chat: callback_data = tên lệnh trần.
+    legacy = data.replace("_", "-")
+    return ("run", legacy, None) if legacy in COMMANDS else None
+
+def _preset_arg(cmd, arg):
+    """'prev' của /exams -> tên kỳ NGAY TRƯỚC kỳ hiện tại. Dò LÚC BẤM, không gắn sẵn vào nút: nút nằm lại
+    trong chat qua nhiều kỳ, gắn sẵn thì sang kỳ mới bấm vẫn ra kỳ cũ."""
+    if cmd == "exams" and arg == "prev":
+        try:
+            return prev_term(current_semester(*creds()))
+        except SystemExit:                     # chưa đăng nhập -> để handle() tự báo đúng lỗi đó
+            return None
+    return arg
 
 def _send(chat_id, text, buttons=None):
     """Gửi trả lời, cắt thành NHIỀU tin ≤ _LIMIT. True chỉ khi MỌI mẩu đã tới nơi.
@@ -142,6 +206,23 @@ def _answer_callback(cb_id, text=None):
         requests.post(_api("answerCallbackQuery"), json=body, timeout=15)
     except requests.RequestException as e:
         print("  trả lời nút lỗi · answerCallbackQuery error:", e)
+
+def _show(chat_id, msg, view):
+    """Chuyển trang menu: SỬA chính tin menu vừa bấm (editMessageText) -> điều hướng không đẻ tin mới.
+    Tin không phải menu, tin quá cũ/đã xoá, lỗi mạng -> gửi menu MỚI. 'not modified' (bấm lại đúng trang
+    đang mở) là THÀNH CÔNG — gửi tin mới lúc đó chỉ tạo bản trùng."""
+    text, buttons = view
+    mid = msg.get("message_id")
+    if mid and str(msg.get("text") or "").startswith(_MENU_TAG):
+        body = {"chat_id": chat_id, "message_id": mid, "text": text, "reply_markup": _keyboard(buttons)}
+        try:
+            r = requests.post(_api("editMessageText"), json=body, timeout=15)
+            if r.ok or "not modified" in str(r.text):
+                return True
+            print(f"  sửa menu lỗi · edit error: HTTP {r.status_code} {str(r.text)[:140]}")
+        except requests.RequestException as e:
+            print("  sửa menu lỗi mạng · edit network error:", e)
+    return _send(chat_id, text, buttons)
 
 def _delete_message(chat_id, message_id):
     """Xoá 1 tin trong chat. Dùng cho tin chứa URL redirect (có MÃ UỶ QUYỀN dùng-một-lần):
@@ -244,8 +325,11 @@ def _dispatch(chat_id, cmd, arg=None):
     if key == "calendar-remove":
         _send(chat_id, remove_destination((arg or "").strip()))
         return
-    if key in ("", "menu", "start", "help"):     # trang trợ giúp = luôn kèm bàn phím nút bấm
-        _send(chat_id, _menu_text(), _menu_buttons())
+    if key in ("", "menu", "start"):             # menu GỌN: 1 tin ngắn + nút nhóm (bản chữ đầy đủ ở /help)
+        _send(chat_id, *_menu_view())
+        return
+    if key == "help":                            # trợ giúp đầy đủ + nút nhóm ở mẩu cuối
+        _send(chat_id, handle("help"), _menu_view()[1])
         return
     try:
         reply = handle(cmd, arg)
@@ -254,7 +338,25 @@ def _dispatch(chat_id, cmd, arg=None):
     except Exception as e:                       # noqa: BLE001 — bot không được chết vì 1 lệnh
         reply = f"Lỗi · error: {e}"
     print(f"  > {key[:40]}  ->  {len(reply)} ký tự")
-    _send(chat_id, reply)
+    _send(chat_id, reply, _reply_buttons(key))
+
+def _on_callback(cb, allow):
+    """MỘT lần bấm nút (inline_keyboard). Kiểm quyền y như tin gõ tay; dữ liệu nút lọc qua _parse_cb."""
+    msg = cb.get("message") or {}
+    chat = str((msg.get("chat") or {}).get("id"))
+    data = (cb.get("data") or "").strip()
+    act = _parse_cb(data) if chat == allow else None
+    # Trả lời nút TRƯỚC (bắt buộc, kể cả khi từ chối) rồi mới chạy lệnh cho đỡ quay vòng. Chat lạ: ack IM
+    # LẶNG (không xác nhận bot sống); nút lạ/cũ trong chat chủ: ack kèm 1 dòng, KHÔNG làm gì thêm.
+    _answer_callback(cb.get("id"), None if act or chat != allow else
+                     t("⚠️ Nút cũ/không hợp lệ — gõ /menu.", "⚠️ Stale/invalid button — send /menu."))
+    if not act:
+        return
+    print(f"  🔘 nút · button: {data[:40]}")
+    if act[0] == "nav":
+        _show(chat, msg, _menu_view(act[1]))
+    else:
+        _dispatch(chat, act[1], _preset_arg(act[1], act[2]))
 
 def run():
     if not config.TELEGRAM_TOKEN:
@@ -308,14 +410,7 @@ def run():
             offset = upd["update_id"] + 1
             cb = upd.get("callback_query")
             if cb:                                 # NGƯỜI DÙNG BẤM NÚT (inline_keyboard)
-                cb_chat = str(((cb.get("message") or {}).get("chat") or {}).get("id"))
-                data = (cb.get("data") or "").strip()
-                # Trả lời nút TRƯỚC (bắt buộc, kể cả khi từ chối) rồi mới chạy lệnh cho đỡ quay vòng.
-                _answer_callback(cb.get("id"))
-                if cb_chat != allow or not data:
-                    continue                       # im lặng y như tin nhắn ngoài allowlist
-                print(f"  🔘 nút · button: {data[:40]}")
-                _dispatch(cb_chat, data)
+                _on_callback(cb, allow)
                 continue
             msg = upd.get("message") or upd.get("edited_message")
             if not msg:
