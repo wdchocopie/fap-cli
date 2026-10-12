@@ -10,13 +10,16 @@ Cần: DISCORD_BOT_TOKEN (Developer Portal → Bot → Token) trong .env, và b�
 user đó (khuyến nghị mạnh — tránh lộ dữ liệu). Prefix mặc định `!`. Xem docs/13-notify.md.
 
 Trả lời NGẮN đi bằng **embed** (tiêu đề + thân), dài thì vẫn cắt mẩu plain-text như cũ.
-`!menu` / `/menu` đăng một **bảng nút bấm** sinh từ bot_core.menu_commands(); nút kiểm quyền
-y hệt lệnh gõ tay, người ngoài bấm nhận lời từ chối RIÊNG (ephemeral).
+`!menu` / `/menu` đăng **menu thả xuống theo NHÓM** (một Select cho mỗi nhóm của
+bot_core.command_groups()); kiểm quyền y hệt lệnh gõ tay, người ngoài chọn nhận lời từ chối RIÊNG.
+`/login [campus]` · `!login [campus]` đăng nhập FAP ngay trong Discord (CHỈ chủ bot) — xem botlogin.py.
 """
 import asyncio, os, time
 from .. import config, fmt
-from .bot_core import handle, menu_commands
-from . import botgcal
+from .bot_core import handle, menu_commands, command_groups
+from . import botgcal, botlogin
+from .gcal import looks_like_gredirect
+from ..core.auth import looks_like_redirect
 from .reminders import ClassReminder
 from .selfupdate import perform_update, restart, maybe_autoupdate, autoupdate_min, owner_checkout
 from ..i18n import t
@@ -32,10 +35,93 @@ _GAP  = 0.4     # giây nghỉ giữa 2 mẩu — nhẹ tay với API (số mẩ
 EMBED_LIMIT = 4000
 TITLE_LIMIT = 250       # trần title của embed là 256
 
-# Nút bấm: Discord cho TỐI ĐA 5 nút/hàng × 5 hàng = 25 nút cho MỘT view.
-BTN_PER_ROW = 5
-BTN_ROWS    = 5
-MAX_BUTTONS = BTN_PER_ROW * BTN_ROWS
+# Menu: MỘT view tối đa 5 hàng, mỗi Select chiếm trọn 1 hàng và chứa tối đa 25 lựa chọn.
+VIEW_ROWS   = 5
+SELECT_MAX  = 25
+OPT_TEXT    = 100   # trần label/description của SelectOption
+PLACEHOLDER = 150   # trần placeholder của Select
+
+# MỘT phiên đăng nhập cho cả tiến trình (2 phiên song song sẽ ghi đè .pkce_state.json của nhau).
+_LOGIN = botlogin.LoginSession()
+# Lệnh mà phần sau là URL redirect dán vào — bóc tên lệnh ra để nhận diện URL như khi dán trần.
+_PASTE_CMDS = ("login-finish", "calendar-auth-finish", "calendar-finish")
+
+def _select_specs(groups=None):
+    """THUẦN: command_groups() -> [(custom_id, placeholder, [(label, value, description), …])], mỗi phần tử
+    là MỘT Select. Quá VIEW_ROWS nhóm thì GỘP các nhóm dôi vào Select cuối (Discord chỉ cho 5 hàng);
+    quá SELECT_MAX lựa chọn thì cắt — lệnh dôi ra vẫn gõ tay được. custom_id theo THỨ TỰ nhóm, cố định
+    qua các lần khởi động (persistent view); callback đọc TÊN LỆNH từ lựa chọn chứ không từ nhóm."""
+    groups = list(command_groups() if groups is None else groups)
+    if len(groups) > VIEW_ROWS:
+        tail = groups[VIEW_ROWS - 1:]
+        groups = groups[:VIEW_ROWS - 1] + [(" · ".join(g for g, _ in tail), [it for _, its in tail for it in its])]
+    specs = []
+    for i, (title, items) in enumerate(groups):
+        opts = [(("/" + name)[:OPT_TEXT], name, (desc or name)[:OPT_TEXT])
+                for name, _emoji, desc in items][:SELECT_MAX]
+        if opts:                                            # Select rỗng bị Discord từ chối cả tin
+            specs.append((f"fap:menu:{i}", f"{items[0][1]} {title}"[:PLACEHOLDER], opts))
+    return specs
+
+def _owner_only(user_id, allow):
+    """Quyền NGHIÊM cho /login và /update: chỉ đúng DISCORD_ALLOWED_USER_ID. Chế độ MỞ (DISCORD_ALLOW_ANYONE,
+    allow=None) -> CẤM hẳn: login gắn tài khoản FAP của bot, update thì pull + restart."""
+    return bool(allow) and str(user_id) == allow
+
+def _route(content, author_id, allow):
+    """THUẦN: định tuyến 1 tin nhắn -> (loại, nội dung); loại ∈ ignore | gcal-paste | login-paste | command.
+
+    Người ngoài allowlist -> im lặng. URL redirect (trần, hoặc sau !login-finish / !calendar-auth-finish)
+    chỉ nhận từ CHỦ bot, GOOGLE TRƯỚC FAP như Telegram: URL loopback Google cũng khớp mẫu FAP ('http' +
+    'code='). Tin trần chỉ nhận URL thật ('://'): mẫu Google còn bắt mã trần '4/…', mà ở kênh guild câu
+    thường kiểu '4/5 nhé' của chủ bot sẽ bị XOÁ oan. Chế độ MỞ (allow=None): tin trần bỏ qua như trước,
+    lệnh `!` đi đường command (ở đó !login bị từ chối)."""
+    s = (content or "").strip()
+    if not s or (allow and str(author_id) != allow):
+        return "ignore", None
+    prefixed = s.startswith(PREFIX)
+    if allow:
+        body = s
+        if prefixed:
+            parts = s[len(PREFIX):].split(None, 1)
+            if parts and parts[0].lower().replace("_", "-") in _PASTE_CMDS:
+                body = parts[1].strip() if len(parts) > 1 else ""
+        if looks_like_gredirect(body) and (prefixed or "://" in body):
+            return "gcal-paste", body
+        if looks_like_redirect(body):
+            return "login-paste", body
+    return ("command", s) if prefixed else ("ignore", None)
+
+def _paste_warn(cmd):
+    return t(f"⚠️ Không xoá được tin chứa link — bạn tự xoá giúp (có mã đăng nhập). "
+             f"Lần sau dùng /{cmd} (ẩn) cho an toàn.",
+             f"⚠️ Couldn't delete your link message — delete it yourself (it has a sign-in code). "
+             f"Next time use /{cmd} (ephemeral) for safety.")
+
+def _login_denied_msg():
+    return t("⛔ /login chỉ dành cho chủ bot (đặt DISCORD_ALLOWED_USER_ID) — đăng nhập gắn tài khoản FAP của bot.",
+             "⛔ /login is for the bot owner only (set DISCORD_ALLOWED_USER_ID) — it binds the bot's FAP account.")
+
+def _login_finish_hint():
+    return t("Dán URL redirect sau lệnh: /login-finish <URL> (chỉ bạn thấy câu trả lời).",
+             "Paste the redirect URL after the command: /login-finish <URL> (the reply is visible only to you).")
+
+def _menu_view(on_pick):
+    """discord.ui.View bền (timeout=None + custom_id cố định): mỗi spec của _select_specs() là MỘT Select.
+    on_pick(interaction, view, tên_lệnh) là coroutine do caller cấp (kiểm quyền + chạy lệnh).
+    `import discord` để TRONG hàm — module phải import được khi thiếu dep."""
+    import discord
+    view = discord.ui.View(timeout=None)
+    for row, (cid, placeholder, opts) in enumerate(_select_specs()):
+        sel = discord.ui.Select(custom_id=cid, placeholder=placeholder, min_values=1, max_values=1, row=row,
+                                options=[discord.SelectOption(label=l, value=v, description=d) for l, v, d in opts])
+
+        async def _cb(interaction):
+            vals = (interaction.data or {}).get("values") or []
+            await on_pick(interaction, view, vals[0] if vals else "")
+        sel.callback = _cb
+        view.add_item(sel)
+    return view
 
 async def _send_chunks(send, text, view=None):
     """Gửi `text` qua coroutine `send(str)` thành NHIỀU mẩu ≤ LIMIT. True chỉ khi MỌI mẩu đã tới nơi.
@@ -100,8 +186,8 @@ async def _send_rich(send, text, view=None):
     return await _send_chunks(send, text, view=view)
 
 def _denied_msg():
-    return t("⛔ Nút này chỉ dành cho chủ bot · không có quyền.",
-             "⛔ This button is for the bot owner only · not allowed.")
+    return t("⛔ Menu này chỉ dành cho chủ bot · không có quyền.",
+             "⛔ This menu is for the bot owner only · not allowed.")
 
 def _update_allowed():
     """/update chạy `git pull` + restart trên CHECKOUT DÙNG CHUNG → phải bật rõ ràng ở máy chủ.
@@ -197,44 +283,65 @@ def run():
             return f"Lỗi calendar · error: {e}"
         return None
 
+    async def _paste(message, fn, cmd):
+        """Tin chứa URL redirect (MÃ dùng-một-lần): XOÁ TRƯỚC — được trong kênh guild có Manage Messages,
+        KHÔNG được trong DM — rồi mới đổi mã (gọi mạng -> executor); xoá hỏng thì nhắc người dùng tự xoá."""
+        try:
+            await message.delete()
+            deleted = True
+        except Exception:                                 # noqa: BLE001 — DM/không đủ quyền
+            deleted = False
+        txt = await client.loop.run_in_executor(None, fn) or t("(không có gì)", "(nothing)")
+        await _send_rich(message.channel.send, txt if deleted else txt + "\n" + _paste_warn(cmd))
+
+    async def _login_start(send, campus):
+        """/login · !login [campus]: mở phiên (gọi FE Identity -> executor). Device flow chờ duyệt tới ~10'
+        ở THREAD NỀN (botlogin.finish_device); kết quả đẩy về event loop bằng run_coroutine_threadsafe —
+        KHÔNG được chặn loop (mất heartbeat gateway + nhắc tiết)."""
+        ok, text, mode = await client.loop.run_in_executor(
+            None, lambda: _LOGIN.start((campus or "").strip() or botlogin.default_campus()))
+        if ok and mode == "pkce":
+            text += "\n" + t("Trên Discord: an toàn nhất là /login-finish <URL> (chỉ bạn thấy).",
+                             "On Discord the safest way is /login-finish <URL> (visible only to you).")
+        await _send_rich(send, text)
+        if ok and mode == "device":
+            botlogin.finish_device(_LOGIN, lambda msg: asyncio.run_coroutine_threadsafe(
+                _send_rich(send, msg), client.loop))
+
+    async def _on_pick(interaction, view, name):
+        """Chọn 1 lệnh trong menu: kiểm quyền BẰNG `_owner` (y hệt lệnh gõ tay) rồi chạy."""
+        if not _owner(interaction.user.id):
+            await interaction.response.send_message(_denied_msg(), ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)   # ack <3s; handle() có thể tốn tới 25s
+        try:                                              # vẽ lại menu: ô chọn về placeholder, nếu không thì
+            await interaction.message.edit(view=view)     # chọn lại CÙNG lệnh lần nữa sẽ không bắn sự kiện
+        except Exception:                                 # noqa: BLE001 — chỉ là thẩm mỹ
+            pass
+        await _send_rich(interaction.followup.send, await _run(name))
+
     _view_memo = {}                                       # dựng MỘT LẦN rồi dùng lại (xem _make_view)
 
     def _make_view():
-        """Bảng nút bấm — sinh TỪ bot_core.menu_commands() (NGUỒN DUY NHẤT, không chép tay lần 2).
-        Cắt còn MAX_BUTTONS=25 nút (trần 5 nút × 5 hàng của Discord); lệnh dôi ra vẫn gõ tay được.
-        Callback kiểm quyền BẰNG `_owner` — người ngoài bấm sẽ bị từ chối RIÊNG (ephemeral).
+        """Menu thả xuống theo nhóm — sinh TỪ bot_core.command_groups() (NGUỒN DUY NHẤT, không chép tay).
 
         MEMO HOÁ: discord.py chỉ gỡ một View khỏi ViewStore khi View.stop()/hết timeout, mà đây là
-        timeout=None → mỗi lần gõ !menu lại nhét thêm 25 nút vào store và chúng ở đó tới hết đời tiến
+        timeout=None → mỗi lần gõ !menu lại nhét thêm item vào store và chúng ở đó tới hết đời tiến
         trình. Dựng 1 lần, gửi lại CÙNG một instance (đúng cách persistent view của discord.py)."""
-        if _view_memo.get("v") is not None:
-            return _view_memo["v"]
-        import discord                                    # LƯỜI: module phải import được khi thiếu dep
-        view = discord.ui.View(timeout=None)              # timeout=None + custom_id -> nút sống lâu dài
-        for i, (name, _desc) in enumerate(menu_commands()[:MAX_BUTTONS]):
-            btn = discord.ui.Button(label=name.replace("_", "-")[:80],
-                                    style=discord.ButtonStyle.secondary,
-                                    custom_id=("fap:" + name)[:100],
-                                    row=i // BTN_PER_ROW)
-
-            async def _cb(interaction, _n=name):          # _n=name: khoá tên lệnh vào từng nút
-                if not _owner(interaction.user.id):
-                    await interaction.response.send_message(_denied_msg(), ephemeral=True)
-                    return
-                await interaction.response.defer(thinking=True)   # ack <3s; handle() có thể tốn tới 25s
-                await _send_rich(interaction.followup.send, await _run(_n))
-            btn.callback = _cb
-            view.add_item(btn)
-        _view_memo["v"] = view
-        return view
+        if _view_memo.get("v") is None:
+            _view_memo["v"] = _menu_view(_on_pick)
+        return _view_memo["v"]
 
     def _menu_text():
-        n = len(menu_commands()[:MAX_BUTTONS])
-        return fmt.header("🎛️", t("Bảng lệnh nhanh", "Quick command panel"),
-                          t(f"{n} lệnh", f"{n} commands")) + "\n" + t(
-            "Bấm một nút để chạy lệnh ngay. Gõ tay `!today` / `/grades` vẫn dùng được như thường.",
-            "Tap a button to run a command. Typing `!today` / `/grades` still works as before.") + (
-            "\n" + t("Chỉ chủ bot bấm được.", "Owner only.") if allow else "")
+        n = sum(len(opts) for _, _, opts in _select_specs())
+        lines = [fmt.header("🎛️", t("Bảng lệnh nhanh", "Quick command panel"), t(f"{n} lệnh", f"{n} commands")),
+                 t("Chọn lệnh trong menu theo nhóm bên dưới để chạy ngay. Gõ tay `!today` / `/grades` vẫn dùng được.",
+                   "Pick a command from the grouped menus below to run it. Typing `!today` / `/grades` still works.")]
+        if allow:
+            lines.append(t("🔐 Token hết hạn? /login để đăng nhập lại FAP ngay tại đây.",
+                           "🔐 Token expired? /login signs in to FAP again right here."))
+            lines.append(t("Chỉ chủ bot dùng được.", "Owner only."))
+        return "\n".join(lines)
 
     # Slash command (/) — danh sách lệnh TỰ GỢI Ý khi gõ '/'. Đăng ký động từ menu_commands().
     # Bọc try/except: nếu phiên bản discord.py không có app_commands thì bot vẫn chạy prefix '!'.
@@ -258,13 +365,36 @@ def run():
             if not _owner(interaction.user.id):
                 await interaction.response.send_message(_denied_msg(), ephemeral=True)
                 return
-            # _send_rich: embed nếu dựng được, không thì gửi plain-text — vẫn kèm bảng nút.
+            # _send_rich: embed nếu dựng được, không thì gửi plain-text — vẫn kèm menu.
             await _send_rich(interaction.response.send_message, _menu_text(), view=_make_view())
         tree.command(name="menu",
-                     description=t("Bảng nút bấm lệnh", "Command button panel")[:100])(_menu_cmd)
+                     description=t("Menu lệnh theo nhóm", "Grouped command menu")[:100])(_menu_cmd)
+
+        # /login + /login-finish: trả lời RIÊNG (ephemeral) — link đăng nhập/URL có mã không lộ ra kênh.
+        # Followup ephemeral sống 15' ≥ hạn device flow (~10') nên kết quả device vẫn về đúng chỗ.
+        async def _login_cmd(interaction, campus: str = None):
+            if not _owner_only(interaction.user.id, allow):
+                await interaction.response.send_message(_login_denied_msg(), ephemeral=True)
+                return
+            await interaction.response.defer(thinking=True, ephemeral=True)
+            await _login_start(lambda *a, **k: interaction.followup.send(*a, ephemeral=True, **k), campus)
+        tree.command(name="login", description=t("Đăng nhập lại FAP (token hết hạn)",
+                                                 "Re-login to FAP (token expired)")[:100])(_login_cmd)
+
+        async def _login_finish_cmd(interaction, url: str):
+            if not _owner_only(interaction.user.id, allow):
+                await interaction.response.send_message(_login_denied_msg(), ephemeral=True)
+                return
+            await interaction.response.defer(thinking=True, ephemeral=True)
+            # Không giống URL redirect -> chỉ nhắc, KHÔNG đụng phiên (finish_paste sẽ đóng phiên dù dán sai).
+            msg = (await client.loop.run_in_executor(None, botlogin.finish_paste, _LOGIN, url))[1] \
+                if looks_like_redirect(url) else _login_finish_hint()
+            await _send_rich(lambda *a, **k: interaction.followup.send(*a, ephemeral=True, **k), msg)
+        tree.command(name="login-finish", description=t("Hoàn tất đăng nhập FAP: dán URL redirect",
+                                                        "Finish FAP sign-in: paste redirect URL")[:100])(_login_finish_cmd)
 
         async def _update_cmd(interaction):                       # /update — chỉ CHỦ tài khoản (kể cả chế độ MỞ)
-            if not allow or str(interaction.user.id) != allow:    # ALLOW_ANYONE: allow=None -> vẫn CHẶN /update
+            if not _owner_only(interaction.user.id, allow):       # ALLOW_ANYONE: allow=None -> vẫn CHẶN /update
                 await interaction.response.send_message(
                     "⛔ /update chỉ dành cho chủ bot (đặt DISCORD_ALLOWED_USER_ID).", ephemeral=True)
                 return
@@ -348,12 +478,12 @@ def run():
                 print(f"  /slash: đồng bộ {len(synced)} lệnh (gõ '/' để thấy gợi ý).")
             except Exception as e:                                # noqa: BLE001
                 print("  (không sync được /slash — cần mời bot với scope 'applications.commands':", e, ")")
-        if not _started["view"]:                                  # nút của bảng !menu CŨ vẫn bấm được sau khi
+        if not _started["view"]:                                  # menu của tin !menu CŨ vẫn chọn được sau khi
             _started["view"] = True                               # bot khởi động lại (vd sau /update)
             try:
                 client.add_view(_make_view())
-            except Exception as e:                                # noqa: BLE001 — không có nút vẫn gõ lệnh được
-                print("  (không đăng ký được nút bấm bền:", e, ")")
+            except Exception as e:                                # noqa: BLE001 — không có menu vẫn gõ lệnh được
+                print("  (không đăng ký được menu bền:", e, ")")
         if not _started["reminder"]:                              # on_ready có thể bắn lại khi reconnect -> chỉ chạy 1 lần
             _started["reminder"] = True
             client.loop.create_task(_reminder_loop())
@@ -368,21 +498,37 @@ def run():
     async def on_message(message):
         if message.author == client.user:
             return
-        content = (message.content or "").strip()
-        if not content.startswith(PREFIX):
+        # Im lặng với người ngoài allowlist (không xác nhận bot sống). XOÁ TRƯỚC, XÉT SAU: URL redirect đi
+        # thẳng lối dán, không cần đang có phiên — xem _route.
+        kind, content = _route(message.content, message.author.id, allow)
+        if kind == "gcal-paste":
+            await _paste(message, lambda: _calendar_text("calendar-auth-finish", content), "calendar-auth-finish")
             return
-        if allow and str(message.author.id) != allow:
-            return                              # im lặng với người ngoài allowlist (không xác nhận bot sống)
+        if kind == "login-paste":
+            await _paste(message, lambda: botlogin.finish_paste(_LOGIN, content)[1], "login-finish")
+            return
+        if kind != "command":
+            return
         # split(None, 1): giữ NGUYÊN phần còn lại làm tham số (như slash command và CLI).
         parts = content[len(PREFIX):].split(None, 1)
         if not parts:
             return
         cmd, arg = parts[0], (parts[1].strip() or None if len(parts) > 1 else None)
-        if cmd.strip().lower() == "menu":                       # !menu — bảng nút bấm (quyền = như lệnh)
+        if cmd.strip().lower() == "menu":                       # !menu — menu theo nhóm (quyền = như lệnh)
             await _send_rich(message.channel.send, _menu_text(), view=_make_view())
             return
+        ck = cmd.strip().lower().replace("_", "-")
+        if ck in ("login", "login-finish"):                     # !login [campus] — chỉ CHỦ tài khoản
+            if not _owner_only(message.author.id, allow):
+                await message.channel.send(_login_denied_msg())
+                return
+            if ck == "login-finish":                            # có URL thật thì _route đã đưa sang lối dán
+                await message.channel.send(_login_finish_hint())
+                return
+            await _login_start(message.channel.send, arg)
+            return
         if cmd.strip().lower() == "update":                     # !update — chỉ CHỦ tài khoản
-            if not allow or str(message.author.id) != allow:    # chế độ MỞ (allow=None): CHẶN update (tránh self-DoS pull+restart)
+            if not _owner_only(message.author.id, allow):       # chế độ MỞ (allow=None): CHẶN update (tránh self-DoS pull+restart)
                 await message.channel.send("⛔ /update chỉ dành cho chủ bot (đặt DISCORD_ALLOWED_USER_ID).")
                 return
             if not _update_allowed():                           # checkout dùng chung -> phải bật FAP_ALLOW_UPDATE
@@ -394,23 +540,10 @@ def run():
             if do_restart:
                 restart()                                       # thay tiến trình → quay lại với mã mới
             return
-        ck = cmd.strip().lower().replace("_", "-")
         if ck == "calendar" or ck.startswith("calendar-") or ck == "calendars":
-            # calendar-auth-finish: URL có mã dùng-một-lần → THỬ xoá tin người dùng (được trong kênh
-            # guild có quyền Manage Messages; KHÔNG được trong DM) rồi báo nếu không xoá được.
+            # calendar-auth-finish: URL có mã dùng-một-lần → THỬ xoá tin người dùng trước (xem _paste).
             if ck in ("calendar-auth-finish", "calendar-finish"):
-                deleted = True
-                try:
-                    await message.delete()
-                except Exception:                               # noqa: BLE001 — DM/không đủ quyền
-                    deleted = False
-                txt = await client.loop.run_in_executor(None, _calendar_text, ck, arg)
-                if not deleted:
-                    txt += "\n" + t("⚠️ Không xoá được tin chứa link — bạn tự xoá giúp (có mã đăng nhập). "
-                                    "Lần sau dùng /calendar-auth-finish (ẩn) cho an toàn.",
-                                    "⚠️ Couldn't delete your link message — delete it yourself (it has a sign-in "
-                                    "code). Next time use /calendar-auth-finish (ephemeral) for safety.")
-                await _send_rich(message.channel.send, txt)
+                await _paste(message, lambda: _calendar_text(ck, arg), "calendar-auth-finish")
                 return
             txt = await client.loop.run_in_executor(None, _calendar_text, ck, arg)
             await _send_rich(message.channel.send, txt or t("(không có gì)", "(nothing)"))

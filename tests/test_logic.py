@@ -3848,6 +3848,65 @@ def test_telegram_register_menu_lists_menu_first():
     finally:
         TG.requests.post = saved
 
+def test_discord_select_specs_cover_commands_and_limits():
+    """Menu Discord theo nhóm: MỌI lệnh COMMAND_INFO có mặt đúng 1 lần, không vượt trần của Discord."""
+    import fapc.app.discordbot as D
+    from fapc.app.bot_core import COMMANDS
+    specs = D._select_specs()
+    vals = [v for _, _, opts in specs for _, v, _ in opts]
+    assert sorted(vals) == sorted(COMMANDS) and len(vals) == len(set(vals))
+    assert 1 <= len(specs) <= D.VIEW_ROWS
+    assert len({cid for cid, _, _ in specs}) == len(specs) and specs == D._select_specs()   # custom_id ổn định
+    for cid, ph, opts in specs:
+        assert cid.startswith("fap:menu:") and len(cid) <= 100 and 0 < len(ph) <= D.PLACEHOLDER
+        assert 1 <= len(opts) <= D.SELECT_MAX
+        for label, value, desc in opts:
+            assert label == "/" + value and len(label) <= D.OPT_TEXT and 0 < len(desc) <= D.OPT_TEXT
+    # 7 nhóm × 10 lệnh, mô tả dài: gộp 3 nhóm dôi (30 lệnh) vào Select cuối, cắt ≤25 lựa chọn, cắt mô tả ≤100
+    fake = [(f"G{g}", [(f"c{g}-{i}", "•", "x" * 300) for i in range(10)]) for g in range(7)]
+    sp = D._select_specs(fake)
+    assert len(sp) == D.VIEW_ROWS and all(len(o) == 10 for _, _, o in sp[:-1])
+    assert len(sp[-1][2]) == D.SELECT_MAX and sp[-1][2][0][1] == "c4-0" and "G4" in sp[-1][1] and "G6" in sp[-1][1]
+    assert all(len(d) == D.OPT_TEXT for _, _, o in sp for _, _, d in o)
+
+def test_discord_menu_view_builds_when_discord_installed():
+    """Có discord.py (máy dev/VPS) -> view thật nhận được: 1 Select/hàng, bền qua restart. CI không cài -> bỏ qua."""
+    try:
+        import discord  # noqa: F401
+    except ImportError:
+        return
+    import fapc.app.discordbot as D
+    view = D._menu_view(lambda *a: None)
+    sels = view.children
+    assert len(sels) == len(D._select_specs()) and view.is_persistent()
+    assert sorted(s.row for s in sels) == list(range(len(sels)))
+    assert all(isinstance(s, discord.ui.Select) and len(s.options) <= D.SELECT_MAX for s in sels)
+
+def test_discord_login_routing():
+    """/login gắn tài khoản FAP của bot -> CHỈ chủ bot, chế độ MỞ (allow=None) cấm hẳn; tin URL redirect của chủ bot
+    đi lối dán (Google TRƯỚC FAP), người lạ bị bỏ qua im lặng, câu thường không bị xoá oan."""
+    import fapc.app.discordbot as D
+    OWNER = "111"
+    assert D._owner_only(OWNER, OWNER) and D._owner_only(int(OWNER), OWNER)
+    assert not D._owner_only("222", OWNER) and not D._owner_only(OWNER, None)
+    fap = "io.identityserver.demo:/oauthredirect?code=Z9&state=q"
+    goo = "http://127.0.0.1:8085/?state=s&code=4/0Ab&scope=x"
+    r = D._route
+    assert r(fap, OWNER, OWNER) == ("login-paste", fap)
+    assert r("https://x/cb?error=access_denied", OWNER, OWNER)[0] == "login-paste"
+    assert r(goo, OWNER, OWNER) == ("gcal-paste", goo)                    # URL Google KHÔNG lạc sang /login
+    assert r("!login-finish " + fap, OWNER, OWNER) == ("login-paste", fap)
+    assert r("!calendar-auth-finish " + goo, OWNER, OWNER) == ("gcal-paste", goo)
+    assert r("!calendar_auth_finish 4/0Ab", OWNER, OWNER) == ("gcal-paste", "4/0Ab")
+    assert r("4/5 nhé", OWNER, OWNER) == ("ignore", None)                 # câu thường: không xoá oan
+    assert r("hello", OWNER, OWNER) == ("ignore", None)
+    assert r("!login APHL", OWNER, OWNER) == ("command", "!login APHL")
+    assert r("!login-finish", OWNER, OWNER) == ("command", "!login-finish")
+    assert r(fap, "222", OWNER) == ("ignore", None) and r("!today", "222", OWNER) == ("ignore", None)
+    assert r(fap, "222", None) == ("ignore", None)                       # chế độ MỞ: tin trần bỏ qua
+    assert r("!login-finish " + fap, "222", None)[0] == "command"         # -> nhánh !login từ chối (_owner_only)
+    assert r("  ", OWNER, OWNER) == ("ignore", None) and r(None, OWNER, OWNER) == ("ignore", None)
+
 # ---- runner không cần pytest ----
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
