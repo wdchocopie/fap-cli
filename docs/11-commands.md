@@ -66,7 +66,7 @@
 | `fap notifications [#id\|từ khoá]` | thông báo cá nhân (`GetNotificationByRoll`), mới nhất trước; mỗi mục có **số `#id` cố định** + **dòng trích nội dung** 💬; số = **toàn văn** thông báo đó, chữ = **lọc** theo tiêu đề/nội dung · notifications with a stable `#id` and a 💬 content preview; a number shows that notification's full text, a word filters | `102` · `#102` · `học phí` | stdout |
 | `fap profile` | hồ sơ sinh viên (`GetStudentById`): tên/MSSV/email/ngày sinh/ngành/lớp… (chỉ hiện field có giá trị). **Ngày sinh · SĐT · CCCD chỉ hiện ở CLI** — `/profile` trên bot/web ẩn chúng · student profile; **date of birth, phone and ID card are CLI-only** — `/profile` in the bots/web hides them | *(không · none)* | stdout |
 | `fap applications` | đơn từ + **huy hiệu trạng thái** ⏳ đang xử lý / ✅ chấp nhận / 🚫 đã hủy / 💳 chờ thanh toán + phản hồi (`GetApplication`), mới nhất trước · applications with status badges | *(không · none)* | stdout |
-| `fap web [port]` | **dashboard web cục bộ** (Python stdlib, 0 dep) — bấm nút xem lịch/điểm/điểm danh; nút **sinh từ `COMMAND_INFO`** (thêm lệnh là có nút ngay) + ô **tham số** trên đầu trang (gõ `IAP491` / `weeks` / `8` rồi Enter để chạy lại lệnh đang xem); CHỈ localhost · local web dashboard (stdlib), buttons derived from `COMMAND_INFO` + an arg box, localhost-only | `[port]` mặc định `8000` · default `8000` | trình duyệt · browser; tiến trình nền |
+| `fap web [port]` | **dashboard web cục bộ** (Python stdlib, 0 dep) — bấm nút xem lịch/điểm/điểm danh; nút **sinh từ `COMMAND_INFO`** (thêm lệnh là có nút ngay) + ô **tham số** trên đầu trang (gõ `IAP491` / `weeks` / `8` rồi Enter để chạy lại lệnh đang xem) + nút **🔐 Đăng nhập FAP** (trang `/login`, đăng nhập lại ngay trong trình duyệt — [13-notify §8.4](13-notify.md)); CHỈ localhost · local web dashboard (stdlib), buttons derived from `COMMAND_INFO` + an arg box + a **🔐 FAP sign-in** page (`/login`), localhost-only | `[port]` mặc định `8000` · default `8000` | trình duyệt · browser; tiến trình nền |
 
 ### Đẩy · Push
 
@@ -85,12 +85,12 @@
 | Lệnh · Command | Tác dụng · What it does | Tham số · Args | Kết quả/Output |
 |---|---|---|---|
 | `fap telegram-bot` | bot Telegram long-polling trả lời `/today` `/grades` `/whatif`… · interactive Telegram bot | *(không · none)* — cần `TELEGRAM_TOKEN` + `TELEGRAM_CHAT` | tiến trình nền · resident process (Ctrl+C để dừng) |
-| `fap discord-bot` | bot Discord (prefix `!`) trả lời lệnh · interactive Discord bot | *(không · none)* — cần `pip install -e ".[bot]"` + `DISCORD_BOT_TOKEN` | tiến trình nền · resident process |
+| `fap discord-bot` | bot Discord (prefix `!` + slash `/`) trả lời lệnh; **`/login [campus]`** đăng nhập lại FAP ngay trong Discord (chỉ chủ bot) · interactive Discord bot, with in-chat FAP `/login` (owner only) | *(không · none)* — cần `pip install -e ".[bot]"` + `DISCORD_BOT_TOKEN` | tiến trình nền · resident process |
 
 > Bot **chỉ trả lời chủ tài khoản** (Telegram: `TELEGRAM_CHAT`; Discord: `DISCORD_ALLOWED_USER_ID`). Mỗi lệnh gọi API FAP live. Chi tiết: [13-notify.md §8](13-notify.md). · Bots answer **only the account owner**; each command hits the live FAP API. See [13-notify.md §8](13-notify.md).
 
-> 🎛️ **VI —** Cả hai bot có **bảng NÚT BẤM**: gõ `/menu` (Telegram) hoặc `!menu` / `/menu` (Discord) để chạy lệnh bằng một chạm, khỏi gõ. Nút sinh từ chính `COMMAND_INFO`; Telegram xếp theo **nhóm** (chạm nhóm → hiện lệnh ngay trong tin đó) nên **đủ mọi lệnh**, kèm nút 🔐 Đăng nhập. Chi tiết + giới hạn số nút: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
-> 🎛️ **EN —** Both bots ship a **BUTTON panel**: send `/menu` (Telegram) or `!menu` / `/menu` (Discord) to run a command with one tap. The buttons are generated from `COMMAND_INFO`; Telegram arranges them in **groups** (tap a group → its commands appear in that same message) so **every command** is reachable, plus a 🔐 Log in button. Details + button caps: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
+> 🎛️ **VI —** Cả hai bot có **bảng lệnh bấm-là-chạy**: gõ `/menu` (Telegram — nút bấm theo **nhóm**: chạm nhóm → hiện lệnh ngay trong tin đó, **đủ mọi lệnh**, kèm nút 🔐 Đăng nhập) hoặc `!menu` / `/menu` (Discord — **menu thả xuống theo nhóm**) để chạy lệnh bằng một chạm, khỏi gõ. Sinh từ chính `COMMAND_INFO`. Chi tiết + giới hạn: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
+> 🎛️ **EN —** Both bots ship a **tap-to-run panel**: send `/menu` (Telegram — **grouped** buttons: tap a group → its commands appear in that same message, **every command** reachable, plus a 🔐 Log in button) or `!menu` / `/menu` (Discord — **grouped dropdown menus**) to run a command with one tap. Generated from `COMMAND_INFO`. Details + caps: [13-notify.md §8.3](13-notify.md#83-nút-bấm--menu--buttons--menu).
 
 ### Khác · Misc
 

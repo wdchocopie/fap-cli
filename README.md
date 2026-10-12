@@ -34,7 +34,8 @@ fap refresh      # các lần sau: làm mới token (không cần browser) · he
 - Import lịch · Import calendar: Google Calendar → **Settings → Import & Export** → `output/lichhoc.ics`.
 - Đẩy thẳng lên Google Calendar · push directly: `fap calendar-auth` rồi `fap calendar-sync`.
 - Gửi lên Telegram/Discord · push to chat: cấu hình `.env` (xem `.env.example`) rồi `fap notify today`.
-- Bot tương tác · interactive bots: `fap telegram-bot` / `fap discord-bot`, rồi gõ **`/menu`** (Telegram) hoặc **`!menu`** (Discord) để hiện **bảng NÚT BẤM** — chạm là chạy lệnh, khỏi nhớ. · tap-to-run button panel.
+- Bot tương tác · interactive bots: `fap telegram-bot` / `fap discord-bot`, rồi gõ **`/menu`** (Telegram — nút bấm) hoặc **`!menu`** (Discord — menu thả xuống theo nhóm) — chạm là chạy lệnh, khỏi nhớ. · tap-to-run panel.
+- Token hết hạn? **`/login`** ngay trong Telegram/Discord, hoặc nút **🔐 Đăng nhập FAP** trên `fap web` — khỏi SSH vào máy chủ. · re-login from the chat or the local dashboard ([13-notify §8.4](docs/13-notify.md)).
 - Xem nhanh · quick view: `fap status` (tổng quan hôm nay · today overview), `fap today` / `fap tomorrow`, `fap week` (lịch tuần · weekly), `fap whatif 8` (mô phỏng GPA · GPA what-if).
 - Lịch **cả kỳ** 1 màn hình · whole-term view: `fap semester` (mẫu lặp hằng tuần · weekly pattern), `fap semester weeks` (mỗi tuần 1 dòng · one line per week), `fap semester list` (từng ngày · day-by-day), `fap semester Fall2026` (kỳ khác · another term). ⚠️ Mẫu **suy ra từ lịch xếp** nên không phản ánh buổi huỷ/nghỉ lễ — tuần nào nghi ngờ thì `fap week-exact`.
 - Điểm thành phần **1 môn** cho nhanh · one-subject components: `fap grades-detail IAP301` (kỳ 6 môn: 8 → 3 request).
