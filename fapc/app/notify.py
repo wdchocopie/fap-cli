@@ -87,7 +87,7 @@ def _telegram(text):
         try:
             r = _post_retry(url, {"chat_id": config.TELEGRAM_CHAT, "text": part})
         except requests.RequestException as e:
-            print("  Telegram lỗi mạng · network:", e); return _partial("Telegram", i, len(parts))
+            print("  Telegram lỗi mạng · network:", type(e).__name__); return _partial("Telegram", i, len(parts))  # URL mang token
         try:
             ok = r.ok and bool(r.json().get("ok"))  # Telegram luôn trả JSON có trường "ok"
         except ValueError:
@@ -110,7 +110,7 @@ def _discord(text):
             # chứa '@everyone'/'@here' không được phép ping cả server Discord. Bot không bao giờ cần mention.
             r = _post_retry(config.DISCORD_WEBHOOK_URL, {"content": part, "allowed_mentions": {"parse": []}})
         except requests.RequestException as e:
-            print("  Discord lỗi mạng · network:", e); return _partial("Discord", i, len(parts))
+            print("  Discord lỗi mạng · network:", type(e).__name__); return _partial("Discord", i, len(parts))  # webhook URL là bí mật
         if r.status_code not in (200, 204):          # webhook thành công = 204 (hoặc 200)
             print(f"  Discord lỗi · error: HTTP {r.status_code} — {str(r.text)[:160]}")
             return _partial("Discord", i, len(parts))
