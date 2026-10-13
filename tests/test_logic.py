@@ -3917,6 +3917,28 @@ def test_discord_legacy_menu_buttons_still_route():
         assert D._legacy_pick(cid) is None, cid
 
 
+# ---- lỗi mạng KHÔNG được in URL (URL Telegram chứa token bot, webhook Discord là bí mật) ----
+def test_network_errors_never_print_tokens():
+    """Regression 13/10/2026: journald của fap-bot chứa token bot vì in nguyên RequestException (có URL)."""
+    import fapc.app.telegrambot as TG, fapc.app.notify as N, fapc.config as C
+    fake_tok = "123456789:AAFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+    hook = "https://discord.com/api/webhooks/1/FAKEWEBHOOKSECRET"
+    def boom(url, *a, **k):
+        raise TG.requests.ConnectionError(f"HTTPSConnectionPool(host='api.telegram.org'): Max retries exceeded with url: {url}")
+    saved = (TG.requests.post, C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT, C.DISCORD_WEBHOOK_URL, N.time.sleep)
+    try:
+        TG.requests.post = boom; N.time.sleep = lambda s: None
+        C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT, C.DISCORD_WEBHOOK_URL = fake_tok, "1", hook
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            TG._send("1", "x"); TG._answer_callback("cb"); TG._register_menu()
+            N._telegram("x"); N._discord("x")
+        text = out.getvalue()
+        assert "ConnectionError" in text
+        assert fake_tok not in text and "AAFAKE" not in text and "FAKEWEBHOOKSECRET" not in text and "/bot" not in text
+    finally:
+        TG.requests.post, C.TELEGRAM_TOKEN, C.TELEGRAM_CHAT, C.DISCORD_WEBHOOK_URL, N.time.sleep = saved
+
 # ---- Gọi thoại nhắc tiết qua CallMeBot (CALLMEBOT_USER) ----
 def test_callmebot_text_and_params_carry_only_the_time():
     import fapc.app.reminders as R

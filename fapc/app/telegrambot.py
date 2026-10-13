@@ -82,7 +82,7 @@ def _register_menu():
         print("📋 Menu lệnh đã đăng ký (gõ '/' để xem gợi ý)." if r.ok
               else f"  (không đặt được menu: HTTP {r.status_code})")
     except requests.RequestException as e:
-        print("  (không đặt được menu lệnh:", e, ")")
+        print("  (không đặt được menu lệnh:", type(e).__name__, ")")
 
 def _partial(done, total):
     """Cảnh báo GỬI DỞ: mẩu đầu đã tới nơi nhưng mẩu sau hỏng -> người đọc đang thiếu chữ."""
@@ -189,7 +189,7 @@ def _send(chat_id, text, buttons=None):
         try:
             r = requests.post(_api("sendMessage"), json=body, timeout=20)
         except requests.RequestException as e:
-            print("  gửi lỗi mạng · network error:", e)
+            print("  gửi lỗi mạng · network error:", type(e).__name__)
             return _partial(i, len(parts))
         if not r.ok:                                 # HTTP 4xx/5xx không ném — phải tự kiểm
             print(f"  gửi lỗi · send error: HTTP {r.status_code} {str(r.text)[:140]}")
@@ -207,7 +207,7 @@ def _answer_callback(cb_id, text=None):
     try:
         requests.post(_api("answerCallbackQuery"), json=body, timeout=15)
     except requests.RequestException as e:
-        print("  trả lời nút lỗi · answerCallbackQuery error:", e)
+        print("  trả lời nút lỗi · answerCallbackQuery error:", type(e).__name__)
 
 def _show(chat_id, msg, view):
     """Chuyển trang menu: SỬA chính tin menu vừa bấm (editMessageText) -> điều hướng không đẻ tin mới.
@@ -223,7 +223,7 @@ def _show(chat_id, msg, view):
                 return True
             print(f"  sửa menu lỗi · edit error: HTTP {r.status_code} {str(r.text)[:140]}")
         except requests.RequestException as e:
-            print("  sửa menu lỗi mạng · edit network error:", e)
+            print("  sửa menu lỗi mạng · edit network error:", type(e).__name__)
     return _send(chat_id, text, buttons)
 
 def _delete_message(chat_id, message_id):
@@ -405,7 +405,8 @@ def run():
             r = requests.get(_api("getUpdates"), params={"timeout": _TIMEOUT, "offset": offset},
                              timeout=_TIMEOUT + 10).json()
         except requests.RequestException as e:
-            print("  mạng lỗi · network error:", e); time.sleep(5); continue
+            # CHỈ tên lớp lỗi: thông điệp của requests chứa URL …/bot<TOKEN>/… (từng lộ token vào journald).
+            print("  mạng lỗi · network error:", type(e).__name__); time.sleep(5); continue
         if not r.get("ok"):
             print("  Telegram:", str(r)[:200]); time.sleep(5); continue
         for upd in r.get("result", []):
